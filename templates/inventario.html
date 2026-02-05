@@ -90,6 +90,63 @@
       margin: 0 32px 16px;
     }
 
+    .import-panel {
+      margin: 0 32px 24px;
+      background: var(--card);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      padding: 16px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .import-panel h2 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .import-panel p {
+      margin: 0;
+      color: var(--muted);
+      font-size: 14px;
+    }
+
+    .import-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .csv-columns {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .csv-columns span {
+      background: #f4f6fb;
+      border-radius: 8px;
+      padding: 6px 10px;
+      border: 1px dashed var(--border);
+    }
+
+    .example-list {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .example-list code {
+      color: #2a335a;
+      background: #eef1f8;
+      padding: 2px 6px;
+      border-radius: 6px;
+    }
+
     .summary-card {
       background: var(--card);
       border-radius: 12px;
@@ -328,6 +385,37 @@
 
   <section class="summary" id="summary"></section>
 
+  <section class="import-panel" aria-labelledby="csv-mvp-title">
+    <div>
+      <h2 id="csv-mvp-title">Plantilla CSV MVP para carga masiva</h2>
+      <p>Descarga la plantilla con las columnas mínimas para registrar productos y crear unidades DISPONIBLE.</p>
+    </div>
+    <div class="import-actions">
+      <button class="primary" id="download-template">Descargar plantilla CSV</button>
+      <p>Regla de importación: por cada fila se crea o encuentra el producto por <strong>línea + nombre</strong> (o por SKU si tu proceso lo genera) y se crean <strong>N unidades DISPONIBLE</strong> según el campo cantidad.</p>
+    </div>
+    <div>
+      <p>Columnas requeridas y opcionales:</p>
+      <div class="csv-columns">
+        <span>linea</span>
+        <span>nombre</span>
+        <span>precio_base_venta</span>
+        <span>precio_consultora</span>
+        <span>caduca (true/false)</span>
+        <span>fecha_caducidad (YYYY-MM-DD, opcional)</span>
+        <span>anotaciones (opcional)</span>
+        <span>cantidad (entero &gt; 0)</span>
+      </div>
+    </div>
+    <div>
+      <p>Ejemplos válidos:</p>
+      <ul class="example-list">
+        <li><code>Nutrición,Proteína Balance 500g,120000,98000,true,2025-01-12,Lote inicial,5</code></li>
+        <li><code>Dermocosmética,Crema Regeneradora,89000,70000,false,,Promoción abril,12</code></li>
+      </ul>
+    </div>
+  </section>
+
   <main>
     <table>
       <thead>
@@ -397,6 +485,7 @@
     const expiryToggle = document.getElementById("expiryToggle");
     const productTable = document.getElementById("productTable");
     const summary = document.getElementById("summary");
+    const downloadTemplateButton = document.getElementById("download-template");
 
     const formatDate = (value) => new Date(value).toLocaleDateString("es-ES");
 
@@ -603,6 +692,54 @@
     });
 
     applyFilters();
+
+    downloadTemplateButton.addEventListener("click", () => {
+      const header = [
+        "linea",
+        "nombre",
+        "precio_base_venta",
+        "precio_consultora",
+        "caduca",
+        "fecha_caducidad",
+        "anotaciones",
+        "cantidad"
+      ];
+      const rows = [
+        [
+          "Nutrición",
+          "Proteína Balance 500g",
+          "120000",
+          "98000",
+          "true",
+          "2025-01-12",
+          "Lote inicial",
+          "5"
+        ],
+        ["Dermocosmética", "Crema Regeneradora", "89000", "70000", "false", "", "Promoción abril", "12"]
+      ];
+
+      const escapeCSV = (value) => {
+        const stringValue = String(value);
+        if (/[",\n]/.test(stringValue)) {
+          return `"${stringValue.replace(/"/g, '""')}"`;
+        }
+        return stringValue;
+      };
+
+      const csvContent = [header, ...rows]
+        .map((row) => row.map(escapeCSV).join(","))
+        .join("\n");
+
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "plantilla_productos_mvp.csv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    });
   </script>
 </body>
 </html>
