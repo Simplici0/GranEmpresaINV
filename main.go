@@ -308,6 +308,10 @@ func main() {
 	if port == "" {
 		port = "8080"
 	}
+	dbPath := os.Getenv("DB_PATH")
+	if dbPath == "" {
+		dbPath = "data.db"
+	}
 
 	tmpl := template.Must(template.ParseFiles(
 		"templates/dashboard.html",
@@ -320,7 +324,7 @@ func main() {
 
 	paymentMethods := []string{"Efectivo", "Transferencia", "Tarjeta", "Nequi", "Daviplata", "Bre-B"}
 
-	db, err := initDB("data.db", paymentMethods)
+	db, err := initDB(dbPath, paymentMethods)
 	if err != nil {
 		log.Fatalf("Error al abrir SQLite: %v", err)
 	}

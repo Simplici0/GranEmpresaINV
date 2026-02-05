@@ -1,0 +1,10 @@
+[Unit]
+Description=Daily backup for GranEmpresa
+
+[Timer]
+OnCalendar=daily
+Persistent=true
+RandomizedDelaySec=10m
+
+[Install]
+WantedBy=timers.target
