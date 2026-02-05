@@ -1,0 +1,350 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{.Title}}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7fb;
+      --card: #ffffff;
+      --text: #1c1f2a;
+      --muted: #5c647c;
+      --primary: #2c6bed;
+      --danger: #e5484d;
+      --border: #d9dfea;
+      --info: #1f6feb;
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: "Inter", "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      padding: 24px;
+    }
+
+    .card {
+      max-width: 900px;
+      margin: 0 auto;
+      background: var(--card);
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      padding: 24px;
+      box-shadow: 0 12px 30px rgba(30, 41, 59, 0.08);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+    }
+
+    p {
+      margin: 0 0 16px;
+      color: var(--muted);
+    }
+
+    .alert {
+      padding: 12px 16px;
+      border-radius: 12px;
+      background: #e8f1ff;
+      border: 1px solid #c6dcff;
+      color: #1f3c88;
+      font-size: 14px;
+      margin-bottom: 16px;
+    }
+
+    form {
+      display: grid;
+      gap: 18px;
+    }
+
+    label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      font-size: 14px;
+    }
+
+    textarea {
+      min-height: 110px;
+      resize: vertical;
+    }
+
+    .row {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+
+    .section {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      display: grid;
+      gap: 12px;
+      background: #f9fafc;
+    }
+
+    .section h2 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .chips {
+      display: flex;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+
+    .chip {
+      padding: 6px 10px;
+      border-radius: 999px;
+      background: #e9f7f1;
+      color: #1b6d4c;
+      font-size: 12px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .chips input {
+      width: auto;
+    }
+
+    .radio-group {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .radio-card {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 12px;
+      display: flex;
+      gap: 8px;
+      align-items: flex-start;
+      background: white;
+    }
+
+    .radio-card input {
+      margin-top: 4px;
+    }
+
+    .hint {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .error {
+      color: var(--danger);
+      font-size: 12px;
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    button,
+    a.button {
+      border: none;
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    button.primary {
+      background: var(--primary);
+      color: white;
+    }
+
+    .secondary {
+      background: #e7ebf6;
+      color: #2a335a;
+    }
+
+    .note {
+      font-size: 12px;
+      color: var(--info);
+      font-weight: 600;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>{{.Title}}</h1>
+    <p>Define el flujo de cambio desde inventario, sin registrar dinero.</p>
+
+    <div class="alert">
+      Este flujo solo registra el movimiento de cambio. Si hay dinero de por medio, utiliza el flujo de ventas.
+    </div>
+
+    <form action="/cambio" method="POST">
+      <div class="row">
+        <div>
+          <label for="producto_id">Producto saliente</label>
+          <select id="producto_id" name="producto_id">
+            {{range .Productos}}
+              <option value="{{.ID}}" {{if eq $.ProductoID .ID}}selected{{end}}>{{.Name}} ({{.ID}})</option>
+            {{end}}
+          </select>
+          {{with index .Errors "producto_id"}}
+            <div class="error">{{.}}</div>
+          {{end}}
+        </div>
+        <div>
+          <label for="persona_del_cambio">Persona del cambio</label>
+          <input id="persona_del_cambio" name="persona_del_cambio" type="text" value="{{.PersonaCambio}}" placeholder="Nombre de quien solicita o recibe" />
+          {{with index .Errors "persona_del_cambio"}}
+            <div class="error">{{.}}</div>
+          {{end}}
+        </div>
+      </div>
+
+      <div class="section">
+        <h2>Unidades salientes (DISPONIBLE → CAMBIO)</h2>
+        <div class="hint">Selecciona una o varias unidades disponibles.</div>
+        <div class="chips">
+          {{range .Unidades}}
+            <label class="chip">
+              <input type="checkbox" name="salientes" value="{{.ID}}" {{if index $.SalientesMap .ID}}checked{{end}} />
+              {{.ID}}
+            </label>
+          {{end}}
+        </div>
+        {{with index .Errors "salientes"}}
+          <div class="error">{{.}}</div>
+        {{end}}
+      </div>
+
+      <div class="section">
+        <h2>Entrantes (se crean como DISPONIBLE)</h2>
+        <div class="radio-group">
+          <label class="radio-card">
+            <input type="radio" name="incoming_mode" value="existing" {{if or (eq .IncomingMode "") (eq .IncomingMode "existing")}}checked{{end}} />
+            <div>
+              <strong>Producto existente</strong>
+              <div class="hint">Selecciona un producto y su cantidad.</div>
+            </div>
+          </label>
+          <label class="radio-card">
+            <input type="radio" name="incoming_mode" value="new" {{if eq .IncomingMode "new"}}checked{{end}} />
+            <div>
+              <strong>Producto nuevo</strong>
+              <div class="hint">Crea un SKU y agrega la cantidad.</div>
+            </div>
+          </label>
+        </div>
+        {{with index .Errors "incoming_mode"}}
+          <div class="error">{{.}}</div>
+        {{end}}
+
+        <div class="row">
+          <div>
+            <label for="incoming_existing_id">Producto entrante</label>
+            <select id="incoming_existing_id" name="incoming_existing_id">
+              {{range .Productos}}
+                <option value="{{.ID}}" {{if eq $.IncomingExistingID .ID}}selected{{end}}>{{.Name}} ({{.ID}})</option>
+              {{end}}
+            </select>
+            {{with index .Errors "incoming_existing_id"}}
+              <div class="error">{{.}}</div>
+            {{end}}
+          </div>
+          <div>
+            <label for="incoming_existing_qty">Cantidad entrante</label>
+            <input id="incoming_existing_qty" name="incoming_existing_qty" type="number" min="1" value="{{.IncomingExistingQty}}" />
+            {{with index .Errors "incoming_existing_qty"}}
+              <div class="error">{{.}}</div>
+            {{end}}
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="incoming_new_sku">SKU nuevo</label>
+            <input id="incoming_new_sku" name="incoming_new_sku" type="text" value="{{.IncomingNewSKU}}" placeholder="SKU o código interno" />
+            {{with index .Errors "incoming_new_sku"}}
+              <div class="error">{{.}}</div>
+            {{end}}
+          </div>
+          <div>
+            <label for="incoming_new_name">Nombre del producto nuevo</label>
+            <input id="incoming_new_name" name="incoming_new_name" type="text" value="{{.IncomingNewName}}" placeholder="Nombre comercial" />
+            {{with index .Errors "incoming_new_name"}}
+              <div class="error">{{.}}</div>
+            {{end}}
+          </div>
+        </div>
+
+        <div class="row">
+          <div>
+            <label for="incoming_new_line">Línea</label>
+            <input id="incoming_new_line" name="incoming_new_line" type="text" value="{{.IncomingNewLine}}" placeholder="Ej. Dermocosmética" />
+          </div>
+          <div>
+            <label for="incoming_new_qty">Cantidad entrante</label>
+            <input id="incoming_new_qty" name="incoming_new_qty" type="number" min="1" value="{{.IncomingNewQty}}" />
+            {{with index .Errors "incoming_new_qty"}}
+              <div class="error">{{.}}</div>
+            {{end}}
+          </div>
+        </div>
+      </div>
+
+      <div>
+        <label for="notas">Notas</label>
+        <textarea id="notas" name="notas" placeholder="Observaciones del cambio">{{.Notas}}</textarea>
+      </div>
+
+      <div class="note">No se registra dinero en este flujo. Usa Venta si hay pago adicional.</div>
+
+      <div class="actions">
+        <button class="primary" type="submit">Confirmar cambio</button>
+        <a class="button secondary" href="/inventario">Volver a inventario</a>
+      </div>
+    </form>
+  </div>
+  <script>
+    const incomingModeInputs = document.querySelectorAll('input[name="incoming_mode"]');
+    const existingFields = document.querySelectorAll('#incoming_existing_id, #incoming_existing_qty');
+    const newFields = document.querySelectorAll('#incoming_new_sku, #incoming_new_name, #incoming_new_line, #incoming_new_qty');
+
+    const updateIncomingMode = () => {
+      const selected = document.querySelector('input[name="incoming_mode"]:checked');
+      const mode = selected ? selected.value : "existing";
+      existingFields.forEach((field) => field.toggleAttribute("disabled", mode !== "existing"));
+      newFields.forEach((field) => field.toggleAttribute("disabled", mode !== "new"));
+    };
+
+    incomingModeInputs.forEach((input) => input.addEventListener("change", updateIncomingMode));
+    updateIncomingMode();
+  </script>
+</body>
+</html>
