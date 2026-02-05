@@ -583,6 +583,14 @@
             window.location.href = `/venta/new?${params.toString()}`;
             return;
           }
+          if (action === "swap") {
+            const params = new URLSearchParams({
+              producto_id: productId,
+              cantidad: quantity.toString()
+            });
+            window.location.href = `/cambio/new?${params.toString()}`;
+            return;
+          }
           applyFifoAction(productId, action, quantity);
           applyFilters();
         }
