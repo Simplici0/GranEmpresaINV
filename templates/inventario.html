@@ -7,15 +7,15 @@
   <style>
     :root {
       color-scheme: light;
-      --bg: #f6f7fb;
+      --bg: #faf9f7;
       --card: #ffffff;
-      --text: #1c1f2a;
-      --muted: #5c647c;
-      --primary: #2c6bed;
-      --success: #1aa36f;
-      --warning: #f5a524;
-      --danger: #e5484d;
-      --border: #d9dfea;
+      --text: #2a2826;
+      --muted: #6b6560;
+      --primary: #e85d3c;
+      --success: #2d9d78;
+      --warning: #f59e42;
+      --danger: #d64545;
+      --border: #e8e4df;
     }
 
     * {
@@ -48,6 +48,47 @@
       display: flex;
       gap: 12px;
       flex-wrap: wrap;
+    }
+
+    /* Nuevo diseño de botones de navegación */
+    .nav-buttons {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .nav-button {
+      display: inline-block;
+      padding: 8px 16px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s ease;
+      border: 1px solid var(--primary);
+      background: var(--card);
+      color: var(--primary);
+      cursor: pointer;
+    }
+
+    .nav-button:hover {
+      background: var(--primary);
+      color: var(--card);
+    }
+
+    .nav-button.active {
+      background: var(--primary);
+      color: var(--card);
+    }
+
+    .nav-button.primary {
+      background: var(--primary);
+      color: var(--card);
+    }
+
+    .nav-button.primary:hover {
+      background: #d84a2b;
     }
 
     header nav a {
@@ -470,16 +511,19 @@
   <header>
     <h1>{{.Title}}</h1>
     <p>{{.Subtitle}}</p>
-    <nav>
-      <a href="/dashboard">Ver dashboard</a>
-      <a href="/venta/new">Registrar venta</a>
-      <a href="/cambio/new">Registrar cambio</a>
-    </nav>
+    <div class="nav-buttons">
+      <a href="/dashboard" class="nav-button">Ver dashboard</a>
+      <a href="/venta/new" class="nav-button">Registrar venta</a>
+      <a href="/cambio/new" class="nav-button">Registrar cambio</a>
+      <a href="/csv/template" class="nav-button" target="_blank">Plantilla CSV</a>
+      <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
+    </div>
     {{if .Flash}}
       <div class="flash">{{.Flash}}</div>
     {{end}}
   </header>
 
+  <!-- Estado - Sección de filtros -->
   <section class="filters">
     <div class="filter-group">
       <label for="statusFilter">Estado</label>
@@ -512,101 +556,26 @@
     </div>
   </section>
 
-  <section class="summary" id="summary"></section>
-
-  <section class="import-panel" aria-labelledby="csv-mvp-title">
-    <div>
-      <h2 id="csv-mvp-title">Plantilla CSV MVP para carga masiva</h2>
-      <p>Descarga la plantilla con las columnas mínimas para registrar productos y crear unidades DISPONIBLE.</p>
-    </div>
-      <div class="import-actions">
-        <button class="primary" id="download-template">Descargar plantilla CSV</button>
-        <label class="secondary" for="csv-upload">
-          <input id="csv-upload" type="file" accept=".csv,text/csv" />
-        </label>
-        <button class="secondary" id="process-csv">Subir CSV</button>
-      </div>
-      <p>Regla de importación: por cada fila se crea o encuentra el producto por <strong>línea + nombre</strong> (o por SKU si tu proceso lo genera) y se crean <strong>N unidades DISPONIBLE</strong> según el campo cantidad.</p>
-    </div>
-    <div>
-      <p>Columnas requeridas y opcionales:</p>
-      <div class="csv-columns">
-        <span>sku (opcional)</span>
-        <span>linea</span>
-        <span>nombre</span>
-        <span>precio_base_venta</span>
-        <span>precio_consultora</span>
-        <span>caduca (true/false)</span>
-        <span>fecha_caducidad (YYYY-MM-DD, opcional)</span>
-        <span>anotaciones (opcional)</span>
-        <span>cantidad (entero &gt; 0)</span>
-      </div>
-    </div>
-    <div>
-      <p>Ejemplos válidos:</p>
-      <ul class="example-list">
-        <li><code>SKU-001,Nutrición,Proteína Balance 500g,120000,98000,true,2025-01-12,Lote inicial,5</code></li>
-        <li><code>,Dermocosmética,Crema Regeneradora,89000,70000,false,,Promoción abril,12</code></li>
-      </ul>
-    </div>
-    <div class="import-meta">
-      <div class="upload-status" id="upload-status">
-        <span>Preview: 0 filas</span>
-        <span>Válidas: 0</span>
-        <span>Errores: 0</span>
-      </div>
-      <div class="movement-log" id="movement-log">
-        <div><strong>Movimiento ALTA_MASIVA</strong> aún no generado.</div>
-        <div>Sube un CSV para ver el batch_id y el resumen.</div>
-      </div>
-      <div class="upload-preview" id="upload-preview">
-        <table>
-          <thead>
-            <tr>
-              <th>#</th>
-              <th>SKU</th>
-              <th>Línea</th>
-              <th>Nombre</th>
-              <th>Precio base</th>
-              <th>Precio consultora</th>
-              <th>Caduca</th>
-              <th>Fecha caducidad</th>
-              <th>Cantidad</th>
-              <th>Resultado</th>
-            </tr>
-          </thead>
-          <tbody id="upload-preview-body">
-            <tr>
-              <td colspan="10" style="text-align: center; color: var(--muted);">Sin archivo cargado.</td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
-    </div>
-  </section>
-
-  <section class="export-panel" aria-labelledby="export-title">
-    <div>
-      <h2 id="export-title">Exportaciones CSV</h2>
-      <p class="export-hint">Genera reportes rápidos para inventario, ventas y cambios. Los rangos usan la fecha del movimiento.</p>
-    </div>
-    <div class="export-grid">
-      <div class="filter-group">
-        <label for="range-start">Inicio rango</label>
-        <input id="range-start" type="date" />
-      </div>
-      <div class="filter-group">
-        <label for="range-end">Fin rango</label>
-        <input id="range-end" type="date" />
-      </div>
-    </div>
-    <div class="export-actions">
-      <button class="primary" id="export-inventory-aggregate">Inventario agregado</button>
-      <button class="secondary" id="export-inventory-units">Inventario por unidades</button>
-      <button class="secondary" id="export-sales">Ventas por rango</button>
-      <button class="secondary" id="export-changes">Cambios por rango</button>
-    </div>
-  </section>
+  <!-- Resumen - Sección de métricas -->
+  <!-- Listado de productos -->
+  <main>
+    <table>
+      <thead>
+        <tr>
+          <th>Producto</th>
+          <th>Línea</th>
+          <th>Estado</th>
+          <th>Stock disponible</th>
+          <th>Acciones rápidas</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody id="productTable"></tbody>
+    </table>
+  </main>
+  
+</body>
+</html>
 
   <main>
     <table>

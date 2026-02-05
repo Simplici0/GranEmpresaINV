@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Exportaciones CSV</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #faf9f7;
+      --card: #ffffff;
+      --text: #2a2826;
+      --muted: #6b6560;
+      --primary: #e85d3c;
+      --success: #2d9d78;
+      --warning: #f59e42;
+      --danger: #d64545;
+      --border: #e8e4df;
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: "Inter", "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      padding: 32px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      margin-bottom: 32px;
+    }
+
+    h1 {
+      margin: 0 0 8px 0;
+      font-size: 28px;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .actions {
+      margin-bottom: 24px;
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+
+    .primary {
+      background: var(--primary);
+      color: white;
+    }
+
+    .primary:hover {
+      background: #1d4ed8;
+    }
+
+    .secondary {
+      background: #e7ebf6;
+      color: #2a335a;
+    }
+
+    .secondary:hover {
+      background: #d0d9f0;
+    }
+
+    .export-panel {
+      background: var(--card);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .export-panel h2 {
+      margin: 0 0 12px 0;
+      font-size: 18px;
+    }
+
+    .export-panel p {
+      margin: 0 0 16px 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .export-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+      margin: 16px 0;
+    }
+
+    .filter-group {
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+    }
+
+    label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+
+    input[type="date"] {
+      padding: 8px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      font-size: 14px;
+      width: 100%;
+    }
+
+    .export-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      margin-top: 16px;
+    }
+
+    .export-hint {
+      font-size: 13px;
+      color: var(--muted);
+      margin-left: 4px;
+    }
+
+    .export-button-row {
+      display: flex;
+      gap: 12px;
+      margin-bottom: 12px;
+    }
+
+    .export-section {
+      margin: 24px 0;
+      padding: 20px;
+      background: #f9fafc;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+    }
+
+    .export-section h3 {
+      margin: 0 0 12px 0;
+      font-size: 16px;
+      color: var(--text);
+    }
+
+    @media (max-width: 768px) {
+      body {
+        padding: 16px;
+      }
+      
+      .actions {
+        flex-direction: column;
+      }
+      
+      .export-actions {
+        flex-direction: column;
+      }
+      
+      .export-button-row {
+        flex-direction: column;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="nav-buttons" style="margin-bottom: 24px;">
+      <a href="/inventario" class="nav-button">Ver inventario</a>
+      <a href="/venta/new" class="nav-button">Registrar venta</a>
+      <a href="/cambio/new" class="nav-button">Registrar cambio</a>
+      <a href="/csv/template" class="nav-button" target="_blank">Plantilla CSV</a>
+      <a href="/csv/export" class="nav-button active">Exportaciones CSV</a>
+    </div>
+    
+    <div class="nav-buttons" style="margin-bottom: 48px;">
+      <button class="nav-button" onclick="window.close()">Cerrar ventana</button>
+    </div>
+
+    <header>
+      <h1>Exportaciones CSV</h1>
+      <p class="subtitle">Genera reportes para inventario, ventas y cambios</p>
+    </header>
+
+    <section class="export-panel">
+      <div>
+        <h2>Configuración de rangos</h2>
+        <p>Las exportaciones de ventas y cambios utilizan estos rangos de fechas. Las exportaciones de inventario son instantáneas y no requieren rango.</p>
+      </div>
+      
+      <div class="export-grid">
+        <div class="filter-group">
+          <label for="range-start">Fecha inicio</label>
+          <input id="range-start" type="date" />
+        </div>
+        <div class="filter-group">
+          <label for="range-end">Fecha fin</label>
+          <input id="range-end" type="date" />
+        </div>
+      </div>
+
+      <div class="export-section">
+        <h3>📊 Inventario</h3>
+        <div class="export-button-row">
+          <button class="primary" id="export-inventory-aggregate">
+            Inventario agregado
+            <span class="export-hint">• Productos con stock total</span>
+          </button>
+          <button class="secondary" id="export-inventory-units">
+            Inventario por unidades
+            <span class="export-hint">• Detalle de cada unidad</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="export-section">
+        <h3>💰 Ventas</h3>
+        <div class="export-button-row">
+          <button class="secondary" id="export-sales">
+            Ventas por rango
+            <span class="export-hint">• Filtrado por fechas seleccionadas</span>
+          </button>
+        </div>
+      </div>
+
+      <div class="export-section">
+        <h3>🔄 Cambios</h3>
+        <div class="export-button-row">
+          <button class="secondary" id="export-changes">
+            Cambios por rango
+            <span class="export-hint">• Intercambios en el período</span>
+          </button>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    // Datos de ejemplo (similares a los del archivo original)
+    const products = [
+      {
+        id: "P-001",
+        name: "Proteína Balance 500g",
+        line: "Nutrición",
+        status: "available",
+        units: [
+          { id: "U-001", received: "2024-05-10", expires: "2024-11-10", location: "A-01", status: "available" },
+          { id: "U-002", received: "2024-06-02", expires: "2024-12-02", location: "A-01", status: "available" },
+          { id: "U-003", received: "2024-07-12", expires: "2025-01-12", location: "A-02", status: "available" }
+        ]
+      },
+      {
+        id: "P-002",
+        name: "Crema Regeneradora",
+        line: "Dermocosmética",
+        status: "available",
+        units: [
+          { id: "U-101", received: "2024-04-01", expires: "2024-09-08", location: "B-11", status: "available" },
+          { id: "U-102", received: "2024-04-18", expires: "2024-09-25", location: "B-11", status: "available" },
+          { id: "U-103", received: "2024-05-05", expires: "2024-11-02", location: "B-12", status: "available" },
+          { id: "U-104", received: "2024-05-20", expires: "2024-12-09", location: "B-13", status: "available" }
+        ]
+      }
+    ];
+
+    const sales = [
+      {
+        id: "V-1001",
+        productId: "P-001",
+        productName: "Proteína Balance 500g",
+        quantity: 2,
+        total: 240000,
+        method: "Transferencia",
+        date: "2024-08-12"
+      },
+      {
+        id: "V-1002",
+        productId: "P-002",
+        productName: "Crema Regeneradora",
+        quantity: 1,
+        total: 89000,
+        method: "Efectivo",
+        date: "2024-08-18"
+      }
+    ];
+
+    const changes = [
+      {
+        id: "C-2001",
+        outgoingProductId: "P-003",
+        outgoingProductName: "Leche Pediátrica Premium",
+        outgoingUnits: 1,
+        incomingProductId: "P-001",
+        incomingProductName: "Proteína Balance 500g",
+        incomingUnits: 1,
+        reason: "Cambio por referencia",
+        date: "2024-08-20"
+      }
+    ];
+
+    // Funciones auxiliares
+    const formatDateISO = (value) => new Date(value).toISOString().slice(0, 10);
+    
+    const escapeCSVValue = (value) => {
+      const stringValue = String(value ?? "");
+      if (/[",\n]/.test(stringValue)) {
+        return `"${stringValue.replace(/"/g, '""')}"`;
+      }
+      return stringValue;
+    };
+
+    const downloadCSV = (filename, header, rows) => {
+      const csvContent = [header, ...rows].map((row) => row.map(escapeCSVValue).join(",")).join("\n");
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    };
+
+    const parseRangeDate = (value) => (value ? new Date(`${value}T00:00:00`) : null);
+    const isWithinRange = (value, start, end) => {
+      const date = new Date(`${value}T00:00:00`);
+      if (start && date < start) return false;
+      if (end && date > end) return false;
+      return true;
+    };
+
+    // Botones de exportación
+    const exportInventoryAggregateButton = document.getElementById("export-inventory-aggregate");
+    const exportInventoryUnitsButton = document.getElementById("export-inventory-units");
+    const exportSalesButton = document.getElementById("export-sales");
+    const exportChangesButton = document.getElementById("export-changes");
+    const rangeStart = document.getElementById("range-start");
+    const rangeEnd = document.getElementById("range-end");
+
+    // Establecer fechas por defecto
+    const today = new Date();
+    const lastMonth = new Date(today.getFullYear(), today.getMonth() - 1, today.getDate());
+    rangeEnd.value = formatDateISO(today);
+    rangeStart.value = formatDateISO(lastMonth);
+
+    exportInventoryAggregateButton.addEventListener("click", () => {
+      const header = ["sku", "nombre", "linea", "estado", "unidades_disponibles", "total_unidades"];
+      const rows = products.map((product) => {
+        const availableUnits = product.units.filter((unit) => unit.status === "available").length;
+        return [
+          product.id,
+          product.name,
+          product.line,
+          product.status,
+          availableUnits,
+          product.units.length
+        ];
+      });
+      downloadCSV(`inventario_agregado_${formatDateISO(new Date())}.csv`, header, rows);
+    });
+
+    exportInventoryUnitsButton.addEventListener("click", () => {
+      const header = ["sku", "nombre", "linea", "unidad_id", "estado", "ingreso", "caducidad", "ubicacion"];
+      const rows = products.flatMap((product) =>
+        product.units.map((unit) => [
+          product.id,
+          product.name,
+          product.line,
+          unit.id,
+          unit.status,
+          unit.received,
+          unit.expires,
+          unit.location
+        ])
+      );
+      downloadCSV(`inventario_unidades_${formatDateISO(new Date())}.csv`, header, rows);
+    });
+
+    exportSalesButton.addEventListener("click", () => {
+      const start = parseRangeDate(rangeStart.value);
+      const end = parseRangeDate(rangeEnd.value);
+      const filtered = sales.filter((sale) => isWithinRange(sale.date, start, end));
+      const header = ["venta_id", "fecha", "sku", "producto", "cantidad", "total", "metodo_pago"];
+      const rows = filtered.map((sale) => [
+        sale.id,
+        sale.date,
+        sale.productId,
+        sale.productName,
+        sale.quantity,
+        sale.total,
+        sale.method
+      ]);
+      downloadCSV(`ventas_${formatDateISO(new Date())}.csv`, header, rows);
+    });
+
+    exportChangesButton.addEventListener("click", () => {
+      const start = parseRangeDate(rangeStart.value);
+      const end = parseRangeDate(rangeEnd.value);
+      const filtered = changes.filter((change) => isWithinRange(change.date, start, end));
+      const header = [
+        "cambio_id",
+        "fecha",
+        "sku_saliente",
+        "producto_saliente",
+        "unidades_salientes",
+        "sku_entrante",
+        "producto_entrante",
+        "unidades_entrantes",
+        "motivo"
+      ];
+      const rows = filtered.map((change) => [
+        change.id,
+        change.date,
+        change.outgoingProductId,
+        change.outgoingProductName,
+        change.outgoingUnits,
+        change.incomingProductId,
+        change.incomingProductName,
+        change.incomingUnits,
+        change.reason
+      ]);
+      downloadCSV(`cambios_${formatDateISO(new Date())}.csv`, header, rows);
+    });
+  </script>
+</body>
+</html>

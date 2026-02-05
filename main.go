@@ -320,6 +320,8 @@ func main() {
 		"templates/venta_confirm.html",
 		"templates/cambio_new.html",
 		"templates/cambio_confirm.html",
+		"templates/csv_template.html",
+		"templates/csv_export.html",
 	))
 
 	paymentMethods := []string{"Efectivo", "Transferencia", "Tarjeta", "Nequi", "Daviplata", "Bre-B"}
@@ -839,6 +841,26 @@ func main() {
 
 		if err := tmpl.ExecuteTemplate(w, "cambio_confirm.html", confirmData); err != nil {
 			http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
+		}
+	})
+
+	http.HandleFunc("/csv/template", func(w http.ResponseWriter, r *http.Request) {
+		if err := tmpl.ExecuteTemplate(w, "csv_template.html", struct {
+			Title string
+		}{
+			Title: "Plantilla CSV - Carga masiva",
+		}); err != nil {
+			http.Error(w, "Error al renderizar plantilla CSV", http.StatusInternalServerError)
+		}
+	})
+
+	http.HandleFunc("/csv/export", func(w http.ResponseWriter, r *http.Request) {
+		if err := tmpl.ExecuteTemplate(w, "csv_export.html", struct {
+			Title string
+		}{
+			Title: "Exportaciones CSV",
+		}); err != nil {
+			http.Error(w, "Error al renderizar exportaciones CSV", http.StatusInternalServerError)
 		}
 	})
 

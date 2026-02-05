@@ -7,13 +7,13 @@
   <style>
     :root {
       color-scheme: light;
-      --bg: #f6f7fb;
+      ----bg: #faf9f7;
       --card: #ffffff;
-      --text: #1c1f2a;
-      --muted: #5c647c;
-      --primary: #2c6bed;
-      --danger: #e5484d;
-      --border: #d9dfea;
+      --text: #2a2826;
+      --muted: #6b6560;
+      --primary: #e85d3c;
+      --danger: #d64545;
+      --border: #e8e4df;
       --info: #1f6feb;
     }
 
@@ -27,6 +27,38 @@
       background: var(--bg);
       color: var(--text);
       padding: 24px;
+    }
+
+    /* Nuevo diseño de botones de navegación */
+    .nav-buttons {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .nav-button {
+      display: inline-block;
+      padding: 8px 16px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s ease;
+      border: 1px solid var(--primary);
+      background: var(--card);
+      color: var(--primary);
+      cursor: pointer;
+    }
+
+    .nav-button:hover {
+      background: var(--primary);
+      color: var(--card);
+    }
+
+    .nav-button.active {
+      background: var(--primary);
+      color: var(--card);
     }
 
     .card {
@@ -197,6 +229,14 @@
   </style>
 </head>
 <body>
+  <div class="nav-buttons">
+    <a href="/inventario" class="nav-button">Volver a inventario</a>
+    <a href="/venta/new" class="nav-button">Registrar venta</a>
+    <a href="/cambio/new" class="nav-button active">Registrar cambio</a>
+    <a href="/csv/template" class="nav-button" target="_blank">Plantilla CSV</a>
+    <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
+  </div>
+
   <div class="card">
     <h1>{{.Title}}</h1>
     <p>Define el flujo de cambio desde inventario, sin registrar dinero.</p>

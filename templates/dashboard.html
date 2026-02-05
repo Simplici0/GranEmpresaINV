@@ -7,12 +7,15 @@
   <style>
     :root {
       color-scheme: light;
-      --bg: #f6f7fb;
+      --bg: #faf9f7;
       --card: #ffffff;
-      --text: #1c1f2a;
-      --muted: #5c647c;
-      --primary: #2c6bed;
-      --border: #d9dfea;
+      --text: #2a2826;
+      --muted: #6b6560;
+      --primary: #e85d3c;
+      --success: #2d9d78;
+      --warning: #f59e42;
+      --danger: #d64545;
+      --border: #e8e4df;
       --shadow: 0 12px 30px rgba(19, 35, 82, 0.08);
     }
 
@@ -48,6 +51,46 @@
       display: flex;
       gap: 12px;
       flex-wrap: wrap;
+    }
+
+    /* Nuevo diseño de botones de navegación */
+    .nav-buttons {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .nav-button {
+      display: inline-block;
+      padding: 8px 16px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s ease;
+      border: 1px solid var(--primary);
+      background: var(--card);
+      color: var(--primary);
+      cursor: pointer;
+    }
+
+    .nav-button:hover {
+      background: var(--primary);
+      color: var(--card);
+    }
+
+    .nav-button.active {
+      background: var(--primary);
+      color: var(--card);
+    }
+
+    .nav-button.primary {
+      background: var(--primary);
+      color: var(--card);
+    }
+
+    .nav-button.primary:hover {
+      background: #d84a2b;
     }
 
     nav a {
@@ -222,11 +265,13 @@
       <h1>{{.Title}}</h1>
       <p>{{.Subtitle}}</p>
     </div>
-    <nav>
-      <a href="/inventario">Volver a inventario</a>
-      <a href="/venta/new">Registrar venta</a>
-      <a href="/cambio/new">Registrar cambio</a>
-    </nav>
+    <div class="nav-buttons">
+      <a href="/inventario" class="nav-button">Ver inventario</a>
+      <a href="/venta/new" class="nav-button">Registrar venta</a>
+      <a href="/cambio/new" class="nav-button">Registrar cambio</a>
+      <a href="/csv/template" class="nav-button" target="_blank">Plantilla CSV</a>
+      <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
+    </div>
   </header>
 
   <section class="grid">

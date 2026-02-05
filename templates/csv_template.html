@@ -1,0 +1,580 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Plantilla CSV - Carga Masiva</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #faf9f7;
+      --card: #ffffff;
+      --text: #2a2826;
+      --muted: #6b6560;
+      --primary: #e85d3c;
+      --success: #2d9d78;
+      --warning: #f59e42;
+      --danger: #d64545;
+      --border: #e8e4df;
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: "Inter", "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      padding: 32px;
+    }
+
+    .container {
+      max-width: 1200px;
+      margin: 0 auto;
+    }
+
+    header {
+      margin-bottom: 32px;
+    }
+
+    h1 {
+      margin: 0 0 8px 0;
+      font-size: 28px;
+    }
+
+    .subtitle {
+      margin: 0;
+      color: var(--muted);
+      font-size: 16px;
+    }
+
+    .actions {
+      margin-bottom: 24px;
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    button {
+      border: none;
+      padding: 12px 24px;
+      border-radius: 8px;
+      font-weight: 600;
+      cursor: pointer;
+      font-size: 14px;
+      transition: all 0.2s;
+    }
+
+    .primary {
+      background: var(--primary);
+      color: white;
+    }
+
+    .primary:hover {
+      background: #1d4ed8;
+    }
+
+    .secondary {
+      background: #e7ebf6;
+      color: #2a335a;
+    }
+
+    .secondary:hover {
+      background: #d0d9f0;
+    }
+
+    .import-panel {
+      background: var(--card);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      padding: 24px;
+      margin-bottom: 24px;
+    }
+
+    .import-panel h2 {
+      margin: 0 0 12px 0;
+      font-size: 18px;
+    }
+
+    .import-panel p {
+      margin: 0 0 16px 0;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 1.5;
+    }
+
+    .import-actions {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .import-actions input[type="file"] {
+      font-size: 13px;
+    }
+
+    .csv-columns {
+      display: grid;
+      gap: 8px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      font-size: 13px;
+      color: var(--muted);
+      margin: 16px 0;
+    }
+
+    .csv-columns span {
+      background: #f4f6fb;
+      border-radius: 8px;
+      padding: 6px 10px;
+      border: 1px dashed var(--border);
+    }
+
+    .example-list {
+      margin: 16px 0;
+      padding-left: 18px;
+      color: var(--muted);
+      font-size: 13px;
+    }
+
+    .example-list code {
+      color: #2a335a;
+      background: #eef1f8;
+      padding: 2px 6px;
+      border-radius: 6px;
+    }
+
+    .import-meta {
+      margin-top: 24px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .upload-status {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .upload-status span {
+      background: #f4f6fb;
+      border-radius: 999px;
+      padding: 6px 12px;
+      border: 1px solid var(--border);
+    }
+
+    .upload-preview {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+      background: #fdfdff;
+      margin-top: 12px;
+    }
+
+    .upload-preview table {
+      width: 100%;
+      border-collapse: collapse;
+      border: none;
+      background: transparent;
+    }
+
+    .upload-preview th,
+    .upload-preview td {
+      font-size: 12px;
+      padding: 8px 10px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+    }
+
+    .upload-preview th {
+      background: #eef1f8;
+      font-weight: 600;
+    }
+
+    .error-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #ffeef0;
+      color: var(--danger);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .success-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 8px;
+      border-radius: 999px;
+      background: #e9f7f1;
+      color: var(--success);
+      font-size: 11px;
+      font-weight: 600;
+    }
+
+    .movement-log {
+      margin-top: 16px;
+      display: grid;
+      gap: 8px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .movement-log strong {
+      color: var(--text);
+    }
+
+    @media (max-width: 768px) {
+      body {
+        padding: 16px;
+      }
+      
+      .actions {
+        flex-direction: column;
+      }
+      
+      .import-actions {
+        flex-direction: column;
+        align-items: stretch;
+      }
+    }
+  </style>
+</head>
+<body>
+  <div class="container">
+    <div class="nav-buttons" style="margin-bottom: 24px;">
+      <a href="/inventario" class="nav-button">Ver inventario</a>
+      <a href="/venta/new" class="nav-button">Registrar venta</a>
+      <a href="/cambio/new" class="nav-button">Registrar cambio</a>
+      <a href="/csv/template" class="nav-button active">Plantilla CSV</a>
+      <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
+    </div>
+    
+    <div class="nav-buttons" style="margin-bottom: 48px;">
+      <button class="nav-button" onclick="window.close()">Cerrar ventana</button>
+    </div>
+
+    <header>
+      <h1>Plantilla CSV</h1>
+      <p class="subtitle">Carga masiva de productos y unidades al inventario</p>
+    </header>
+
+    <section class="import-panel">
+      <div>
+        <h2>Plantilla CSV MVP para carga masiva</h2>
+        <p>Descarga la plantilla con las columnas mínimas para registrar productos y crear unidades DISPONIBLE.</p>
+      </div>
+      <div class="import-actions">
+        <button class="primary" id="download-template">Descargar plantilla CSV</button>
+        <label class="secondary" for="csv-upload">
+          <input id="csv-upload" type="file" accept=".csv,text/csv" />
+        </label>
+        <button class="secondary" id="process-csv">Subir CSV</button>
+      </div>
+      <p>Regla de importación: por cada fila se crea o encuentra el producto por <strong>línea + nombre</strong> (o por SKU si tu proceso lo genera) y se crean <strong>N unidades DISPONIBLE</strong> según el campo cantidad.</p>
+      
+      <div>
+        <p>Columnas requeridas y opcionales:</p>
+        <div class="csv-columns">
+          <span>sku (opcional)</span>
+          <span>linea</span>
+          <span>nombre</span>
+          <span>precio_base_venta</span>
+          <span>precio_consultora</span>
+          <span>caduca (true/false)</span>
+          <span>fecha_caducidad (YYYY-MM-DD, opcional)</span>
+          <span>anotaciones (opcional)</span>
+          <span>cantidad (entero > 0)</span>
+        </div>
+      </div>
+      
+      <div>
+        <p>Ejemplos válidos:</p>
+        <ul class="example-list">
+          <li><code>SKU-001,Nutrición,Proteína Balance 500g,120000,98000,true,2025-01-12,Lote inicial,5</code></li>
+          <li><code>,Dermocosmética,Crema Regeneradora,89000,70000,false,,Promoción abril,12</code></li>
+        </ul>
+      </div>
+      
+      <div class="import-meta">
+        <div class="upload-status" id="upload-status">
+          <span>Preview: 0 filas</span>
+          <span>Válidas: 0</span>
+          <span>Errores: 0</span>
+        </div>
+        <div class="movement-log" id="movement-log">
+          <div><strong>Movimiento ALTA_MASIVA</strong> aún no generado.</div>
+          <div>Sube un CSV para ver el batch_id y el resumen.</div>
+        </div>
+        <div class="upload-preview" id="upload-preview">
+          <table>
+            <thead>
+              <tr>
+                <th>#</th>
+                <th>SKU</th>
+                <th>Línea</th>
+                <th>Nombre</th>
+                <th>Precio base</th>
+                <th>Precio consultora</th>
+                <th>Caduca</th>
+                <th>Fecha caducidad</th>
+                <th>Cantidad</th>
+                <th>Resultado</th>
+              </tr>
+            </thead>
+            <tbody id="upload-preview-body">
+              <tr>
+                <td colspan="10" style="text-align: center; color: var(--muted);">Sin archivo cargado.</td>
+              </tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+    </section>
+  </div>
+
+  <script>
+    const uploadStatus = document.getElementById("upload-status");
+    const uploadPreviewBody = document.getElementById("upload-preview-body");
+    const movementLog = document.getElementById("movement-log");
+    
+    const formatDateISO = (value) => new Date(value).toISOString().slice(0, 10);
+    
+    const escapeCSV = (value) => {
+      const stringValue = String(value);
+      if (/[",\n]/.test(stringValue)) {
+        return `"${stringValue.replace(/"/g, '""')}"`;
+      }
+      return stringValue;
+    };
+
+    // Funciones similares a las del archivo original
+    const parseCSV = (text) => {
+      const rows = [];
+      let current = [];
+      let value = "";
+      let inQuotes = false;
+      for (let i = 0; i < text.length; i++) {
+        const char = text[i];
+        const next = text[i + 1];
+
+        if (char === '"' && inQuotes && next === '"') {
+          value += '"';
+          i++;
+          continue;
+        }
+
+        if (char === '"') {
+          inQuotes = !inQuotes;
+          continue;
+        }
+
+        if (char === "," && !inQuotes) {
+          current.push(value);
+          value = "";
+          continue;
+        }
+
+        if ((char === "\n" || char === "\r") && !inQuotes) {
+          if (value !== "" || current.length > 0) {
+            current.push(value);
+            rows.push(current);
+            current = [];
+            value = "";
+          }
+          continue;
+        }
+
+        value += char;
+      }
+
+      if (value !== "" || current.length > 0) {
+        current.push(value);
+        rows.push(current);
+      }
+
+      return rows;
+    };
+
+    downloadTemplateButton.addEventListener("click", () => {
+      const header = [
+        "sku",
+        "linea",
+        "nombre",
+        "precio_base_venta",
+        "precio_consultora",
+        "caduca",
+        "fecha_caducidad",
+        "anotaciones",
+        "cantidad"
+      ];
+      const rows = [
+        [
+          "SKU-001",
+          "Nutrición",
+          "Proteína Balance 500g",
+          "120000",
+          "98000",
+          "true",
+          "2025-01-12",
+          "Lote inicial",
+          "5"
+        ],
+        ["", "Dermocosmética", "Crema Regeneradora", "89000", "70000", "false", "", "Promoción abril", "12"]
+      ];
+
+      const csvContent = [header, ...rows]
+        .map((row) => row.map(escapeCSV).join(","))
+        .join("\n");
+
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = "plantilla_productos_mvp.csv";
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    });
+
+    const validateRow = (row, index) => {
+      const errors = [];
+      const [
+        sku = "",
+        linea = "",
+        nombre = "",
+        precioBase = "",
+        precioConsultora = "",
+        caduca = "",
+        fechaCaducidad = "",
+        anotaciones = "",
+        cantidad = ""
+      ] = row.map((cell) => cell.trim());
+
+      if (!linea) errors.push("Línea es obligatoria.");
+      if (!nombre) errors.push("Nombre es obligatorio.");
+
+      const precioBaseNum = Number(precioBase.replace(",", "."));
+      if (!precioBase || Number.isNaN(precioBaseNum) || precioBaseNum <= 0) {
+        errors.push("Precio base inválido.");
+      }
+
+      const precioConsultoraNum = Number(precioConsultora.replace(",", "."));
+      if (!precioConsultora || Number.isNaN(precioConsultoraNum) || precioConsultoraNum <= 0) {
+        errors.push("Precio consultora inválido.");
+      }
+
+      const caducaLower = caduca.toLowerCase();
+      if (!caduca || (caducaLower !== "true" && caducaLower !== "false")) {
+        errors.push("Caduca debe ser true/false.");
+      }
+
+      if (caducaLower === "true" && !fechaCaducidad) {
+        errors.push("Fecha caducidad requerida si caduca.");
+      }
+      if (fechaCaducidad && !/^\d{4}-\d{2}-\d{2}$/.test(fechaCaducidad)) {
+        errors.push("Fecha caducidad debe ser YYYY-MM-DD.");
+      }
+
+      const cantidadNum = Number(cantidad);
+      if (!cantidad || !Number.isInteger(cantidadNum) || cantidadNum <= 0) {
+        errors.push("Cantidad debe ser entero mayor a 0.");
+      }
+
+      return {
+        index,
+        sku,
+        linea,
+        nombre,
+        precioBase,
+        precioConsultora,
+        caduca: caducaLower,
+        fechaCaducidad,
+        anotaciones,
+        cantidad: cantidadNum,
+        errors
+      };
+    };
+
+    const handleCSV = (file) => {
+      if (!file) return;
+
+      const reader = new FileReader();
+      reader.onload = () => {
+        const text = reader.result;
+        const rows = parseCSV(text).filter((row) => row.some((cell) => cell.trim() !== ""));
+
+        if (rows.length === 0) {
+          uploadPreviewBody.innerHTML = `
+            <tr>
+              <td colspan="10" style="text-align: center; color: var(--muted);">Sin filas para mostrar.</td>
+            </tr>
+          `;
+          return;
+        }
+
+        const hasHeader = rows[0].map((cell) => cell.trim().toLowerCase());
+        const expected = [
+          "sku",
+          "linea",
+          "nombre",
+          "precio_base_venta",
+          "precio_consultora",
+          "caduca",
+          "fecha_caducidad",
+          "anotaciones",
+          "cantidad"
+        ];
+
+        const isHeaderValid = expected.every((column, index) => hasHeader[index] === column);
+        const dataRows = isHeaderValid ? rows.slice(1) : rows;
+        const validated = dataRows.map((row, idx) => validateRow(row, idx + 1));
+
+        uploadPreviewBody.innerHTML = "";
+        validated.forEach((row) => {
+          const errorMarkup = row.errors.length
+            ? `<span class="error-tag">Errores: ${row.errors.join(" ")}</span>`
+            : `<span class="success-tag">OK</span>`;
+
+          const tr = document.createElement("tr");
+          tr.innerHTML = `
+            <td>${row.index}</td>
+            <td>${row.sku || "-"}</td>
+            <td>${row.linea || "-"}</td>
+            <td>${row.nombre || "-"}</td>
+            <td>${row.precioBase || "-"}</td>
+            <td>${row.precioConsultora || "-"}</td>
+            <td>${row.caduca || "-"}</td>
+            <td>${row.fechaCaducidad || "-"}</td>
+            <td>${row.cantidad || "-"}</td>
+            <td>${errorMarkup}</td>
+          `;
+          uploadPreviewBody.appendChild(tr);
+        });
+
+        const validCount = validated.filter((row) => row.errors.length === 0).length;
+        uploadStatus.innerHTML = `
+          <span>Preview: ${validated.length} filas</span>
+          <span>Válidas: ${validCount}</span>
+          <span>Errores: ${validated.length - validCount}</span>
+        `;
+      };
+      reader.readAsText(file);
+    };
+    
+    const processButton = document.getElementById("process-csv");
+    processButton.addEventListener("click", () => {
+      const file = document.getElementById("csv-upload").files[0];
+      handleCSV(file);
+    });
+  </script>
+</body>
+</html>
