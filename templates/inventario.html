@@ -221,6 +221,38 @@
       color: var(--muted);
     }
 
+    .export-panel {
+      margin: 0 32px 24px;
+      background: var(--card);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      padding: 16px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .export-panel h2 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .export-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+
+    .export-actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+    }
+
+    .export-hint {
+      font-size: 13px;
+      color: var(--muted);
+    }
+
     .movement-log strong {
       color: var(--text);
     }
@@ -534,6 +566,29 @@
     </div>
   </section>
 
+  <section class="export-panel" aria-labelledby="export-title">
+    <div>
+      <h2 id="export-title">Exportaciones CSV</h2>
+      <p class="export-hint">Genera reportes rápidos para inventario, ventas y cambios. Los rangos usan la fecha del movimiento.</p>
+    </div>
+    <div class="export-grid">
+      <div class="filter-group">
+        <label for="range-start">Inicio rango</label>
+        <input id="range-start" type="date" />
+      </div>
+      <div class="filter-group">
+        <label for="range-end">Fin rango</label>
+        <input id="range-end" type="date" />
+      </div>
+    </div>
+    <div class="export-actions">
+      <button class="primary" id="export-inventory-aggregate">Inventario agregado</button>
+      <button class="secondary" id="export-inventory-units">Inventario por unidades</button>
+      <button class="secondary" id="export-sales">Ventas por rango</button>
+      <button class="secondary" id="export-changes">Cambios por rango</button>
+    </div>
+  </section>
+
   <main>
     <table>
       <thead>
@@ -609,8 +664,15 @@
     const uploadStatus = document.getElementById("upload-status");
     const uploadPreviewBody = document.getElementById("upload-preview-body");
     const movementLog = document.getElementById("movement-log");
+    const rangeStart = document.getElementById("range-start");
+    const rangeEnd = document.getElementById("range-end");
+    const exportInventoryAggregateButton = document.getElementById("export-inventory-aggregate");
+    const exportInventoryUnitsButton = document.getElementById("export-inventory-units");
+    const exportSalesButton = document.getElementById("export-sales");
+    const exportChangesButton = document.getElementById("export-changes");
 
     const formatDate = (value) => new Date(value).toLocaleDateString("es-ES");
+    const formatDateISO = (value) => new Date(value).toISOString().slice(0, 10);
 
     const updateSummary = (visibleProducts) => {
       const totalProducts = visibleProducts.length;
@@ -915,6 +977,90 @@
 
     const normalizeText = (value) => value.trim().toLowerCase();
 
+    const escapeCSVValue = (value) => {
+      const stringValue = String(value ?? "");
+      if (/[",\n]/.test(stringValue)) {
+        return `"${stringValue.replace(/"/g, '""')}"`;
+      }
+      return stringValue;
+    };
+
+    const downloadCSV = (filename, header, rows) => {
+      const csvContent = [header, ...rows].map((row) => row.map(escapeCSVValue).join(",")).join("\n");
+      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+      const url = URL.createObjectURL(blob);
+      const link = document.createElement("a");
+      link.href = url;
+      link.download = filename;
+      document.body.appendChild(link);
+      link.click();
+      link.remove();
+      URL.revokeObjectURL(url);
+    };
+
+    const sales = [
+      {
+        id: "V-1001",
+        productId: "P-001",
+        productName: "Proteína Balance 500g",
+        quantity: 2,
+        total: 240000,
+        method: "Transferencia",
+        date: "2024-08-12"
+      },
+      {
+        id: "V-1002",
+        productId: "P-002",
+        productName: "Crema Regeneradora",
+        quantity: 1,
+        total: 89000,
+        method: "Efectivo",
+        date: "2024-08-18"
+      },
+      {
+        id: "V-1003",
+        productId: "P-003",
+        productName: "Leche Pediátrica Premium",
+        quantity: 3,
+        total: 315000,
+        method: "Tarjeta",
+        date: "2024-09-02"
+      }
+    ];
+
+    const changes = [
+      {
+        id: "C-2001",
+        outgoingProductId: "P-003",
+        outgoingProductName: "Leche Pediátrica Premium",
+        outgoingUnits: 1,
+        incomingProductId: "P-001",
+        incomingProductName: "Proteína Balance 500g",
+        incomingUnits: 1,
+        reason: "Cambio por referencia",
+        date: "2024-08-20"
+      },
+      {
+        id: "C-2002",
+        outgoingProductId: "P-002",
+        outgoingProductName: "Crema Regeneradora",
+        outgoingUnits: 2,
+        incomingProductId: "SKU-NUEVO-22",
+        incomingProductName: "Crema Calmante",
+        incomingUnits: 2,
+        reason: "Garantía",
+        date: "2024-09-05"
+      }
+    ];
+
+    const parseRangeDate = (value) => (value ? new Date(`${value}T00:00:00`) : null);
+    const isWithinRange = (value, start, end) => {
+      const date = new Date(`${value}T00:00:00`);
+      if (start && date < start) return false;
+      if (end && date > end) return false;
+      return true;
+    };
+
     const validateRow = (row, index) => {
       const errors = [];
       const [
@@ -1102,6 +1248,85 @@
 
     processButton.addEventListener("click", () => {
       handleCSV(uploadInput.files[0]);
+    });
+
+    exportInventoryAggregateButton.addEventListener("click", () => {
+      const header = ["sku", "nombre", "linea", "estado", "unidades_disponibles", "total_unidades"];
+      const rows = products.map((product) => {
+        const availableUnits = product.units.filter((unit) => unit.status === "available").length;
+        return [
+          product.id,
+          product.name,
+          product.line,
+          product.status,
+          availableUnits,
+          product.units.length
+        ];
+      });
+      downloadCSV(`inventario_agregado_${formatDateISO(new Date())}.csv`, header, rows);
+    });
+
+    exportInventoryUnitsButton.addEventListener("click", () => {
+      const header = ["sku", "nombre", "linea", "unidad_id", "estado", "ingreso", "caducidad", "ubicacion"];
+      const rows = products.flatMap((product) =>
+        product.units.map((unit) => [
+          product.id,
+          product.name,
+          product.line,
+          unit.id,
+          unit.status,
+          unit.received,
+          unit.expires,
+          unit.location
+        ])
+      );
+      downloadCSV(`inventario_unidades_${formatDateISO(new Date())}.csv`, header, rows);
+    });
+
+    exportSalesButton.addEventListener("click", () => {
+      const start = parseRangeDate(rangeStart.value);
+      const end = parseRangeDate(rangeEnd.value);
+      const filtered = sales.filter((sale) => isWithinRange(sale.date, start, end));
+      const header = ["venta_id", "fecha", "sku", "producto", "cantidad", "total", "metodo_pago"];
+      const rows = filtered.map((sale) => [
+        sale.id,
+        sale.date,
+        sale.productId,
+        sale.productName,
+        sale.quantity,
+        sale.total,
+        sale.method
+      ]);
+      downloadCSV(`ventas_${formatDateISO(new Date())}.csv`, header, rows);
+    });
+
+    exportChangesButton.addEventListener("click", () => {
+      const start = parseRangeDate(rangeStart.value);
+      const end = parseRangeDate(rangeEnd.value);
+      const filtered = changes.filter((change) => isWithinRange(change.date, start, end));
+      const header = [
+        "cambio_id",
+        "fecha",
+        "sku_saliente",
+        "producto_saliente",
+        "unidades_salientes",
+        "sku_entrante",
+        "producto_entrante",
+        "unidades_entrantes",
+        "motivo"
+      ];
+      const rows = filtered.map((change) => [
+        change.id,
+        change.date,
+        change.outgoingProductId,
+        change.outgoingProductName,
+        change.outgoingUnits,
+        change.incomingProductId,
+        change.incomingProductName,
+        change.incomingUnits,
+        change.reason
+      ]);
+      downloadCSV(`cambios_${formatDateISO(new Date())}.csv`, header, rows);
     });
   </script>
 </body>
