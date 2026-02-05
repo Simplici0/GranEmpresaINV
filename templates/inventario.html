@@ -110,6 +110,17 @@
       font-weight: 600;
     }
 
+    .flash {
+      margin-top: 16px;
+      background: #e9f7f1;
+      color: #1a6b4b;
+      border: 1px solid #bde4d2;
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
     main {
       padding: 0 32px 32px;
     }
@@ -278,6 +289,9 @@
   <header>
     <h1>{{.Title}}</h1>
     <p>{{.Subtitle}}</p>
+    {{if .Flash}}
+      <div class="flash">{{.Flash}}</div>
+    {{end}}
   </header>
 
   <section class="filters">
@@ -561,6 +575,14 @@
         const quantity = parseInt(qtyInput.value, 10);
 
         if (!Number.isNaN(quantity) && quantity > 0) {
+          if (action === "sell") {
+            const params = new URLSearchParams({
+              producto_id: productId,
+              cantidad: quantity.toString()
+            });
+            window.location.href = `/venta/new?${params.toString()}`;
+            return;
+          }
           applyFifoAction(productId, action, quantity);
           applyFilters();
         }
