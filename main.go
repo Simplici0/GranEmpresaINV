@@ -19,6 +19,7 @@ type inventoryPageData struct {
 	Subtitle    string
 	RoutePrefix string
 	Flash       string
+	Products    []inventoryProduct
 }
 
 type unitOption struct {
@@ -31,6 +32,27 @@ type productOption struct {
 	Line  string
 	Units []unitOption
 }
+
+type inventoryUnit struct {
+	ID          string
+	Estado      string
+	EstadoClass string
+	CreadoEn    string
+	FIFO        string
+}
+
+type inventoryProduct struct {
+	ID           string
+	Name         string
+	Line         string
+	EstadoLabel  string
+	EstadoClass  string
+	Disponible   int
+	Unidades     []inventoryUnit
+	DisabledSale bool
+}
+
+var errInsufficientStock = fmt.Errorf("stock insuficiente")
 
 type cambioFormData struct {
 	Title               string
@@ -147,6 +169,74 @@ func buildSalientesMap(salientes []string) map[string]bool {
 	return mapped
 }
 
+func estadoClass(estado string) string {
+	switch estado {
+	case "Disponible":
+		return "available"
+	case "Vendida":
+		return "sold"
+	case "Cambio":
+		return "swapped"
+	default:
+		return "available"
+	}
+}
+
+func selectAndMarkUnitsSold(tx *sql.Tx, productID string, qty int) ([]string, error) {
+	if qty <= 0 {
+		return nil, fmt.Errorf("cantidad inválida")
+	}
+
+	rows, err := tx.Query(`
+		SELECT id
+		FROM unidades
+		WHERE producto_id = ? AND estado = 'Disponible'
+		ORDER BY creado_en, id
+		LIMIT ?`, productID, qty)
+	if err != nil {
+		return nil, fmt.Errorf("query unidades: %w", err)
+	}
+	defer rows.Close()
+
+	ids := []string{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan unidad: %w", err)
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows unidades: %w", err)
+	}
+
+	if len(ids) < qty {
+		return nil, errInsufficientStock
+	}
+
+	placeholders := make([]string, len(ids))
+	args := make([]interface{}, 0, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+
+	query := fmt.Sprintf("UPDATE unidades SET estado = 'Vendida' WHERE id IN (%s) AND estado = 'Disponible'", strings.Join(placeholders, ","))
+	result, err := tx.Exec(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("update unidades: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("rows affected: %w", err)
+	}
+	if int(affected) != qty {
+		return nil, fmt.Errorf("unidades actualizadas inesperadas: %d", affected)
+	}
+
+	return ids, nil
+}
+
 func formatCurrency(value float64) string {
 	return fmt.Sprintf("$%.0f", value)
 }
@@ -190,6 +280,7 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 		cantidad INTEGER NOT NULL,
 		precio_final REAL NOT NULL,
 		metodo_pago TEXT NOT NULL,
+		notas TEXT NOT NULL DEFAULT '',
 		fecha TEXT NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas (fecha);
@@ -206,6 +297,16 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 
 	if _, err := db.Exec(schema); err != nil {
 		return nil, err
+	}
+
+	var notasColumn string
+	if err := db.QueryRow("SELECT name FROM pragma_table_info('ventas') WHERE name = 'notas'").Scan(&notasColumn); err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+	if notasColumn == "" {
+		if _, err := db.Exec("ALTER TABLE ventas ADD COLUMN notas TEXT NOT NULL DEFAULT ''"); err != nil {
+			return nil, err
+		}
 	}
 
 	var ventasCount int
@@ -238,8 +339,8 @@ func seedVentas(db *sql.DB, paymentMethods []string) error {
 	if err != nil {
 		return err
 	}
-	stmt, err := tx.Prepare(`INSERT INTO ventas (producto_id, cantidad, precio_final, metodo_pago, fecha)
-		VALUES (?, ?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT INTO ventas (producto_id, cantidad, precio_final, metodo_pago, notas, fecha)
+		VALUES (?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
 			return fmt.Errorf("prepare ventas: %w (rollback: %v)", err, rollbackErr)
@@ -258,7 +359,7 @@ func seedVentas(db *sql.DB, paymentMethods []string) error {
 			cantidad := (j % 3) + 1
 			precio := float64(18000 + (i * 1200) + (j * 800))
 			metodo := paymentMethods[(i+j)%len(paymentMethods)]
-			if _, err := stmt.Exec(productoID, cantidad, precio, metodo, date); err != nil {
+			if _, err := stmt.Exec(productoID, cantidad, precio, metodo, "Venta seed", date); err != nil {
 				if rollbackErr := tx.Rollback(); rollbackErr != nil {
 					return fmt.Errorf("insert ventas: %w (rollback: %v)", err, rollbackErr)
 				}
@@ -556,11 +657,73 @@ func main() {
 
 	http.HandleFunc("/inventario", func(w http.ResponseWriter, r *http.Request) {
 		flash := r.URL.Query().Get("mensaje")
+		inventoryProducts := make([]inventoryProduct, 0, len(products))
+		for _, product := range products {
+			rows, err := db.Query(`
+				SELECT id, estado, creado_en
+				FROM unidades
+				WHERE producto_id = ?
+				ORDER BY creado_en, id`, product.ID)
+			if err != nil {
+				http.Error(w, "Error al consultar unidades", http.StatusInternalServerError)
+				return
+			}
+
+			units := []inventoryUnit{}
+			availableCount := 0
+			fifoIndex := 1
+			for rows.Next() {
+				var id, estado, creadoEn string
+				if err := rows.Scan(&id, &estado, &creadoEn); err != nil {
+					rows.Close()
+					http.Error(w, "Error al leer unidades", http.StatusInternalServerError)
+					return
+				}
+				fifo := "-"
+				if estado == "Disponible" {
+					fifo = strconv.Itoa(fifoIndex)
+					fifoIndex++
+					availableCount++
+				}
+				units = append(units, inventoryUnit{
+					ID:          id,
+					Estado:      estado,
+					EstadoClass: estadoClass(estado),
+					CreadoEn:    creadoEn,
+					FIFO:        fifo,
+				})
+			}
+			if err := rows.Err(); err != nil {
+				rows.Close()
+				http.Error(w, "Error al procesar unidades", http.StatusInternalServerError)
+				return
+			}
+			rows.Close()
+
+			estadoLabel := "Disponible"
+			estadoClass := "available"
+			if availableCount == 0 {
+				estadoLabel = "Vendido"
+				estadoClass = "sold"
+			}
+
+			inventoryProducts = append(inventoryProducts, inventoryProduct{
+				ID:           product.ID,
+				Name:         product.Name,
+				Line:         product.Line,
+				EstadoLabel:  estadoLabel,
+				EstadoClass:  estadoClass,
+				Disponible:   availableCount,
+				Unidades:     units,
+				DisabledSale: availableCount == 0,
+			})
+		}
 		data := inventoryPageData{
 			Title:       "Pantalla Inventario (por producto)",
 			Subtitle:    "Control por producto con ventas, cambios y auditoría de unidades en FIFO.",
 			RoutePrefix: "",
 			Flash:       flash,
+			Products:    inventoryProducts,
 		}
 		if err := tmpl.ExecuteTemplate(w, "inventario.html", data); err != nil {
 			http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
@@ -686,6 +849,57 @@ func main() {
 			if err := tmpl.ExecuteTemplate(w, "venta_new.html", data); err != nil {
 				http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
 			}
+			return
+		}
+
+		precioFinal, _ := strconv.ParseFloat(precioValue, 64)
+		tx, err := db.Begin()
+		if err != nil {
+			http.Error(w, "Error al procesar la venta", http.StatusInternalServerError)
+			return
+		}
+
+		_, err = selectAndMarkUnitsSold(tx, productID, cantidad)
+		if err != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				log.Printf("rollback venta: %v", rollbackErr)
+			}
+			if err == errInsufficientStock {
+				errors["cantidad"] = "No hay stock disponible suficiente para completar la venta."
+				data := ventaFormData{
+					Title:       "Registrar venta",
+					ProductoID:  productID,
+					Cantidad:    cantidad,
+					PrecioFinal: precioValue,
+					MetodoPago:  metodoPago,
+					Notas:       notas,
+					Errors:      errors,
+					MetodoPagos: paymentMethods,
+				}
+				w.WriteHeader(http.StatusBadRequest)
+				if err := tmpl.ExecuteTemplate(w, "venta_new.html", data); err != nil {
+					http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
+				}
+				return
+			}
+			http.Error(w, "Error al actualizar inventario", http.StatusInternalServerError)
+			return
+		}
+
+		if _, err := tx.Exec(
+			`INSERT INTO ventas (producto_id, cantidad, precio_final, metodo_pago, notas, fecha)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+			productID, cantidad, precioFinal, metodoPago, notas, time.Now().Format(time.RFC3339),
+		); err != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				log.Printf("rollback venta insert: %v", rollbackErr)
+			}
+			http.Error(w, "Error al registrar la venta", http.StatusInternalServerError)
+			return
+		}
+
+		if err := tx.Commit(); err != nil {
+			http.Error(w, "Error al confirmar la venta", http.StatusInternalServerError)
 			return
 		}
 
