@@ -1,0 +1,339 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{.Title}}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7fb;
+      --card: #ffffff;
+      --text: #1c1f2a;
+      --muted: #5c647c;
+      --primary: #2c6bed;
+      --border: #d9dfea;
+      --shadow: 0 12px 30px rgba(19, 35, 82, 0.08);
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: "Inter", "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    header {
+      padding: 24px 32px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 26px;
+    }
+
+    header p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    nav {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    nav a {
+      text-decoration: none;
+      color: var(--primary);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .grid {
+      display: grid;
+      gap: 20px;
+      padding: 0 32px 32px;
+      grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    }
+
+    .card {
+      background: var(--card);
+      border-radius: 16px;
+      padding: 16px;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .card h2 {
+      margin: 0;
+      font-size: 16px;
+    }
+
+    .state-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    .state-list a {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      text-decoration: none;
+      color: inherit;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: #f9faff;
+    }
+
+    .state-list span {
+      font-weight: 600;
+    }
+
+    .periods {
+      display: grid;
+      gap: 12px;
+    }
+
+    .bar-chart {
+      display: grid;
+      gap: 12px;
+    }
+
+    .bar-row {
+      display: grid;
+      grid-template-columns: 80px 1fr;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .bar {
+      position: relative;
+      height: 12px;
+      background: #eef2ff;
+      border-radius: 999px;
+      overflow: hidden;
+    }
+
+    .bar span {
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+      background: linear-gradient(90deg, #2c6bed, #7d4cf6);
+      border-radius: 999px;
+    }
+
+    .period {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 12px;
+    }
+
+    .period strong {
+      font-size: 18px;
+      display: block;
+      margin-top: 6px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+    }
+
+    th,
+    td {
+      text-align: left;
+      padding: 8px;
+      font-size: 13px;
+      border-bottom: 1px solid var(--border);
+    }
+
+    th {
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .badge {
+      background: #eef2ff;
+      color: var(--primary);
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 12px;
+    }
+
+    .pie-wrap {
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 16px;
+      align-items: center;
+    }
+
+    .pie-legend {
+      display: grid;
+      gap: 8px;
+      font-size: 13px;
+    }
+
+    .legend-item {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .legend-dot {
+      width: 10px;
+      height: 10px;
+      border-radius: 50%;
+    }
+
+    .line-chart {
+      width: 100%;
+      height: auto;
+      background: #f9faff;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+    }
+
+    .timeline-grid {
+      display: grid;
+      gap: 8px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div>
+      <h1>{{.Title}}</h1>
+      <p>{{.Subtitle}}</p>
+    </div>
+    <nav>
+      <a href="/inventario">Volver a inventario</a>
+      <a href="/venta/new">Registrar venta</a>
+      <a href="/cambio/new">Registrar cambio</a>
+    </nav>
+  </header>
+
+  <section class="grid">
+    <article class="card">
+      <h2>Conteo por estado</h2>
+      <div class="state-list">
+        {{range .EstadoConteos}}
+        <a href="{{.Link}}">
+          <div>{{.Estado}}</div>
+          <span class="badge">{{.Cantidad}}</span>
+        </a>
+        {{end}}
+      </div>
+    </article>
+
+    <article class="card">
+      <h2>Ventas totales por periodo</h2>
+      <div class="bar-chart">
+        {{range .PeriodosTotales}}
+        <div class="bar-row">
+          <div>{{.Label}}</div>
+          <div class="bar"><span style="width: {{printf "%.1f" .Percent}}%;"></span></div>
+        </div>
+        {{end}}
+      </div>
+      <div class="periods">
+        {{range .PeriodosTotales}}
+        <div class="period">
+          <div>{{.Label}}</div>
+          <strong>{{.Total}}</strong>
+          <div class="badge">{{.Range}}</div>
+        </div>
+        {{end}}
+      </div>
+    </article>
+
+    <article class="card">
+      <h2>Ventas por método de pago</h2>
+      <div class="pie-wrap">
+        <svg viewBox="0 0 120 120" width="180" height="180" role="img" aria-label="Ventas por método de pago">
+          <circle cx="60" cy="60" r="45" fill="none" stroke="#eef2ff" stroke-width="16"></circle>
+          {{range .PieSlices}}
+          <circle cx="60" cy="60" r="45" fill="none" stroke="{{.Color}}" stroke-width="16"
+            stroke-dasharray="{{printf "%.2f" .Percent}} {{printf "%.2f" .Gap}}"
+            stroke-dashoffset="{{printf "%.2f" .Offset}}"
+            transform="rotate(-90 60 60)"></circle>
+          {{end}}
+          <text x="60" y="58" text-anchor="middle" font-size="12" fill="#5c647c">Total</text>
+          <text x="60" y="74" text-anchor="middle" font-size="14" font-weight="600" fill="#1c1f2a">{{.PieTotal}}</text>
+        </svg>
+        <div class="pie-legend">
+          {{range .PieSlices}}
+          <div class="legend-item">
+            <span class="legend-dot" style="background: {{.Color}};"></span>
+            <div>{{.Metodo}} · {{printf "%.0f" .Percent}}%</div>
+          </div>
+          {{end}}
+        </div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Método</th>
+            <th>Ventas</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .MetodosPago}}
+          <tr>
+            <td>{{.Metodo}}</td>
+            <td>{{.Cantidad}}</td>
+            <td>{{.Total}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </article>
+
+    <article class="card">
+      <h2>Línea de tiempo (ventas por día)</h2>
+      <svg class="line-chart" viewBox="0 0 560 180" role="img" aria-label="Histórico de ventas">
+        <polyline fill="none" stroke="#2c6bed" stroke-width="3" points="{{.TimelinePoints}}"></polyline>
+      </svg>
+      <div class="timeline-grid">
+        <div>Máximo: {{.MaxTimelineText}}</div>
+        <div>Días visibles: {{len .Timeline}}</div>
+      </div>
+      <table>
+        <thead>
+          <tr>
+            <th>Fecha</th>
+            <th>Ventas</th>
+            <th>Total</th>
+          </tr>
+        </thead>
+        <tbody>
+          {{range .Timeline}}
+          <tr>
+            <td>{{.Fecha}}</td>
+            <td>{{.Cantidad}}</td>
+            <td>{{.Total}}</td>
+          </tr>
+          {{end}}
+        </tbody>
+      </table>
+    </article>
+  </section>
+</body>
+</html>

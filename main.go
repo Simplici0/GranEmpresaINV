@@ -1,11 +1,17 @@
 package main
 
 import (
+	"database/sql"
+	"fmt"
 	"html/template"
 	"log"
 	"net/http"
 	"os"
 	"strconv"
+	"strings"
+	"time"
+
+	_ "modernc.org/sqlite"
 )
 
 type inventoryPageData struct {
@@ -62,6 +68,60 @@ type cambioConfirmData struct {
 	IncomingNewQty      int
 }
 
+type estadoCount struct {
+	Estado   string
+	Cantidad int
+	Link     string
+}
+
+type periodTotal struct {
+	Label   string
+	Total   string
+	Range   string
+	Value   float64
+	Percent float64
+}
+
+type metodoPagoTotal struct {
+	Metodo   string
+	Cantidad int
+	Total    string
+	Value    float64
+}
+
+type timelinePoint struct {
+	Fecha    string
+	Cantidad int
+	Total    string
+	Value    float64
+	Index    int
+	Percent  float64
+}
+
+type pieSlice struct {
+	Metodo  string
+	Total   string
+	Percent float64
+	Offset  float64
+	Gap     float64
+	Color   string
+}
+
+type dashboardData struct {
+	Title           string
+	Subtitle        string
+	EstadoConteos   []estadoCount
+	PeriodosTotales []periodTotal
+	MetodosPago     []metodoPagoTotal
+	PieSlices       []pieSlice
+	PieTotal        string
+	MaxPeriodo      float64
+	MaxTimeline     float64
+	MaxTimelineText string
+	TimelinePoints  string
+	Timeline        []timelinePoint
+}
+
 func findProduct(products []productOption, id string) (productOption, bool) {
 	for _, product := range products {
 		if product.ID == id {
@@ -87,6 +147,162 @@ func buildSalientesMap(salientes []string) map[string]bool {
 	return mapped
 }
 
+func formatCurrency(value float64) string {
+	return fmt.Sprintf("$%.0f", value)
+}
+
+func buildTimelinePoints(timeline []timelinePoint, width, height, padding float64) string {
+	if len(timeline) == 0 {
+		return ""
+	}
+	if len(timeline) == 1 {
+		x := padding
+		y := height - padding - (timeline[0].Percent/100)*(height-2*padding)
+		return fmt.Sprintf("%.1f,%.1f", x, y)
+	}
+	step := (width - 2*padding) / float64(len(timeline)-1)
+	points := make([]string, 0, len(timeline))
+	for i, point := range timeline {
+		x := padding + step*float64(i)
+		y := height - padding - (point.Percent/100)*(height-2*padding)
+		points = append(points, fmt.Sprintf("%.1f,%.1f", x, y))
+	}
+	return strings.Join(points, " ")
+}
+
+func initDB(path string, paymentMethods []string) (*sql.DB, error) {
+	db, err := sql.Open("sqlite", path)
+	if err != nil {
+		return nil, err
+	}
+
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+		return nil, err
+	}
+
+	schema := `
+	CREATE TABLE IF NOT EXISTS ventas (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		producto_id TEXT NOT NULL,
+		cantidad INTEGER NOT NULL,
+		precio_final REAL NOT NULL,
+		metodo_pago TEXT NOT NULL,
+		fecha TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas (fecha);
+	CREATE INDEX IF NOT EXISTS idx_ventas_metodo ON ventas (metodo_pago);
+
+	CREATE TABLE IF NOT EXISTS unidades (
+		id TEXT PRIMARY KEY,
+		producto_id TEXT NOT NULL,
+		estado TEXT NOT NULL,
+		creado_en TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_unidades_estado ON unidades (estado);
+	`
+
+	if _, err := db.Exec(schema); err != nil {
+		return nil, err
+	}
+
+	var ventasCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM ventas").Scan(&ventasCount); err != nil {
+		return nil, err
+	}
+
+	if ventasCount == 0 {
+		if err := seedVentas(db, paymentMethods); err != nil {
+			return nil, err
+		}
+	}
+
+	var unidadesCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM unidades").Scan(&unidadesCount); err != nil {
+		return nil, err
+	}
+
+	if unidadesCount == 0 {
+		if err := seedUnidades(db); err != nil {
+			return nil, err
+		}
+	}
+
+	return db, nil
+}
+
+func seedVentas(db *sql.DB, paymentMethods []string) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`INSERT INTO ventas (producto_id, cantidad, precio_final, metodo_pago, fecha)
+		VALUES (?, ?, ?, ?, ?)`)
+	if err != nil {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			return fmt.Errorf("prepare ventas: %w (rollback: %v)", err, rollbackErr)
+		}
+		return err
+	}
+	defer stmt.Close()
+
+	baseDate := time.Now()
+	products := []string{"P-001", "P-002", "P-003"}
+	for i := 0; i < 14; i++ {
+		date := baseDate.AddDate(0, 0, -i).Format("2006-01-02")
+		entries := (i % 3) + 2
+		for j := 0; j < entries; j++ {
+			productoID := products[(i+j)%len(products)]
+			cantidad := (j % 3) + 1
+			precio := float64(18000 + (i * 1200) + (j * 800))
+			metodo := paymentMethods[(i+j)%len(paymentMethods)]
+			if _, err := stmt.Exec(productoID, cantidad, precio, metodo, date); err != nil {
+				if rollbackErr := tx.Rollback(); rollbackErr != nil {
+					return fmt.Errorf("insert ventas: %w (rollback: %v)", err, rollbackErr)
+				}
+				return err
+			}
+		}
+	}
+
+	return tx.Commit()
+}
+
+func seedUnidades(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`INSERT INTO unidades (id, producto_id, estado, creado_en)
+		VALUES (?, ?, ?, ?)`)
+	if err != nil {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			return fmt.Errorf("prepare unidades: %w (rollback: %v)", err, rollbackErr)
+		}
+		return err
+	}
+	defer stmt.Close()
+
+	statuses := []string{"Disponible", "Vendida", "Cambio"}
+	products := []string{"P-001", "P-002", "P-003"}
+	now := time.Now().Format(time.RFC3339)
+	for i := 1; i <= 36; i++ {
+		id := fmt.Sprintf("U-%03d", i)
+		productoID := products[i%len(products)]
+		estado := statuses[i%len(statuses)]
+		if _, err := stmt.Exec(id, productoID, estado, now); err != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				return fmt.Errorf("insert unidades: %w (rollback: %v)", err, rollbackErr)
+			}
+			return err
+		}
+	}
+
+	return tx.Commit()
+}
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -94,6 +310,7 @@ func main() {
 	}
 
 	tmpl := template.Must(template.ParseFiles(
+		"templates/dashboard.html",
 		"templates/inventario.html",
 		"templates/venta_new.html",
 		"templates/venta_confirm.html",
@@ -102,6 +319,12 @@ func main() {
 	))
 
 	paymentMethods := []string{"Efectivo", "Transferencia", "Tarjeta", "Nequi", "Daviplata", "Bre-B"}
+
+	db, err := initDB("data.db", paymentMethods)
+	if err != nil {
+		log.Fatalf("Error al abrir SQLite: %v", err)
+	}
+	defer db.Close()
 
 	products := []productOption{
 		{
@@ -144,6 +367,186 @@ func main() {
 		MetodoPago  string
 		Notas       string
 	}
+
+	http.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
+		estadoRows, err := db.Query(`
+			SELECT estado, COUNT(*)
+			FROM unidades
+			GROUP BY estado
+			ORDER BY estado`)
+		if err != nil {
+			http.Error(w, "Error al consultar estados", http.StatusInternalServerError)
+			return
+		}
+		defer estadoRows.Close()
+
+		estadoConteos := []estadoCount{}
+		for estadoRows.Next() {
+			var estado string
+			var cantidad int
+			if err := estadoRows.Scan(&estado, &cantidad); err != nil {
+				http.Error(w, "Error al leer estados", http.StatusInternalServerError)
+				return
+			}
+			estadoConteos = append(estadoConteos, estadoCount{
+				Estado:   estado,
+				Cantidad: cantidad,
+				Link:     "/inventario?estado=" + estado,
+			})
+		}
+		if err := estadoRows.Err(); err != nil {
+			http.Error(w, "Error al procesar estados", http.StatusInternalServerError)
+			return
+		}
+
+		var hoyTotal, semanaTotal, mesTotal float64
+		err = db.QueryRow(`
+			SELECT
+				COALESCE(SUM(CASE WHEN fecha = date('now') THEN precio_final END), 0),
+				COALESCE(SUM(CASE WHEN fecha >= date('now','-6 days') THEN precio_final END), 0),
+				COALESCE(SUM(CASE WHEN fecha >= date('now','start of month') THEN precio_final END), 0)
+			FROM ventas`).Scan(&hoyTotal, &semanaTotal, &mesTotal)
+		if err != nil {
+			http.Error(w, "Error al consultar ventas", http.StatusInternalServerError)
+			return
+		}
+
+		periodosTotales := []periodTotal{
+			{Label: "Hoy", Total: formatCurrency(hoyTotal), Range: "Ventas del día", Value: hoyTotal},
+			{Label: "Últimos 7 días", Total: formatCurrency(semanaTotal), Range: "Acumulado semanal", Value: semanaTotal},
+			{Label: "Mes actual", Total: formatCurrency(mesTotal), Range: "Acumulado del mes", Value: mesTotal},
+		}
+		maxPeriodo := 0.0
+		for _, periodo := range periodosTotales {
+			if periodo.Value > maxPeriodo {
+				maxPeriodo = periodo.Value
+			}
+		}
+		if maxPeriodo > 0 {
+			for i := range periodosTotales {
+				periodosTotales[i].Percent = (periodosTotales[i].Value / maxPeriodo) * 100
+			}
+		}
+
+		metodoRows, err := db.Query(`
+			SELECT metodo_pago, COUNT(*), SUM(precio_final)
+			FROM ventas
+			GROUP BY metodo_pago
+			ORDER BY SUM(precio_final) DESC`)
+		if err != nil {
+			http.Error(w, "Error al consultar métodos de pago", http.StatusInternalServerError)
+			return
+		}
+		defer metodoRows.Close()
+
+		metodosPago := []metodoPagoTotal{}
+		totalPago := 0.0
+		for metodoRows.Next() {
+			var metodo string
+			var cantidad int
+			var total float64
+			if err := metodoRows.Scan(&metodo, &cantidad, &total); err != nil {
+				http.Error(w, "Error al leer métodos de pago", http.StatusInternalServerError)
+				return
+			}
+			metodosPago = append(metodosPago, metodoPagoTotal{
+				Metodo:   metodo,
+				Cantidad: cantidad,
+				Total:    formatCurrency(total),
+				Value:    total,
+			})
+			totalPago += total
+		}
+		if err := metodoRows.Err(); err != nil {
+			http.Error(w, "Error al procesar métodos de pago", http.StatusInternalServerError)
+			return
+		}
+
+		pieColors := []string{"#2c6bed", "#7d4cf6", "#22a88b", "#f5a524", "#e5484d", "#14b8a6"}
+		pieSlices := []pieSlice{}
+		offset := 25.0
+		for i, metodo := range metodosPago {
+			percent := 0.0
+			if totalPago > 0 {
+				percent = (metodo.Value / totalPago) * 100
+			}
+			gap := 100 - percent
+			color := pieColors[i%len(pieColors)]
+			pieSlices = append(pieSlices, pieSlice{
+				Metodo:  metodo.Metodo,
+				Total:   metodo.Total,
+				Percent: percent,
+				Offset:  offset,
+				Gap:     gap,
+				Color:   color,
+			})
+			offset -= percent
+		}
+
+		timeRows, err := db.Query(`
+			SELECT fecha, COUNT(*), SUM(precio_final)
+			FROM ventas
+			WHERE fecha >= date('now','-13 days')
+			GROUP BY fecha
+			ORDER BY fecha`)
+		if err != nil {
+			http.Error(w, "Error al consultar timeline", http.StatusInternalServerError)
+			return
+		}
+		defer timeRows.Close()
+
+		timeline := []timelinePoint{}
+		maxTimeline := 0.0
+		index := 0
+		for timeRows.Next() {
+			var fecha string
+			var cantidad int
+			var total float64
+			if err := timeRows.Scan(&fecha, &cantidad, &total); err != nil {
+				http.Error(w, "Error al leer timeline", http.StatusInternalServerError)
+				return
+			}
+			timeline = append(timeline, timelinePoint{
+				Fecha:    fecha,
+				Cantidad: cantidad,
+				Total:    formatCurrency(total),
+				Value:    total,
+				Index:    index,
+			})
+			if total > maxTimeline {
+				maxTimeline = total
+			}
+			index++
+		}
+		if err := timeRows.Err(); err != nil {
+			http.Error(w, "Error al procesar timeline", http.StatusInternalServerError)
+			return
+		}
+		if maxTimeline > 0 {
+			for i := range timeline {
+				timeline[i].Percent = (timeline[i].Value / maxTimeline) * 100
+			}
+		}
+
+		data := dashboardData{
+			Title:           "Dashboard SSR",
+			Subtitle:        "Resumen agregado de inventario y ventas.",
+			EstadoConteos:   estadoConteos,
+			PeriodosTotales: periodosTotales,
+			MetodosPago:     metodosPago,
+			PieSlices:       pieSlices,
+			PieTotal:        formatCurrency(totalPago),
+			MaxPeriodo:      maxPeriodo,
+			MaxTimeline:     maxTimeline,
+			MaxTimelineText: formatCurrency(maxTimeline),
+			TimelinePoints:  buildTimelinePoints(timeline, 560, 180, 24),
+			Timeline:        timeline,
+		}
+
+		if err := tmpl.ExecuteTemplate(w, "dashboard.html", data); err != nil {
+			http.Error(w, "Error al renderizar el dashboard", http.StatusInternalServerError)
+		}
+	})
 
 	http.HandleFunc("/inventario", func(w http.ResponseWriter, r *http.Request) {
 		flash := r.URL.Query().Get("mensaje")
