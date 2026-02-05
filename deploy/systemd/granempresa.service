@@ -1,0 +1,17 @@
+[Unit]
+Description=GranEmpresa inventory service
+After=network.target
+
+[Service]
+Type=simple
+User=granempresa
+Group=granempresa
+WorkingDirectory=/srv/granempresa/app
+Environment=PORT=8080
+Environment=DB_PATH=/srv/granempresa/data/data.db
+ExecStart=/srv/granempresa/app/granempresa
+Restart=on-failure
+RestartSec=5
+
+[Install]
+WantedBy=multi-user.target

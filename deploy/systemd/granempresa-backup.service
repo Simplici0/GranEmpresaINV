@@ -1,0 +1,11 @@
+[Unit]
+Description=Backup SQLite database for GranEmpresa
+
+[Service]
+Type=oneshot
+User=granempresa
+Group=granempresa
+Environment=DB_PATH=/srv/granempresa/data/data.db
+Environment=BACKUP_DIR=/srv/granempresa/backups
+Environment=KEEP_DAYS=14
+ExecStart=/srv/granempresa/scripts/backup_db.sh
