@@ -1,0 +1,126 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{.Title}}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7fb;
+      --card: #ffffff;
+      --text: #1c1f2a;
+      --muted: #5c647c;
+      --primary: #2c6bed;
+      --success: #1aa36f;
+      --border: #d9dfea;
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: "Inter", "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      padding: 24px;
+    }
+
+    .card {
+      max-width: 640px;
+      margin: 0 auto;
+      background: var(--card);
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      padding: 24px;
+      box-shadow: 0 12px 30px rgba(30, 41, 59, 0.08);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+    }
+
+    p {
+      margin: 0 0 16px;
+      color: var(--muted);
+    }
+
+    .summary {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      background: #f9fafc;
+      display: grid;
+      gap: 8px;
+    }
+
+    .summary div {
+      display: flex;
+      justify-content: space-between;
+      font-size: 14px;
+    }
+
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      background: #e9f7f1;
+      color: var(--success);
+      font-weight: 600;
+      padding: 6px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+    }
+
+    a.button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 10px 16px;
+      border-radius: 10px;
+      background: var(--primary);
+      color: white;
+      text-decoration: none;
+      font-weight: 600;
+      margin-top: 16px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <span class="badge">Venta registrada</span>
+    <h1>{{.Title}}</h1>
+    <p>La venta se registró en el flujo SSR (sin persistencia).</p>
+
+    <div class="summary">
+      <div>
+        <strong>Producto</strong>
+        <span>{{.ProductoID}}</span>
+      </div>
+      <div>
+        <strong>Cantidad</strong>
+        <span>{{.Cantidad}}</span>
+      </div>
+      <div>
+        <strong>Precio final unidad</strong>
+        <span>{{.PrecioFinal}}</span>
+      </div>
+      <div>
+        <strong>Método de pago</strong>
+        <span>{{.MetodoPago}}</span>
+      </div>
+      {{if .Notas}}
+        <div>
+          <strong>Notas</strong>
+          <span>{{.Notas}}</span>
+        </div>
+      {{end}}
+    </div>
+
+    <a class="button" href="/inventario?mensaje=Venta%20registrada%20correctamente">Volver a inventario</a>
+  </div>
+</body>
+</html>

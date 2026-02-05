@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{.Title}}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f6f7fb;
+      --card: #ffffff;
+      --text: #1c1f2a;
+      --muted: #5c647c;
+      --primary: #2c6bed;
+      --danger: #e5484d;
+      --border: #d9dfea;
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: "Inter", "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      padding: 24px;
+    }
+
+    .card {
+      max-width: 720px;
+      margin: 0 auto;
+      background: var(--card);
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      padding: 24px;
+      box-shadow: 0 12px 30px rgba(30, 41, 59, 0.08);
+    }
+
+    h1 {
+      margin: 0 0 8px;
+      font-size: 24px;
+    }
+
+    p {
+      margin: 0 0 16px;
+      color: var(--muted);
+    }
+
+    form {
+      display: grid;
+      gap: 16px;
+    }
+
+    label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    input,
+    select,
+    textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      font-size: 14px;
+    }
+
+    textarea {
+      min-height: 120px;
+      resize: vertical;
+    }
+
+    .row {
+      display: grid;
+      gap: 16px;
+      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+    }
+
+    .actions {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    button,
+    a.button {
+      border: none;
+      padding: 10px 16px;
+      border-radius: 10px;
+      font-weight: 600;
+      cursor: pointer;
+      text-decoration: none;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+    }
+
+    button.primary {
+      background: var(--primary);
+      color: white;
+    }
+
+    .secondary {
+      background: #e7ebf6;
+      color: #2a335a;
+    }
+
+    .error {
+      color: var(--danger);
+      font-size: 12px;
+      margin-top: 6px;
+    }
+  </style>
+</head>
+<body>
+  <div class="card">
+    <h1>{{.Title}}</h1>
+    <p>Completa los datos de venta desde inventario.</p>
+
+    <form action="/venta" method="POST">
+      <div class="row">
+        <div>
+          <label for="producto_id">Producto</label>
+          <input id="producto_id" name="producto_id" type="text" value="{{.ProductoID}}" readonly />
+          {{with index .Errors "producto_id"}}
+            <div class="error">{{.}}</div>
+          {{end}}
+        </div>
+        <div>
+          <label for="cantidad">Cantidad</label>
+          <input id="cantidad" name="cantidad" type="number" min="1" value="{{.Cantidad}}" />
+          {{with index .Errors "cantidad"}}
+            <div class="error">{{.}}</div>
+          {{end}}
+        </div>
+      </div>
+
+      <div class="row">
+        <div>
+          <label for="precio_final_venta">Precio final de venta (unidad)</label>
+          <input id="precio_final_venta" name="precio_final_venta" type="number" step="0.01" min="0" placeholder="0.00" value="{{.PrecioFinal}}" />
+          {{with index .Errors "precio_final_venta"}}
+            <div class="error">{{.}}</div>
+          {{end}}
+        </div>
+        <div>
+          <label for="metodo_pago">Método de pago</label>
+          <select id="metodo_pago" name="metodo_pago">
+            {{range .MetodoPagos}}
+              <option value="{{.}}" {{if eq $.MetodoPago .}}selected{{end}}>{{.}}</option>
+            {{end}}
+          </select>
+          {{with index .Errors "metodo_pago"}}
+            <div class="error">{{.}}</div>
+          {{end}}
+        </div>
+      </div>
+
+      <div>
+        <label for="notas">Notas</label>
+        <textarea id="notas" name="notas" placeholder="Observaciones de la venta">{{.Notas}}</textarea>
+      </div>
+
+      <div class="actions">
+        <button class="primary" type="submit">Confirmar venta</button>
+        <a class="button secondary" href="/inventario">Volver a inventario</a>
+      </div>
+    </form>
+  </div>
+</body>
+</html>
