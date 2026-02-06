@@ -109,6 +109,24 @@ sudo systemctl reload caddy
 - El backup diario se ejecuta con `VACUUM INTO` y genera archivos timestamped en `/srv/granempresa/backups`.
 - Se conserva la cantidad de días definida por `KEEP_DAYS` (por defecto 14) y se rota automáticamente.
 
+## 7.1) Usuario administrador inicial
+
+Al iniciar la aplicación se crea un usuario administrador si no existe, leyendo las variables de entorno:
+
+```bash
+ADMIN_USER=admin
+ADMIN_PASS=SuperSecreto123
+```
+
+Ejemplo en systemd (editar `/etc/systemd/system/granempresa.service`):
+
+```ini
+Environment=ADMIN_USER=admin
+Environment=ADMIN_PASS=SuperSecreto123
+```
+
+> Si ya existe un usuario con ese `username`, no se vuelve a crear.
+
 ### Ejecutar backup manual
 
 ```bash

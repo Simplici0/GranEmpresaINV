@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{.Title}}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #faf9f7;
+      --card: #ffffff;
+      --text: #2a2826;
+      --muted: #6b6560;
+      --primary: #e85d3c;
+      --border: #e8e4df;
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: "Inter", "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    header {
+      padding: 24px 32px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .user-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .role-pill {
+      background: #f4f6fb;
+      color: #2054c6;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .logout-button {
+      border: 1px solid var(--primary);
+      background: var(--card);
+      color: var(--primary);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .logout-button:hover {
+      background: var(--primary);
+      color: var(--card);
+    }
+
+    .nav-buttons {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .nav-button {
+      display: inline-block;
+      padding: 8px 16px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s ease;
+      border: 1px solid var(--primary);
+      background: var(--card);
+      color: var(--primary);
+      cursor: pointer;
+    }
+
+    .nav-button:hover {
+      background: var(--primary);
+      color: var(--card);
+    }
+
+    main {
+      padding: 0 32px 32px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--card);
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    th, td {
+      text-align: left;
+      padding: 12px 16px;
+      border-bottom: 1px solid var(--border);
+      font-size: 14px;
+    }
+
+    th {
+      background: #f4f6fb;
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .status-pill {
+      display: inline-flex;
+      align-items: center;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      background: #e9f7f1;
+      color: #2d9d78;
+    }
+
+    .status-pill.inactive {
+      background: #fff1f1;
+      color: #d64545;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-top">
+      <div>
+        <h1>{{.Title}}</h1>
+        <p>{{.Subtitle}}</p>
+      </div>
+      {{if .CurrentUser}}
+      <div class="user-bar">
+        <span>{{.CurrentUser.Username}}</span>
+        <span class="role-pill">{{.CurrentUser.Role}}</span>
+        <form method="POST" action="/logout">
+          <button class="logout-button" type="submit">Cerrar sesión</button>
+        </form>
+      </div>
+      {{end}}
+    </div>
+    <div class="nav-buttons">
+      <a href="/inventario" class="nav-button">Ver inventario</a>
+      <a href="/dashboard" class="nav-button">Ver dashboard</a>
+      <a href="/productos/new" class="nav-button">Nuevo producto</a>
+      <a href="/admin/users" class="nav-button">Usuarios</a>
+      <a href="/csv/template" class="nav-button" target="_blank">Plantilla CSV</a>
+      <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
+    </div>
+  </header>
+
+  <main>
+    <table>
+      <thead>
+        <tr>
+          <th>ID</th>
+          <th>Usuario</th>
+          <th>Rol</th>
+          <th>Estado</th>
+          <th>Creado</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Users}}
+        <tr>
+          <td>{{.ID}}</td>
+          <td>{{.Username}}</td>
+          <td>{{.Role}}</td>
+          <td>
+            {{if .IsActive}}
+              <span class="status-pill">Activo</span>
+            {{else}}
+              <span class="status-pill inactive">Inactivo</span>
+            {{end}}
+          </td>
+          <td>{{.CreatedAt}}</td>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>

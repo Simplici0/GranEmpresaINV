@@ -87,10 +87,64 @@
       font-weight: 600;
       margin-top: 16px;
     }
+
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-bottom: 12px;
+    }
+
+    .user-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .role-pill {
+      background: #f4f6fb;
+      color: #2054c6;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .logout-button {
+      border: 1px solid var(--primary);
+      background: var(--card);
+      color: var(--primary);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .logout-button:hover {
+      background: var(--primary);
+      color: var(--card);
+    }
   </style>
 </head>
 <body>
   <div class="card">
+    {{if .CurrentUser}}
+    <div class="header-top">
+      <div class="user-bar">
+        <span>{{.CurrentUser.Username}}</span>
+        <span class="role-pill">{{.CurrentUser.Role}}</span>
+      </div>
+      <form method="POST" action="/logout">
+        <button class="logout-button" type="submit">Cerrar sesión</button>
+      </form>
+    </div>
+    {{end}}
     <span class="badge">Venta registrada</span>
     <h1>{{.Title}}</h1>
     <p>La venta se registró en el flujo SSR (sin persistencia).</p>
