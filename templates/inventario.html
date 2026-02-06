@@ -515,8 +515,11 @@
       <a href="/dashboard" class="nav-button">Ver dashboard</a>
       <a href="/venta/new" class="nav-button">Registrar venta</a>
       <a href="/cambio/new" class="nav-button">Registrar cambio</a>
-      <a href="/csv/template" class="nav-button" target="_blank">Plantilla CSV</a>
-      <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
+      {{if .IsAdmin}}
+        <a href="/csv/template" class="nav-button" target="_blank">Plantilla CSV</a>
+        <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
+        <a href="/admin/users" class="nav-button">Usuarios</a>
+      {{end}}
     </div>
     {{if .Flash}}
       <div class="flash">{{.Flash}}</div>

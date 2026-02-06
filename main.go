@@ -1,7 +1,11 @@
 package main
 
 import (
+	"crypto/rand"
+	"crypto/sha256"
 	"database/sql"
+	"encoding/hex"
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -15,10 +19,12 @@ import (
 )
 
 type inventoryPageData struct {
-	Title       string
-	Subtitle    string
-	RoutePrefix string
-	Flash       string
+	Title           string
+	Subtitle        string
+	RoutePrefix     string
+	Flash           string
+	CurrentUserName string
+	IsAdmin         bool
 }
 
 type unitOption struct {
@@ -49,6 +55,7 @@ type cambioFormData struct {
 	IncomingNewLine     string
 	IncomingNewQty      int
 	Errors              map[string]string
+	IsAdmin             bool
 }
 
 type cambioConfirmData struct {
@@ -120,6 +127,37 @@ type dashboardData struct {
 	MaxTimelineText string
 	TimelinePoints  string
 	Timeline        []timelinePoint
+	IsAdmin         bool
+}
+
+type adminUsersListData struct {
+	Title string
+	Users []appUser
+	Flash string
+}
+
+type adminUserFormData struct {
+	Title       string
+	User        appUser
+	Errors      map[string]string
+	Flash       string
+	NewPassword string
+}
+
+type appUser struct {
+	ID           int
+	Name         string
+	Email        string
+	Role         string
+	Active       bool
+	PasswordHash string
+	PasswordSalt string
+}
+
+type authResult struct {
+	User   *appUser
+	Status int
+	Err    error
 }
 
 func findProduct(products []productOption, id string) (productOption, bool) {
@@ -170,6 +208,136 @@ func buildTimelinePoints(timeline []timelinePoint, width, height, padding float6
 	return strings.Join(points, " ")
 }
 
+func createUser(db *sql.DB, name, email, role, password string, active bool) (*appUser, error) {
+	if name == "" || email == "" || role == "" {
+		return nil, errors.New("missing fields")
+	}
+	if role != "admin" && role != "employee" {
+		return nil, errors.New("invalid role")
+	}
+	salt, err := generateSalt()
+	if err != nil {
+		return nil, err
+	}
+	passwordHash := hashPassword(password, salt)
+	activeValue := 0
+	if active {
+		activeValue = 1
+	}
+	now := time.Now().Format(time.RFC3339)
+	result, err := db.Exec(`INSERT INTO users (name, email, role, active, password_hash, password_salt, created_at)
+		VALUES (?, ?, ?, ?, ?, ?, ?)`, name, email, role, activeValue, passwordHash, salt, now)
+	if err != nil {
+		return nil, err
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		return nil, err
+	}
+	return &appUser{
+		ID:           int(id),
+		Name:         name,
+		Email:        email,
+		Role:         role,
+		Active:       active,
+		PasswordHash: passwordHash,
+		PasswordSalt: salt,
+	}, nil
+}
+
+func getUserByEmail(db *sql.DB, email string) (*appUser, error) {
+	row := db.QueryRow(`SELECT id, name, email, role, active, password_hash, password_salt
+		FROM users WHERE email = ?`, email)
+	var user appUser
+	var activeValue int
+	if err := row.Scan(&user.ID, &user.Name, &user.Email, &user.Role, &activeValue, &user.PasswordHash, &user.PasswordSalt); err != nil {
+		return nil, err
+	}
+	user.Active = activeValue == 1
+	return &user, nil
+}
+
+func getUserByID(db *sql.DB, id int) (*appUser, error) {
+	row := db.QueryRow(`SELECT id, name, email, role, active, password_hash, password_salt
+		FROM users WHERE id = ?`, id)
+	var user appUser
+	var activeValue int
+	if err := row.Scan(&user.ID, &user.Name, &user.Email, &user.Role, &activeValue, &user.PasswordHash, &user.PasswordSalt); err != nil {
+		return nil, err
+	}
+	user.Active = activeValue == 1
+	return &user, nil
+}
+
+func authenticateUser(r *http.Request, db *sql.DB) authResult {
+	email, password, ok := r.BasicAuth()
+	if !ok || email == "" || password == "" {
+		return authResult{Status: http.StatusUnauthorized, Err: errors.New("missing credentials")}
+	}
+	user, err := getUserByEmail(db, email)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return authResult{Status: http.StatusUnauthorized, Err: errors.New("invalid credentials")}
+		}
+		return authResult{Status: http.StatusInternalServerError, Err: err}
+	}
+	if hashPassword(password, user.PasswordSalt) != user.PasswordHash {
+		return authResult{Status: http.StatusUnauthorized, Err: errors.New("invalid credentials")}
+	}
+	if !user.Active {
+		return authResult{Status: http.StatusForbidden, Err: errors.New("user inactive")}
+	}
+	return authResult{User: user, Status: http.StatusOK}
+}
+
+func withAuth(db *sql.DB, allowedRoles []string, handler func(http.ResponseWriter, *http.Request, *appUser)) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		result := authenticateUser(r, db)
+		if result.Status != http.StatusOK {
+			if result.Status == http.StatusUnauthorized {
+				w.Header().Set("WWW-Authenticate", `Basic realm="GranEmpresa"`)
+			}
+			http.Error(w, "Acceso no autorizado", result.Status)
+			return
+		}
+		if len(allowedRoles) > 0 && !roleAllowed(result.User.Role, allowedRoles) {
+			http.Error(w, "No autorizado para esta acción", http.StatusForbidden)
+			return
+		}
+		handler(w, r, result.User)
+	}
+}
+
+func generateSalt() (string, error) {
+	bytes := make([]byte, 16)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
+}
+
+func hashPassword(password, salt string) string {
+	sum := sha256.Sum256([]byte(salt + password))
+	return hex.EncodeToString(sum[:])
+}
+
+func randomPassword() (string, error) {
+	bytes := make([]byte, 6)
+	if _, err := rand.Read(bytes); err != nil {
+		return "", err
+	}
+	return hex.EncodeToString(bytes), nil
+}
+
+func roleAllowed(role string, allowed []string) bool {
+	for _, allowedRole := range allowed {
+		if role == allowedRole {
+			return true
+		}
+	}
+	return false
+}
+
 func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -202,6 +370,17 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 		creado_en TEXT NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS idx_unidades_estado ON unidades (estado);
+
+	CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		name TEXT NOT NULL,
+		email TEXT NOT NULL UNIQUE,
+		role TEXT NOT NULL,
+		active INTEGER NOT NULL DEFAULT 1,
+		password_hash TEXT NOT NULL,
+		password_salt TEXT NOT NULL,
+		created_at TEXT NOT NULL
+	);
 	`
 
 	if _, err := db.Exec(schema); err != nil {
@@ -226,6 +405,19 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 
 	if unidadesCount == 0 {
 		if err := seedUnidades(db); err != nil {
+			return nil, err
+		}
+	}
+
+	var usersCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM users").Scan(&usersCount); err != nil {
+		return nil, err
+	}
+	if usersCount == 0 {
+		if _, err := createUser(db, "Administrador", "admin@granempresa.local", "admin", "admin123", true); err != nil {
+			return nil, err
+		}
+		if _, err := createUser(db, "Empleado", "empleado@granempresa.local", "employee", "empleado123", true); err != nil {
 			return nil, err
 		}
 	}
@@ -322,6 +514,9 @@ func main() {
 		"templates/cambio_confirm.html",
 		"templates/csv_template.html",
 		"templates/csv_export.html",
+		"templates/admin_users_list.html",
+		"templates/admin_users_new.html",
+		"templates/admin_users_edit.html",
 	))
 
 	paymentMethods := []string{"Efectivo", "Transferencia", "Tarjeta", "Nequi", "Daviplata", "Bre-B"}
@@ -363,6 +558,7 @@ func main() {
 		Errors      map[string]string
 		MetodoPagos []string
 		RoutePrefix string
+		IsAdmin     bool
 	}
 
 	type ventaConfirmData struct {
@@ -374,7 +570,7 @@ func main() {
 		Notas       string
 	}
 
-	http.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/dashboard", withAuth(db, []string{"admin", "employee"}, func(w http.ResponseWriter, r *http.Request, user *appUser) {
 		estadoRows, err := db.Query(`
 			SELECT estado, COUNT(*)
 			FROM unidades
@@ -547,27 +743,30 @@ func main() {
 			MaxTimelineText: formatCurrency(maxTimeline),
 			TimelinePoints:  buildTimelinePoints(timeline, 560, 180, 24),
 			Timeline:        timeline,
+			IsAdmin:         user.Role == "admin",
 		}
 
 		if err := tmpl.ExecuteTemplate(w, "dashboard.html", data); err != nil {
 			http.Error(w, "Error al renderizar el dashboard", http.StatusInternalServerError)
 		}
-	})
+	}))
 
-	http.HandleFunc("/inventario", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/inventario", withAuth(db, []string{"admin", "employee"}, func(w http.ResponseWriter, r *http.Request, user *appUser) {
 		flash := r.URL.Query().Get("mensaje")
 		data := inventoryPageData{
-			Title:       "Pantalla Inventario (por producto)",
-			Subtitle:    "Control por producto con ventas, cambios y auditoría de unidades en FIFO.",
-			RoutePrefix: "",
-			Flash:       flash,
+			Title:           "Pantalla Inventario (por producto)",
+			Subtitle:        "Control por producto con ventas, cambios y auditoría de unidades en FIFO.",
+			RoutePrefix:     "",
+			Flash:           flash,
+			CurrentUserName: user.Name,
+			IsAdmin:         user.Role == "admin",
 		}
 		if err := tmpl.ExecuteTemplate(w, "inventario.html", data); err != nil {
 			http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
 		}
-	})
+	}))
 
-	http.HandleFunc("/venta/new", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/venta/new", withAuth(db, []string{"admin", "employee"}, func(w http.ResponseWriter, r *http.Request, user *appUser) {
 		productID := r.URL.Query().Get("producto_id")
 		cantidad := 1
 		if qty := r.URL.Query().Get("cantidad"); qty != "" {
@@ -582,14 +781,15 @@ func main() {
 			Cantidad:    cantidad,
 			MetodoPago:  paymentMethods[0],
 			MetodoPagos: paymentMethods,
+			IsAdmin:     user.Role == "admin",
 		}
 
 		if err := tmpl.ExecuteTemplate(w, "venta_new.html", data); err != nil {
 			http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
 		}
-	})
+	}))
 
-	http.HandleFunc("/cambio/new", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/cambio/new", withAuth(db, []string{"admin", "employee"}, func(w http.ResponseWriter, r *http.Request, user *appUser) {
 		productID := r.URL.Query().Get("producto_id")
 		if productID == "" {
 			productID = products[0].ID
@@ -622,14 +822,15 @@ func main() {
 			IncomingMode:        "existing",
 			IncomingExistingID:  products[0].ID,
 			IncomingExistingQty: cantidad,
+			IsAdmin:             user.Role == "admin",
 		}
 
 		if err := tmpl.ExecuteTemplate(w, "cambio_new.html", data); err != nil {
 			http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
 		}
-	})
+	}))
 
-	http.HandleFunc("/venta", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/venta", withAuth(db, []string{"admin", "employee"}, func(w http.ResponseWriter, r *http.Request, user *appUser) {
 		if r.Method != http.MethodPost {
 			http.Redirect(w, r, "/venta/new", http.StatusSeeOther)
 			return
@@ -681,6 +882,7 @@ func main() {
 				Notas:       notas,
 				Errors:      errors,
 				MetodoPagos: paymentMethods,
+				IsAdmin:     user.Role == "admin",
 			}
 			w.WriteHeader(http.StatusBadRequest)
 			if err := tmpl.ExecuteTemplate(w, "venta_new.html", data); err != nil {
@@ -700,9 +902,9 @@ func main() {
 		if err := tmpl.ExecuteTemplate(w, "venta_confirm.html", confirmData); err != nil {
 			http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
 		}
-	})
+	}))
 
-	http.HandleFunc("/cambio", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/cambio", withAuth(db, []string{"admin", "employee"}, func(w http.ResponseWriter, r *http.Request, user *appUser) {
 		if r.Method != http.MethodPost {
 			http.Redirect(w, r, "/cambio/new", http.StatusSeeOther)
 			return
@@ -769,6 +971,9 @@ func main() {
 		if incomingMode != "existing" && incomingMode != "new" {
 			errors["incoming_mode"] = "Selecciona el tipo de entrada."
 		}
+		if incomingMode == "new" && user.Role != "admin" {
+			errors["incoming_mode"] = "Solo administración puede crear productos nuevos."
+		}
 
 		if incomingMode == "existing" {
 			if incomingExistingID == "" {
@@ -807,6 +1012,7 @@ func main() {
 				IncomingNewLine:     incomingNewLine,
 				IncomingNewQty:      incomingNewQty,
 				Errors:              errors,
+				IsAdmin:             user.Role == "admin",
 			}
 			w.WriteHeader(http.StatusBadRequest)
 			if err := tmpl.ExecuteTemplate(w, "cambio_new.html", data); err != nil {
@@ -842,9 +1048,9 @@ func main() {
 		if err := tmpl.ExecuteTemplate(w, "cambio_confirm.html", confirmData); err != nil {
 			http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
 		}
-	})
+	}))
 
-	http.HandleFunc("/csv/template", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/csv/template", withAuth(db, []string{"admin"}, func(w http.ResponseWriter, r *http.Request, user *appUser) {
 		if err := tmpl.ExecuteTemplate(w, "csv_template.html", struct {
 			Title string
 		}{
@@ -852,9 +1058,9 @@ func main() {
 		}); err != nil {
 			http.Error(w, "Error al renderizar plantilla CSV", http.StatusInternalServerError)
 		}
-	})
+	}))
 
-	http.HandleFunc("/csv/export", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/csv/export", withAuth(db, []string{"admin"}, func(w http.ResponseWriter, r *http.Request, user *appUser) {
 		if err := tmpl.ExecuteTemplate(w, "csv_export.html", struct {
 			Title string
 		}{
@@ -862,7 +1068,220 @@ func main() {
 		}); err != nil {
 			http.Error(w, "Error al renderizar exportaciones CSV", http.StatusInternalServerError)
 		}
-	})
+	}))
+
+	http.HandleFunc("/admin/users", withAuth(db, []string{"admin"}, func(w http.ResponseWriter, r *http.Request, user *appUser) {
+		if r.Method == http.MethodPost {
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "No se pudo leer el formulario", http.StatusBadRequest)
+				return
+			}
+			name := strings.TrimSpace(r.FormValue("name"))
+			email := strings.TrimSpace(r.FormValue("email"))
+			role := r.FormValue("role")
+			password := r.FormValue("password")
+
+			errors := make(map[string]string)
+			if name == "" {
+				errors["name"] = "El nombre es obligatorio."
+			}
+			if email == "" || !strings.Contains(email, "@") {
+				errors["email"] = "Ingresa un email válido."
+			}
+			if role != "admin" && role != "employee" {
+				errors["role"] = "Selecciona un rol válido."
+			}
+
+			if len(errors) > 0 {
+				w.WriteHeader(http.StatusBadRequest)
+				if err := tmpl.ExecuteTemplate(w, "admin_users_new.html", adminUserFormData{
+					Title:  "Nuevo usuario",
+					User:   appUser{Name: name, Email: email, Role: role, Active: true},
+					Errors: errors,
+				}); err != nil {
+					http.Error(w, "Error al renderizar formulario", http.StatusInternalServerError)
+				}
+				return
+			}
+
+			newPassword := ""
+			if password == "" {
+				generated, err := randomPassword()
+				if err != nil {
+					http.Error(w, "No se pudo generar la contraseña", http.StatusInternalServerError)
+					return
+				}
+				password = generated
+				newPassword = generated
+			}
+
+			if _, err := createUser(db, name, email, role, password, true); err != nil {
+				errors["form"] = "No se pudo crear el usuario. Verifica que el email no esté duplicado."
+				w.WriteHeader(http.StatusBadRequest)
+				if err := tmpl.ExecuteTemplate(w, "admin_users_new.html", adminUserFormData{
+					Title:  "Nuevo usuario",
+					User:   appUser{Name: name, Email: email, Role: role, Active: true},
+					Errors: errors,
+				}); err != nil {
+					http.Error(w, "Error al renderizar formulario", http.StatusInternalServerError)
+				}
+				return
+			}
+
+			if err := tmpl.ExecuteTemplate(w, "admin_users_new.html", adminUserFormData{
+				Title:       "Nuevo usuario",
+				Flash:       "Usuario creado correctamente.",
+				NewPassword: newPassword,
+			}); err != nil {
+				http.Error(w, "Error al renderizar formulario", http.StatusInternalServerError)
+			}
+			return
+		}
+
+		rows, err := db.Query(`SELECT id, name, email, role, active FROM users ORDER BY id`)
+		if err != nil {
+			http.Error(w, "Error al consultar usuarios", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		users := []appUser{}
+		for rows.Next() {
+			var userRow appUser
+			var activeValue int
+			if err := rows.Scan(&userRow.ID, &userRow.Name, &userRow.Email, &userRow.Role, &activeValue); err != nil {
+				http.Error(w, "Error al leer usuarios", http.StatusInternalServerError)
+				return
+			}
+			userRow.Active = activeValue == 1
+			users = append(users, userRow)
+		}
+		if err := rows.Err(); err != nil {
+			http.Error(w, "Error al procesar usuarios", http.StatusInternalServerError)
+			return
+		}
+
+		if err := tmpl.ExecuteTemplate(w, "admin_users_list.html", adminUsersListData{
+			Title: "Usuarios",
+			Users: users,
+			Flash: r.URL.Query().Get("mensaje"),
+		}); err != nil {
+			http.Error(w, "Error al renderizar usuarios", http.StatusInternalServerError)
+		}
+	}))
+
+	http.HandleFunc("/admin/users/new", withAuth(db, []string{"admin"}, func(w http.ResponseWriter, r *http.Request, user *appUser) {
+		if err := tmpl.ExecuteTemplate(w, "admin_users_new.html", adminUserFormData{
+			Title: "Nuevo usuario",
+			User:  appUser{Active: true, Role: "employee"},
+		}); err != nil {
+			http.Error(w, "Error al renderizar formulario", http.StatusInternalServerError)
+		}
+	}))
+
+	http.HandleFunc("/admin/users/", withAuth(db, []string{"admin"}, func(w http.ResponseWriter, r *http.Request, user *appUser) {
+		trimmed := strings.TrimPrefix(r.URL.Path, "/admin/users/")
+		parts := strings.Split(strings.Trim(trimmed, "/"), "/")
+		if len(parts) != 2 || parts[1] != "edit" {
+			http.NotFound(w, r)
+			return
+		}
+		id, err := strconv.Atoi(parts[0])
+		if err != nil {
+			http.NotFound(w, r)
+			return
+		}
+
+		targetUser, err := getUserByID(db, id)
+		if err != nil {
+			if errors.Is(err, sql.ErrNoRows) {
+				http.NotFound(w, r)
+				return
+			}
+			http.Error(w, "Error al consultar usuario", http.StatusInternalServerError)
+			return
+		}
+
+		if r.Method == http.MethodPost {
+			if err := r.ParseForm(); err != nil {
+				http.Error(w, "No se pudo leer el formulario", http.StatusBadRequest)
+				return
+			}
+			role := r.FormValue("role")
+			active := r.FormValue("active") == "on"
+			resetPassword := r.FormValue("reset_password") == "1"
+
+			errors := make(map[string]string)
+			if role != "admin" && role != "employee" {
+				errors["role"] = "Selecciona un rol válido."
+			}
+
+			if len(errors) > 0 {
+				targetUser.Role = role
+				targetUser.Active = active
+				w.WriteHeader(http.StatusBadRequest)
+				if err := tmpl.ExecuteTemplate(w, "admin_users_edit.html", adminUserFormData{
+					Title:  "Editar usuario",
+					User:   *targetUser,
+					Errors: errors,
+				}); err != nil {
+					http.Error(w, "Error al renderizar formulario", http.StatusInternalServerError)
+				}
+				return
+			}
+
+			activeValue := 0
+			if active {
+				activeValue = 1
+			}
+			if _, err := db.Exec(`UPDATE users SET role = ?, active = ? WHERE id = ?`, role, activeValue, targetUser.ID); err != nil {
+				http.Error(w, "Error al actualizar usuario", http.StatusInternalServerError)
+				return
+			}
+
+			newPassword := ""
+			if resetPassword {
+				generated, err := randomPassword()
+				if err != nil {
+					http.Error(w, "No se pudo generar la contraseña", http.StatusInternalServerError)
+					return
+				}
+				salt, err := generateSalt()
+				if err != nil {
+					http.Error(w, "No se pudo generar la contraseña", http.StatusInternalServerError)
+					return
+				}
+				hashed := hashPassword(generated, salt)
+				if _, err := db.Exec(`UPDATE users SET password_hash = ?, password_salt = ? WHERE id = ?`, hashed, salt, targetUser.ID); err != nil {
+					http.Error(w, "Error al reiniciar la contraseña", http.StatusInternalServerError)
+					return
+				}
+				newPassword = generated
+			}
+
+			updatedUser, err := getUserByID(db, targetUser.ID)
+			if err != nil {
+				http.Error(w, "Error al consultar usuario", http.StatusInternalServerError)
+				return
+			}
+			if err := tmpl.ExecuteTemplate(w, "admin_users_edit.html", adminUserFormData{
+				Title:       "Editar usuario",
+				User:        *updatedUser,
+				Flash:       "Usuario actualizado.",
+				NewPassword: newPassword,
+			}); err != nil {
+				http.Error(w, "Error al renderizar formulario", http.StatusInternalServerError)
+			}
+			return
+		}
+
+		if err := tmpl.ExecuteTemplate(w, "admin_users_edit.html", adminUserFormData{
+			Title: "Editar usuario",
+			User:  *targetUser,
+		}); err != nil {
+			http.Error(w, "Error al renderizar formulario", http.StatusInternalServerError)
+		}
+	}))
 
 	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/inventario", http.StatusFound)

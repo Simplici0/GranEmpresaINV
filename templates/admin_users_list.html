@@ -1,0 +1,175 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{.Title}}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #faf9f7;
+      --card: #ffffff;
+      --text: #2a2826;
+      --muted: #6b6560;
+      --primary: #e85d3c;
+      --border: #e8e4df;
+      --success: #2d9d78;
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: "Inter", "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    header {
+      padding: 24px 32px 16px;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 24px;
+    }
+
+    header p {
+      margin: 8px 0 0;
+      color: var(--muted);
+    }
+
+    .nav-buttons {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .nav-button {
+      display: inline-block;
+      padding: 8px 16px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s ease;
+      border: 1px solid var(--primary);
+      background: var(--card);
+      color: var(--primary);
+      cursor: pointer;
+    }
+
+    .nav-button.primary {
+      background: var(--primary);
+      color: var(--card);
+    }
+
+    .flash {
+      margin-top: 16px;
+      background: #e9f7f1;
+      color: #1a6b4b;
+      border: 1px solid #bde4d2;
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    main {
+      padding: 0 32px 32px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      background: var(--card);
+      border-radius: 12px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+    }
+
+    th,
+    td {
+      padding: 12px 16px;
+      font-size: 14px;
+      border-bottom: 1px solid var(--border);
+      text-align: left;
+    }
+
+    thead {
+      background: #eef1f8;
+    }
+
+    tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    .badge {
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 600;
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .badge.active {
+      background: #e9f7f1;
+      color: var(--success);
+    }
+
+    .badge.inactive {
+      background: #ffeef0;
+      color: #d64545;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{{.Title}}</h1>
+    <p>Gestión básica de usuarios (solo administración).</p>
+    <div class="nav-buttons">
+      <a class="nav-button" href="/inventario">Inventario</a>
+      <a class="nav-button" href="/dashboard">Dashboard</a>
+      <a class="nav-button primary" href="/admin/users/new">Crear usuario</a>
+    </div>
+    {{if .Flash}}
+      <div class="flash">{{.Flash}}</div>
+    {{end}}
+  </header>
+  <main>
+    <table>
+      <thead>
+        <tr>
+          <th>Nombre</th>
+          <th>Email</th>
+          <th>Rol</th>
+          <th>Estado</th>
+          <th>Acciones</th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Users}}
+          <tr>
+            <td>{{.Name}}</td>
+            <td>{{.Email}}</td>
+            <td>{{.Role}}</td>
+            <td>
+              {{if .Active}}
+                <span class="badge active">Activo</span>
+              {{else}}
+                <span class="badge inactive">Inactivo</span>
+              {{end}}
+            </td>
+            <td><a class="nav-button" href="/admin/users/{{.ID}}/edit">Editar</a></td>
+          </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </main>
+</body>
+</html>
