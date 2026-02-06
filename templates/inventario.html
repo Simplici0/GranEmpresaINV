@@ -528,7 +528,7 @@
               <h4>Unidades del producto</h4>
               <span class="fifo-note">Auditoría por lote · Selección FIFO al vender</span>
             </div>
-            <table class="units-table" aria-label="Unidades de {{.Name}}">
+            <table class="units-table" aria-label="Unidades del producto">
               <thead>
                 <tr>
                   <th>ID unidad</th>
@@ -557,10 +557,19 @@
             </table>
           </td>
         </tr>
-        {{end}}
-      </tbody>
-    </table>
-  </main>
+        `;
+
+        productTable.appendChild(unitsRow);
+      });
+    };
+
+    renderTable(products);
+    updateSummary(products);
+    [statusFilter, lineFilter, searchFilter, expiryToggle].forEach((input) =>
+      input.addEventListener("change", applyFilters)
+    );
+    searchFilter.addEventListener("input", applyFilters);
+  </script>
 
   <script>
     document.addEventListener("click", (event) => {
