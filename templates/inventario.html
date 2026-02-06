@@ -529,9 +529,9 @@
       <label for="statusFilter">Estado</label>
       <select id="statusFilter">
         <option value="all">Todos</option>
-        <option value="available">Available</option>
-        <option value="sold">Sold</option>
-        <option value="swapped">Swapped</option>
+        <option value="available">Disponible</option>
+        <option value="sold">Vendido</option>
+        <option value="swapped">Cambio</option>
       </select>
     </div>
     <div class="filter-group">
@@ -661,6 +661,16 @@
 
     const formatDate = (value) => new Date(value).toLocaleDateString("es-ES");
     const formatDateISO = (value) => new Date(value).toISOString().slice(0, 10);
+    const statusLabels = {
+      available: "Disponible",
+      sold: "Vendido",
+      swapped: "Cambio",
+      Disponible: "Disponible",
+      Vendida: "Vendido",
+      Vendido: "Vendido",
+      Cambio: "Cambio"
+    };
+    const statusLabel = (status) => statusLabels[status] || status;
 
     const updateSummary = (visibleProducts) => {
       const totalProducts = visibleProducts.length;
@@ -725,7 +735,7 @@
             <div class="fifo-note">SKU ${product.id} · FIFO: ${availableUnits.length} unidades disponibles</div>
           </td>
           <td>${product.line}</td>
-          <td><span class="status ${product.status}">${product.status}</span></td>
+          <td><span class="status ${product.status}">${statusLabel(product.status)}</span></td>
           <td><strong>${availableUnits.length}</strong></td>
           <td>
             <div class="actions">
@@ -776,7 +786,7 @@
                         <td>${formatDate(unit.received)}</td>
                         <td>${formatDate(unit.expires)}</td>
                         <td>${unit.location}</td>
-                        <td>${unit.status}</td>
+                        <td>${statusLabel(unit.status)}</td>
                         <td><span class="unit-tag">${fifoOrder}</span></td>
                       </tr>
                     `;
