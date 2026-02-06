@@ -1,0 +1,24 @@
+{{define "header"}}
+  <div class="global-banner">
+    <div class="banner-logos">
+      <div class="logo-placeholder">Logo 1</div>
+      <div class="logo-placeholder">Logo 2</div>
+    </div>
+  </div>
+  <header class="page-header">
+    <div class="header-text">
+      <h1>{{.Title}}</h1>
+      {{if .Subtitle}}
+        <p>{{.Subtitle}}</p>
+      {{end}}
+    </div>
+    <nav class="nav-buttons">
+      <a href="/dashboard" class="nav-button">Dashboard</a>
+      <a href="/inventario" class="nav-button">Inventario</a>
+      <a href="/venta/new" class="nav-button">Registrar venta</a>
+      <a href="/cambio/new" class="nav-button">Registrar cambio</a>
+      <a href="/csv/template" class="nav-button" target="_blank">Plantilla CSV</a>
+      <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
+    </nav>
+  </header>
+{{end}}

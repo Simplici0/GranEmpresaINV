@@ -29,25 +29,53 @@
       color: var(--text);
     }
 
-    header {
-      padding: 24px 32px 8px;
+    .page-content {
+      padding: 16px 32px 32px;
     }
 
-    header h1 {
+    .global-banner {
+      background: #f47a24;
+      padding: 6px 32px;
+    }
+
+    .banner-logos {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .logo-placeholder {
+      height: 22px;
+      min-width: 76px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px dashed rgba(255, 255, 255, 0.7);
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .page-header {
+      padding: 16px 32px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .page-header h1 {
       margin: 0;
       font-size: 24px;
     }
 
-    header p {
-      margin: 8px 0 0;
+    .page-header p {
+      margin: 0;
       color: var(--muted);
-    }
-
-    header nav {
-      margin-top: 12px;
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
     }
 
     /* Nuevo diseño de botones de navegación */
@@ -89,13 +117,6 @@
 
     .nav-button.primary:hover {
       background: #d84a2b;
-    }
-
-    header nav a {
-      text-decoration: none;
-      color: var(--primary);
-      font-size: 13px;
-      font-weight: 600;
     }
 
     .filters {
@@ -508,23 +529,13 @@
   </style>
 </head>
 <body>
-  <header>
-    <h1>{{.Title}}</h1>
-    <p>{{.Subtitle}}</p>
-    <div class="nav-buttons">
-      <a href="/dashboard" class="nav-button">Ver dashboard</a>
-      <a href="/venta/new" class="nav-button">Registrar venta</a>
-      <a href="/cambio/new" class="nav-button">Registrar cambio</a>
-      <a href="/csv/template" class="nav-button" target="_blank">Plantilla CSV</a>
-      <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
-    </div>
+  {{template "header" .}}
+  <div class="page-content">
     {{if .Flash}}
       <div class="flash">{{.Flash}}</div>
     {{end}}
-  </header>
-
-  <!-- Estado - Sección de filtros -->
-  <section class="filters">
+    <!-- Estado - Sección de filtros -->
+    <section class="filters">
     <div class="filter-group">
       <label for="statusFilter">Estado</label>
       <select id="statusFilter">
@@ -554,29 +565,10 @@
         <span>Mostrar próximos 45 días</span>
       </div>
     </div>
-  </section>
+    </section>
 
   <!-- Resumen - Sección de métricas -->
   <!-- Listado de productos -->
-  <main>
-    <table>
-      <thead>
-        <tr>
-          <th>Producto</th>
-          <th>Línea</th>
-          <th>Estado</th>
-          <th>Stock disponible</th>
-          <th>Acciones rápidas</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody id="productTable"></tbody>
-    </table>
-  </main>
-  
-</body>
-</html>
-
   <main>
     <table>
       <thead>
