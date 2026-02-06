@@ -2,6 +2,7 @@ package main
 
 import (
 	"database/sql"
+	"encoding/json"
 	"fmt"
 	"html/template"
 	"log"
@@ -15,10 +16,11 @@ import (
 )
 
 type inventoryPageData struct {
-	Title       string
-	Subtitle    string
-	RoutePrefix string
-	Flash       string
+	Title        string
+	Subtitle     string
+	RoutePrefix  string
+	Flash        string
+	ProductsJSON template.JS
 }
 
 type unitOption struct {
@@ -30,6 +32,22 @@ type productOption struct {
 	Name  string
 	Line  string
 	Units []unitOption
+}
+
+type inventoryUnit struct {
+	ID       string `json:"id"`
+	Received string `json:"received"`
+	Expires  string `json:"expires"`
+	Location string `json:"location"`
+	Status   string `json:"status"`
+}
+
+type inventoryProduct struct {
+	ID     string          `json:"id"`
+	Name   string          `json:"name"`
+	Line   string          `json:"line"`
+	Status string          `json:"status"`
+	Units  []inventoryUnit `json:"units"`
 }
 
 type cambioFormData struct {
@@ -131,14 +149,6 @@ func findProduct(products []productOption, id string) (productOption, bool) {
 	return productOption{}, false
 }
 
-func buildEntranteIDs(prefix string, qty int) []string {
-	ids := make([]string, 0, qty)
-	for i := 1; i <= qty; i++ {
-		ids = append(ids, prefix+"-"+strconv.Itoa(i))
-	}
-	return ids
-}
-
 func buildSalientesMap(salientes []string) map[string]bool {
 	mapped := make(map[string]bool, len(salientes))
 	for _, id := range salientes {
@@ -184,6 +194,14 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	}
 
 	schema := `
+	CREATE TABLE IF NOT EXISTS productos (
+		id TEXT PRIMARY KEY,
+		sku TEXT,
+		nombre TEXT NOT NULL,
+		linea TEXT NOT NULL,
+		precio_base REAL
+	);
+
 	CREATE TABLE IF NOT EXISTS ventas (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		producto_id TEXT NOT NULL,
@@ -202,6 +220,16 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 		creado_en TEXT NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS idx_unidades_estado ON unidades (estado);
+
+	CREATE TABLE IF NOT EXISTS cambios (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		producto_saliente_id TEXT NOT NULL,
+		unidades_ids TEXT NOT NULL,
+		persona_cambio TEXT NOT NULL,
+		registrado_en TEXT NOT NULL,
+		producto_entrante_id TEXT,
+		producto_entrante_detalle TEXT NOT NULL
+	);
 	`
 
 	if _, err := db.Exec(schema); err != nil {
@@ -224,6 +252,16 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 		return nil, err
 	}
 
+	var productosCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM productos").Scan(&productosCount); err != nil {
+		return nil, err
+	}
+	if productosCount == 0 {
+		if err := seedProductos(db); err != nil {
+			return nil, err
+		}
+	}
+
 	if unidadesCount == 0 {
 		if err := seedUnidades(db); err != nil {
 			return nil, err
@@ -231,6 +269,44 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+func seedProductos(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	stmt, err := tx.Prepare(`INSERT INTO productos (id, sku, nombre, linea, precio_base)
+		VALUES (?, ?, ?, ?, ?)`)
+	if err != nil {
+		if rollbackErr := tx.Rollback(); rollbackErr != nil {
+			return fmt.Errorf("prepare productos: %w (rollback: %v)", err, rollbackErr)
+		}
+		return err
+	}
+	defer stmt.Close()
+
+	products := []struct {
+		ID    string
+		Name  string
+		Line  string
+		Price float64
+	}{
+		{ID: "P-001", Name: "Proteína Balance 500g", Line: "Nutrición", Price: 120000},
+		{ID: "P-002", Name: "Crema Regeneradora", Line: "Dermocosmética", Price: 89000},
+		{ID: "P-003", Name: "Leche Pediátrica Premium", Line: "Pediatría", Price: 105000},
+	}
+
+	for _, product := range products {
+		if _, err := stmt.Exec(product.ID, product.ID, product.Name, product.Line, product.Price); err != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				return fmt.Errorf("insert productos: %w (rollback: %v)", err, rollbackErr)
+			}
+			return err
+		}
+	}
+
+	return tx.Commit()
 }
 
 func seedVentas(db *sql.DB, paymentMethods []string) error {
@@ -303,6 +379,168 @@ func seedUnidades(db *sql.DB) error {
 	return tx.Commit()
 }
 
+func fetchProductOptions(db *sql.DB) ([]productOption, error) {
+	rows, err := db.Query(`SELECT id, nombre, linea FROM productos ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	products := []productOption{}
+	for rows.Next() {
+		var id, name, line string
+		if err := rows.Scan(&id, &name, &line); err != nil {
+			return nil, err
+		}
+		products = append(products, productOption{
+			ID:   id,
+			Name: name,
+			Line: line,
+		})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return products, nil
+}
+
+func fetchProductByID(db *sql.DB, productID string) (productOption, error) {
+	var product productOption
+	err := db.QueryRow(`SELECT id, nombre, linea FROM productos WHERE id = ?`, productID).Scan(&product.ID, &product.Name, &product.Line)
+	return product, err
+}
+
+func fetchAvailableUnits(db *sql.DB, productID string) ([]unitOption, error) {
+	rows, err := db.Query(`SELECT id FROM unidades WHERE producto_id = ? AND estado = 'Disponible' ORDER BY creado_en, id`, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	units := []unitOption{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		units = append(units, unitOption{ID: id})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return units, nil
+}
+
+func fetchInventoryProducts(db *sql.DB) ([]inventoryProduct, error) {
+	productRows, err := db.Query(`SELECT id, nombre, linea FROM productos ORDER BY id`)
+	if err != nil {
+		return nil, err
+	}
+	defer productRows.Close()
+
+	products := []inventoryProduct{}
+	productIndex := map[string]int{}
+	for productRows.Next() {
+		var id, name, line string
+		if err := productRows.Scan(&id, &name, &line); err != nil {
+			return nil, err
+		}
+		productIndex[id] = len(products)
+		products = append(products, inventoryProduct{
+			ID:     id,
+			Name:   name,
+			Line:   line,
+			Status: "available",
+			Units:  []inventoryUnit{},
+		})
+	}
+	if err := productRows.Err(); err != nil {
+		return nil, err
+	}
+
+	unitRows, err := db.Query(`SELECT id, producto_id, estado, creado_en FROM unidades ORDER BY creado_en, id`)
+	if err != nil {
+		return nil, err
+	}
+	defer unitRows.Close()
+
+	for unitRows.Next() {
+		var id, productID, estado, creadoEn string
+		if err := unitRows.Scan(&id, &productID, &estado, &creadoEn); err != nil {
+			return nil, err
+		}
+		idx, ok := productIndex[productID]
+		if !ok {
+			continue
+		}
+		status := mapEstadoToStatus(estado)
+		unit := inventoryUnit{
+			ID:       id,
+			Received: creadoEn,
+			Expires:  creadoEn,
+			Location: "-",
+			Status:   status,
+		}
+		products[idx].Units = append(products[idx].Units, unit)
+	}
+	if err := unitRows.Err(); err != nil {
+		return nil, err
+	}
+
+	for i := range products {
+		products[i].Status = deriveProductStatus(products[i].Units)
+	}
+
+	return products, nil
+}
+
+func mapEstadoToStatus(estado string) string {
+	switch estado {
+	case "Disponible":
+		return "available"
+	case "Vendida":
+		return "sold"
+	case "Cambio":
+		return "swapped"
+	default:
+		return "available"
+	}
+}
+
+func deriveProductStatus(units []inventoryUnit) string {
+	if len(units) == 0 {
+		return "available"
+	}
+	allSold := true
+	allSwapped := true
+	for _, unit := range units {
+		if unit.Status != "sold" {
+			allSold = false
+		}
+		if unit.Status != "swapped" {
+			allSwapped = false
+		}
+		if unit.Status == "available" {
+			return "available"
+		}
+	}
+	if allSold {
+		return "sold"
+	}
+	if allSwapped {
+		return "swapped"
+	}
+	return "available"
+}
+
+func buildUnitIDs(prefix string, qty int) []string {
+	ids := make([]string, 0, qty)
+	for i := 0; i < qty; i++ {
+		ids = append(ids, fmt.Sprintf("%s-%d", prefix, i+1))
+	}
+	return ids
+}
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -331,27 +569,6 @@ func main() {
 		log.Fatalf("Error al abrir SQLite: %v", err)
 	}
 	defer db.Close()
-
-	products := []productOption{
-		{
-			ID:    "P-001",
-			Name:  "Proteína Balance 500g",
-			Line:  "Nutrición",
-			Units: []unitOption{{ID: "U-001"}, {ID: "U-002"}, {ID: "U-003"}},
-		},
-		{
-			ID:    "P-002",
-			Name:  "Crema Regeneradora",
-			Line:  "Dermocosmética",
-			Units: []unitOption{{ID: "U-101"}, {ID: "U-102"}, {ID: "U-103"}, {ID: "U-104"}},
-		},
-		{
-			ID:    "P-003",
-			Name:  "Leche Pediátrica Premium",
-			Line:  "Pediatría",
-			Units: []unitOption{{ID: "U-201"}},
-		},
-	}
 
 	type ventaFormData struct {
 		Title       string
@@ -556,11 +773,22 @@ func main() {
 
 	http.HandleFunc("/inventario", func(w http.ResponseWriter, r *http.Request) {
 		flash := r.URL.Query().Get("mensaje")
+		products, err := fetchInventoryProducts(db)
+		if err != nil {
+			http.Error(w, "Error al consultar inventario", http.StatusInternalServerError)
+			return
+		}
+		productsJSON, err := json.Marshal(products)
+		if err != nil {
+			http.Error(w, "Error al serializar inventario", http.StatusInternalServerError)
+			return
+		}
 		data := inventoryPageData{
-			Title:       "Pantalla Inventario (por producto)",
-			Subtitle:    "Control por producto con ventas, cambios y auditoría de unidades en FIFO.",
-			RoutePrefix: "",
-			Flash:       flash,
+			Title:        "Pantalla Inventario (por producto)",
+			Subtitle:     "Control por producto con ventas, cambios y auditoría de unidades en FIFO.",
+			RoutePrefix:  "",
+			Flash:        flash,
+			ProductsJSON: template.JS(string(productsJSON)),
 		}
 		if err := tmpl.ExecuteTemplate(w, "inventario.html", data); err != nil {
 			http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
@@ -591,9 +819,6 @@ func main() {
 
 	http.HandleFunc("/cambio/new", func(w http.ResponseWriter, r *http.Request) {
 		productID := r.URL.Query().Get("producto_id")
-		if productID == "" {
-			productID = products[0].ID
-		}
 		cantidad := 1
 		if qty := r.URL.Query().Get("cantidad"); qty != "" {
 			if parsed, err := strconv.Atoi(qty); err == nil && parsed > 0 {
@@ -601,22 +826,40 @@ func main() {
 			}
 		}
 
+		products, err := fetchProductOptions(db)
+		if err != nil {
+			http.Error(w, "Error al consultar productos", http.StatusInternalServerError)
+			return
+		}
+		if len(products) == 0 {
+			http.Error(w, "No hay productos disponibles", http.StatusBadRequest)
+			return
+		}
+
+		if productID == "" {
+			productID = products[0].ID
+		}
 		selectedProduct, ok := findProduct(products, productID)
 		if !ok {
 			selectedProduct = products[0]
 			productID = selectedProduct.ID
 		}
 
+		units, err := fetchAvailableUnits(db, productID)
+		if err != nil {
+			http.Error(w, "Error al consultar unidades disponibles", http.StatusInternalServerError)
+			return
+		}
 		salientes := make([]string, 0, cantidad)
-		for i := 0; i < cantidad && i < len(selectedProduct.Units); i++ {
-			salientes = append(salientes, selectedProduct.Units[i].ID)
+		for i := 0; i < cantidad && i < len(units); i++ {
+			salientes = append(salientes, units[i].ID)
 		}
 
 		data := cambioFormData{
 			Title:               "Registrar cambio",
 			ProductoID:          productID,
 			Productos:           products,
-			Unidades:            selectedProduct.Units,
+			Unidades:            units,
 			Salientes:           salientes,
 			SalientesMap:        buildSalientesMap(salientes),
 			IncomingMode:        "existing",
@@ -727,31 +970,19 @@ func main() {
 
 		errors := make(map[string]string)
 
-		selectedProduct, ok := findProduct(products, productID)
-		if !ok {
+		selectedProduct, err := fetchProductByID(db, productID)
+		if err != nil {
 			errors["producto_id"] = "Selecciona un producto válido."
-			selectedProduct = products[0]
-			productID = selectedProduct.ID
 		}
 
 		if personaCambio == "" {
 			errors["persona_del_cambio"] = "Ingresa la persona responsable del cambio."
 		}
 
-		unitLookup := make(map[string]struct{})
-		for _, unit := range selectedProduct.Units {
-			unitLookup[unit.ID] = struct{}{}
-		}
-		validSalientes := make([]string, 0, len(salientes))
-		for _, unitID := range salientes {
-			if _, ok := unitLookup[unitID]; ok {
-				validSalientes = append(validSalientes, unitID)
-			}
-		}
-		if len(validSalientes) == 0 {
+		requestedQty := len(salientes)
+		if requestedQty == 0 {
 			errors["salientes"] = "Selecciona al menos una unidad disponible como saliente."
 		}
-		salientes = validSalientes
 
 		incomingExistingQty := 0
 		if incomingExistingQtyValue != "" {
@@ -777,6 +1008,11 @@ func main() {
 			if incomingExistingQty <= 0 {
 				errors["incoming_existing_qty"] = "Ingresa una cantidad válida para la entrada."
 			}
+			if incomingExistingID != "" {
+				if _, err := fetchProductByID(db, incomingExistingID); err != nil {
+					errors["incoming_existing_id"] = "El producto entrante no existe."
+				}
+			}
 		} else if incomingMode == "new" {
 			if incomingNewSKU == "" {
 				errors["incoming_new_sku"] = "Ingresa el SKU del producto nuevo."
@@ -787,6 +1023,31 @@ func main() {
 			if incomingNewQty <= 0 {
 				errors["incoming_new_qty"] = "Ingresa una cantidad válida para la entrada."
 			}
+			if incomingNewSKU != "" {
+				var existingID string
+				err := db.QueryRow(`SELECT id FROM productos WHERE id = ?`, incomingNewSKU).Scan(&existingID)
+				if err == nil {
+					errors["incoming_new_sku"] = "El SKU ya existe como producto."
+				} else if err != sql.ErrNoRows {
+					http.Error(w, "Error al validar el SKU", http.StatusInternalServerError)
+					return
+				}
+			}
+		}
+
+		products, productsErr := fetchProductOptions(db)
+		if productsErr != nil {
+			http.Error(w, "Error al consultar productos", http.StatusInternalServerError)
+			return
+		}
+
+		availableUnits, unitsErr := fetchAvailableUnits(db, productID)
+		if unitsErr != nil {
+			http.Error(w, "Error al consultar unidades disponibles", http.StatusInternalServerError)
+			return
+		}
+		if requestedQty > len(availableUnits) {
+			errors["salientes"] = "No puedes cambiar más unidades que el stock disponible."
 		}
 
 		if len(errors) > 0 {
@@ -794,7 +1055,7 @@ func main() {
 				Title:               "Registrar cambio",
 				ProductoID:          productID,
 				Productos:           products,
-				Unidades:            selectedProduct.Units,
+				Unidades:            availableUnits,
 				PersonaCambio:       personaCambio,
 				Notas:               notas,
 				Salientes:           salientes,
@@ -815,11 +1076,122 @@ func main() {
 			return
 		}
 
+		tx, err := db.Begin()
+		if err != nil {
+			http.Error(w, "No se pudo registrar el cambio", http.StatusInternalServerError)
+			return
+		}
+		rollback := func() {
+			_ = tx.Rollback()
+		}
+
+		selectedUnits := []string{}
+		rows, err := tx.Query(`SELECT id FROM unidades WHERE producto_id = ? AND estado = 'Disponible' ORDER BY creado_en, id LIMIT ?`, productID, requestedQty)
+		if err != nil {
+			rollback()
+			http.Error(w, "Error al seleccionar unidades disponibles", http.StatusInternalServerError)
+			return
+		}
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				rollback()
+				http.Error(w, "Error al seleccionar unidades disponibles", http.StatusInternalServerError)
+				return
+			}
+			selectedUnits = append(selectedUnits, id)
+		}
+		rows.Close()
+		if len(selectedUnits) != requestedQty {
+			rollback()
+			http.Error(w, "No hay stock disponible suficiente para el cambio", http.StatusBadRequest)
+			return
+		}
+
+		placeholders := make([]string, len(selectedUnits))
+		args := make([]interface{}, 0, len(selectedUnits))
+		for i, id := range selectedUnits {
+			placeholders[i] = "?"
+			args = append(args, id)
+		}
+		updateQuery := fmt.Sprintf("UPDATE unidades SET estado = 'Cambio' WHERE id IN (%s)", strings.Join(placeholders, ","))
+		if _, err := tx.Exec(updateQuery, args...); err != nil {
+			rollback()
+			http.Error(w, "No se pudo actualizar unidades salientes", http.StatusInternalServerError)
+			return
+		}
+
 		entrantes := []string{}
+		now := time.Now().Format(time.RFC3339)
+		incomingProductID := ""
 		if incomingMode == "existing" {
-			entrantes = buildEntranteIDs("ENT-"+incomingExistingID, incomingExistingQty)
+			if _, err := fetchProductByID(db, incomingExistingID); err != nil {
+				rollback()
+				http.Error(w, "Producto entrante no existe", http.StatusBadRequest)
+				return
+			}
+			incomingProductID = incomingExistingID
+			entrantes = buildUnitIDs(fmt.Sprintf("U-%d", time.Now().UnixNano()), incomingExistingQty)
 		} else {
-			entrantes = buildEntranteIDs("ENT-"+incomingNewSKU, incomingNewQty)
+			if incomingNewLine == "" {
+				incomingNewLine = "Sin línea"
+			}
+			incomingProductID = incomingNewSKU
+			if _, err := tx.Exec(`INSERT INTO productos (id, sku, nombre, linea, precio_base) VALUES (?, ?, ?, ?, ?)`,
+				incomingNewSKU, incomingNewSKU, incomingNewName, incomingNewLine, nil); err != nil {
+				rollback()
+				http.Error(w, "No se pudo crear el producto nuevo", http.StatusInternalServerError)
+				return
+			}
+			entrantes = buildUnitIDs(fmt.Sprintf("U-%d", time.Now().UnixNano()), incomingNewQty)
+		}
+
+		for _, unitID := range entrantes {
+			if _, err := tx.Exec(`INSERT INTO unidades (id, producto_id, estado, creado_en) VALUES (?, ?, 'Disponible', ?)`,
+				unitID, incomingProductID, now); err != nil {
+				rollback()
+				http.Error(w, "No se pudo registrar las unidades entrantes", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		detalle := map[string]interface{}{
+			"mode": incomingMode,
+		}
+		if incomingMode == "existing" {
+			detalle["incoming_product_id"] = incomingExistingID
+			detalle["incoming_qty"] = incomingExistingQty
+		} else {
+			detalle["incoming_new_sku"] = incomingNewSKU
+			detalle["incoming_new_name"] = incomingNewName
+			detalle["incoming_new_line"] = incomingNewLine
+			detalle["incoming_qty"] = incomingNewQty
+		}
+		unitsJSON, err := json.Marshal(selectedUnits)
+		if err != nil {
+			rollback()
+			http.Error(w, "No se pudo registrar el cambio", http.StatusInternalServerError)
+			return
+		}
+		detalleJSON, err := json.Marshal(detalle)
+		if err != nil {
+			rollback()
+			http.Error(w, "No se pudo registrar el cambio", http.StatusInternalServerError)
+			return
+		}
+		if _, err := tx.Exec(`INSERT INTO cambios (producto_saliente_id, unidades_ids, persona_cambio, registrado_en, producto_entrante_id, producto_entrante_detalle)
+			VALUES (?, ?, ?, ?, ?, ?)`,
+			productID, string(unitsJSON), personaCambio, now, incomingProductID, string(detalleJSON)); err != nil {
+			rollback()
+			http.Error(w, "No se pudo registrar el cambio", http.StatusInternalServerError)
+			return
+		}
+
+		if err := tx.Commit(); err != nil {
+			rollback()
+			http.Error(w, "No se pudo confirmar el cambio", http.StatusInternalServerError)
+			return
 		}
 
 		confirmData := cambioConfirmData{
@@ -828,7 +1200,7 @@ func main() {
 			ProductoNombre:      selectedProduct.Name,
 			PersonaCambio:       personaCambio,
 			Notas:               notas,
-			Salientes:           salientes,
+			Salientes:           selectedUnits,
 			Entrantes:           entrantes,
 			IncomingMode:        incomingMode,
 			IncomingExistingID:  incomingExistingID,
