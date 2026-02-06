@@ -19,6 +19,7 @@ type inventoryPageData struct {
 	Subtitle    string
 	RoutePrefix string
 	Flash       string
+	Pricing     []productPricing
 }
 
 type unitOption struct {
@@ -26,10 +27,14 @@ type unitOption struct {
 }
 
 type productOption struct {
-	ID    string
-	Name  string
-	Line  string
-	Units []unitOption
+	ID                     string
+	Name                   string
+	Line                   string
+	Units                  []unitOption
+	PrecioBase             float64
+	PrecioVentaActual      float64
+	PrecioConsultora       float64
+	DescuentoPersonalizado float64
 }
 
 type cambioFormData struct {
@@ -122,6 +127,16 @@ type dashboardData struct {
 	Timeline        []timelinePoint
 }
 
+type productPricing struct {
+	ID                     string
+	Name                   string
+	Line                   string
+	PrecioBase             float64
+	PrecioVentaActual      float64
+	PrecioConsultora       float64
+	DescuentoPersonalizado float64
+}
+
 func findProduct(products []productOption, id string) (productOption, bool) {
 	for _, product := range products {
 		if product.ID == id {
@@ -195,6 +210,28 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas (fecha);
 	CREATE INDEX IF NOT EXISTS idx_ventas_metodo ON ventas (metodo_pago);
 
+	CREATE TABLE IF NOT EXISTS productos (
+		id TEXT PRIMARY KEY,
+		nombre TEXT NOT NULL,
+		linea TEXT NOT NULL,
+		precio_base REAL NOT NULL,
+		precio_venta_actual REAL NOT NULL,
+		precio_consultora REAL NOT NULL,
+		descuento_personalizado REAL NOT NULL,
+		actualizado_en TEXT NOT NULL
+	);
+	CREATE INDEX IF NOT EXISTS idx_productos_linea ON productos (linea);
+
+	CREATE TABLE IF NOT EXISTS precio_venta_historial (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		producto_id TEXT NOT NULL,
+		precio_anterior REAL NOT NULL,
+		precio_nuevo REAL NOT NULL,
+		fecha TEXT NOT NULL,
+		FOREIGN KEY (producto_id) REFERENCES productos(id)
+	);
+	CREATE INDEX IF NOT EXISTS idx_precio_historial_producto ON precio_venta_historial (producto_id);
+
 	CREATE TABLE IF NOT EXISTS unidades (
 		id TEXT PRIMARY KEY,
 		producto_id TEXT NOT NULL,
@@ -231,6 +268,112 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	}
 
 	return db, nil
+}
+
+func ensureProductPricing(db *sql.DB, products []productOption) error {
+	stmt, err := db.Prepare(`SELECT COUNT(*) FROM productos WHERE id = ?`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	insertStmt, err := db.Prepare(`
+		INSERT INTO productos
+			(id, nombre, linea, precio_base, precio_venta_actual, precio_consultora, descuento_personalizado, actualizado_en)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer insertStmt.Close()
+
+	for _, product := range products {
+		var count int
+		if err := stmt.QueryRow(product.ID).Scan(&count); err != nil {
+			return err
+		}
+		if count > 0 {
+			continue
+		}
+		if _, err := insertStmt.Exec(
+			product.ID,
+			product.Name,
+			product.Line,
+			product.PrecioBase,
+			product.PrecioVentaActual,
+			product.PrecioConsultora,
+			product.DescuentoPersonalizado,
+			time.Now().Format(time.RFC3339),
+		); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func fetchAllProductPricing(db *sql.DB) ([]productPricing, error) {
+	rows, err := db.Query(`
+		SELECT id, nombre, linea, precio_base, precio_venta_actual, precio_consultora, descuento_personalizado
+		FROM productos
+		ORDER BY linea, nombre`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	pricing := []productPricing{}
+	for rows.Next() {
+		var item productPricing
+		if err := rows.Scan(
+			&item.ID,
+			&item.Name,
+			&item.Line,
+			&item.PrecioBase,
+			&item.PrecioVentaActual,
+			&item.PrecioConsultora,
+			&item.DescuentoPersonalizado,
+		); err != nil {
+			return nil, err
+		}
+		pricing = append(pricing, item)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return pricing, nil
+}
+
+func fetchProductPricing(db *sql.DB, id string) (productPricing, error) {
+	var item productPricing
+	err := db.QueryRow(`
+		SELECT id, nombre, linea, precio_base, precio_venta_actual, precio_consultora, descuento_personalizado
+		FROM productos
+		WHERE id = ?`, id).Scan(
+		&item.ID,
+		&item.Name,
+		&item.Line,
+		&item.PrecioBase,
+		&item.PrecioVentaActual,
+		&item.PrecioConsultora,
+		&item.DescuentoPersonalizado,
+	)
+	return item, err
+}
+
+func parseCOP(value string) (float64, error) {
+	normalized := strings.TrimSpace(value)
+	if normalized == "" {
+		return 0, fmt.Errorf("valor requerido")
+	}
+	normalized = strings.ReplaceAll(normalized, ",", ".")
+	parsed, err := strconv.ParseFloat(normalized, 64)
+	if err != nil {
+		return 0, fmt.Errorf("valor inválido")
+	}
+	if parsed < 0 {
+		return 0, fmt.Errorf("valor negativo")
+	}
+	return parsed, nil
 }
 
 func seedVentas(db *sql.DB, paymentMethods []string) error {
@@ -334,23 +477,39 @@ func main() {
 
 	products := []productOption{
 		{
-			ID:    "P-001",
-			Name:  "Proteína Balance 500g",
-			Line:  "Nutrición",
-			Units: []unitOption{{ID: "U-001"}, {ID: "U-002"}, {ID: "U-003"}},
+			ID:                     "P-001",
+			Name:                   "Proteína Balance 500g",
+			Line:                   "Nutrición",
+			Units:                  []unitOption{{ID: "U-001"}, {ID: "U-002"}, {ID: "U-003"}},
+			PrecioBase:             120000,
+			PrecioVentaActual:      120000,
+			PrecioConsultora:       98000,
+			DescuentoPersonalizado: 0,
 		},
 		{
-			ID:    "P-002",
-			Name:  "Crema Regeneradora",
-			Line:  "Dermocosmética",
-			Units: []unitOption{{ID: "U-101"}, {ID: "U-102"}, {ID: "U-103"}, {ID: "U-104"}},
+			ID:                     "P-002",
+			Name:                   "Crema Regeneradora",
+			Line:                   "Dermocosmética",
+			Units:                  []unitOption{{ID: "U-101"}, {ID: "U-102"}, {ID: "U-103"}, {ID: "U-104"}},
+			PrecioBase:             89000,
+			PrecioVentaActual:      89000,
+			PrecioConsultora:       70000,
+			DescuentoPersonalizado: 0,
 		},
 		{
-			ID:    "P-003",
-			Name:  "Leche Pediátrica Premium",
-			Line:  "Pediatría",
-			Units: []unitOption{{ID: "U-201"}},
+			ID:                     "P-003",
+			Name:                   "Leche Pediátrica Premium",
+			Line:                   "Pediatría",
+			Units:                  []unitOption{{ID: "U-201"}},
+			PrecioBase:             105000,
+			PrecioVentaActual:      105000,
+			PrecioConsultora:       86000,
+			DescuentoPersonalizado: 0,
 		},
+	}
+
+	if err := ensureProductPricing(db, products); err != nil {
+		log.Fatalf("Error al asegurar productos: %v", err)
 	}
 
 	type ventaFormData struct {
@@ -556,15 +715,123 @@ func main() {
 
 	http.HandleFunc("/inventario", func(w http.ResponseWriter, r *http.Request) {
 		flash := r.URL.Query().Get("mensaje")
+		pricing, err := fetchAllProductPricing(db)
+		if err != nil {
+			http.Error(w, "Error al consultar precios", http.StatusInternalServerError)
+			return
+		}
 		data := inventoryPageData{
 			Title:       "Pantalla Inventario (por producto)",
 			Subtitle:    "Control por producto con ventas, cambios y auditoría de unidades en FIFO.",
 			RoutePrefix: "",
 			Flash:       flash,
+			Pricing:     pricing,
 		}
 		if err := tmpl.ExecuteTemplate(w, "inventario.html", data); err != nil {
 			http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
 		}
+	})
+
+	http.HandleFunc("/productos/", func(w http.ResponseWriter, r *http.Request) {
+		if !strings.HasSuffix(r.URL.Path, "/edit-pricing") {
+			http.NotFound(w, r)
+			return
+		}
+		trimmed := strings.TrimSuffix(r.URL.Path, "/edit-pricing")
+		parts := strings.Split(strings.Trim(trimmed, "/"), "/")
+		if len(parts) != 2 || parts[0] != "productos" {
+			http.NotFound(w, r)
+			return
+		}
+		productID := parts[1]
+		if productID == "" {
+			http.NotFound(w, r)
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "No se pudo leer el formulario", http.StatusBadRequest)
+			return
+		}
+
+		precioVentaValue := r.FormValue("precio_venta_actual")
+		precioConsultoraValue := r.FormValue("precio_consultora")
+		descuentoValue := r.FormValue("descuento_personalizado")
+
+		precioVenta, err := parseCOP(precioVentaValue)
+		if err != nil {
+			http.Error(w, "Precio de venta inválido", http.StatusBadRequest)
+			return
+		}
+		precioConsultora, err := parseCOP(precioConsultoraValue)
+		if err != nil {
+			http.Error(w, "Precio consultora inválido", http.StatusBadRequest)
+			return
+		}
+		descuentoPersonalizado, err := parseCOP(descuentoValue)
+		if err != nil {
+			http.Error(w, "Descuento personalizado inválido", http.StatusBadRequest)
+			return
+		}
+
+		current, err := fetchProductPricing(db, productID)
+		if err != nil {
+			http.Error(w, "Producto no encontrado", http.StatusNotFound)
+			return
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			http.Error(w, "Error al guardar precios", http.StatusInternalServerError)
+			return
+		}
+		if _, err := tx.Exec(`
+			UPDATE productos
+			SET precio_venta_actual = ?, precio_consultora = ?, descuento_personalizado = ?, actualizado_en = ?
+			WHERE id = ?`,
+			precioVenta,
+			precioConsultora,
+			descuentoPersonalizado,
+			time.Now().Format(time.RFC3339),
+			productID,
+		); err != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				http.Error(w, "Error al guardar precios", http.StatusInternalServerError)
+				return
+			}
+			http.Error(w, "Error al guardar precios", http.StatusInternalServerError)
+			return
+		}
+
+		if current.PrecioVentaActual != precioVenta {
+			if _, err := tx.Exec(`
+				INSERT INTO precio_venta_historial (producto_id, precio_anterior, precio_nuevo, fecha)
+				VALUES (?, ?, ?, ?)`,
+				productID,
+				current.PrecioVentaActual,
+				precioVenta,
+				time.Now().Format(time.RFC3339),
+			); err != nil {
+				if rollbackErr := tx.Rollback(); rollbackErr != nil {
+					http.Error(w, "Error al guardar historial", http.StatusInternalServerError)
+					return
+				}
+				http.Error(w, "Error al guardar historial", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			http.Error(w, "Error al guardar precios", http.StatusInternalServerError)
+			return
+		}
+
+		http.Redirect(w, r, "/inventario?mensaje=Precios+actualizados", http.StatusSeeOther)
 	})
 
 	http.HandleFunc("/venta/new", func(w http.ResponseWriter, r *http.Request) {
