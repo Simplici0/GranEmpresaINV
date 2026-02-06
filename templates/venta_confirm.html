@@ -25,7 +25,82 @@
       margin: 0;
       background: var(--bg);
       color: var(--text);
-      padding: 24px;
+    }
+
+    .global-banner {
+      background: #f47a24;
+      padding: 6px 32px;
+    }
+
+    .banner-logos {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .logo-placeholder {
+      height: 22px;
+      min-width: 76px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px dashed rgba(255, 255, 255, 0.7);
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .page-header {
+      padding: 16px 32px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .page-header h1 {
+      margin: 0;
+      font-size: 24px;
+    }
+
+    .page-header p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .page-content {
+      padding: 24px 32px 32px;
+    }
+
+    .nav-buttons {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .nav-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 16px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s ease;
+      border: 1px solid var(--primary);
+      background: var(--card);
+      color: var(--primary);
+      cursor: pointer;
+    }
+
+    .nav-button:hover {
+      background: var(--primary);
+      color: var(--card);
     }
 
     .card {
@@ -90,7 +165,9 @@
   </style>
 </head>
 <body>
-  <div class="card">
+  {{template "header" .}}
+  <main class="page-content">
+    <div class="card">
     <span class="badge">Venta registrada</span>
     <h1>{{.Title}}</h1>
     <p>La venta se registró en el flujo SSR (sin persistencia).</p>
@@ -120,7 +197,8 @@
       {{end}}
     </div>
 
-    <a class="button" href="/inventario?mensaje=Venta%20registrada%20correctamente">Volver a inventario</a>
-  </div>
+      <a class="button" href="/inventario?mensaje=Venta%20registrada%20correctamente">Volver a inventario</a>
+    </div>
+  </main>
 </body>
 </html>

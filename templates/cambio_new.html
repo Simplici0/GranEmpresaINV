@@ -26,7 +26,55 @@
       margin: 0;
       background: var(--bg);
       color: var(--text);
-      padding: 24px;
+    }
+
+    .global-banner {
+      background: #f47a24;
+      padding: 6px 32px;
+    }
+
+    .banner-logos {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .logo-placeholder {
+      height: 22px;
+      min-width: 76px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px dashed rgba(255, 255, 255, 0.7);
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .page-header {
+      padding: 16px 32px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .page-header h1 {
+      margin: 0;
+      font-size: 24px;
+    }
+
+    .page-header p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .page-content {
+      padding: 24px 32px 32px;
     }
 
     /* Nuevo diseño de botones de navegación */
@@ -229,15 +277,9 @@
   </style>
 </head>
 <body>
-  <div class="nav-buttons">
-    <a href="/inventario" class="nav-button">Volver a inventario</a>
-    <a href="/venta/new" class="nav-button">Registrar venta</a>
-    <a href="/cambio/new" class="nav-button active">Registrar cambio</a>
-    <a href="/csv/template" class="nav-button" target="_blank">Plantilla CSV</a>
-    <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
-  </div>
-
-  <div class="card">
+  {{template "header" .}}
+  <main class="page-content">
+    <div class="card">
     <h1>{{.Title}}</h1>
     <p>Define el flujo de cambio desde inventario, sin registrar dinero.</p>
 
@@ -370,7 +412,8 @@
         <a class="button secondary" href="/inventario">Volver a inventario</a>
       </div>
     </form>
-  </div>
+    </div>
+  </main>
   <script>
     const incomingModeInputs = document.querySelectorAll('input[name="incoming_mode"]');
     const existingFields = document.querySelectorAll('#incoming_existing_id, #incoming_existing_qty');

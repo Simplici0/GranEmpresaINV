@@ -34,6 +34,7 @@ type productOption struct {
 
 type cambioFormData struct {
 	Title               string
+	Subtitle            string
 	ProductoID          string
 	Productos           []productOption
 	Unidades            []unitOption
@@ -53,6 +54,7 @@ type cambioFormData struct {
 
 type cambioConfirmData struct {
 	Title               string
+	Subtitle            string
 	ProductoID          string
 	ProductoNombre      string
 	PersonaCambio       string
@@ -322,6 +324,7 @@ func main() {
 		"templates/cambio_confirm.html",
 		"templates/csv_template.html",
 		"templates/csv_export.html",
+		"templates/partials/header.html",
 	))
 
 	paymentMethods := []string{"Efectivo", "Transferencia", "Tarjeta", "Nequi", "Daviplata", "Bre-B"}
@@ -355,6 +358,7 @@ func main() {
 
 	type ventaFormData struct {
 		Title       string
+		Subtitle    string
 		ProductoID  string
 		Cantidad    int
 		PrecioFinal string
@@ -367,6 +371,7 @@ func main() {
 
 	type ventaConfirmData struct {
 		Title       string
+		Subtitle    string
 		ProductoID  string
 		Cantidad    int
 		PrecioFinal string
@@ -846,9 +851,11 @@ func main() {
 
 	http.HandleFunc("/csv/template", func(w http.ResponseWriter, r *http.Request) {
 		if err := tmpl.ExecuteTemplate(w, "csv_template.html", struct {
-			Title string
+			Title    string
+			Subtitle string
 		}{
-			Title: "Plantilla CSV - Carga masiva",
+			Title:    "Plantilla CSV - Carga masiva",
+			Subtitle: "",
 		}); err != nil {
 			http.Error(w, "Error al renderizar plantilla CSV", http.StatusInternalServerError)
 		}
@@ -856,9 +863,11 @@ func main() {
 
 	http.HandleFunc("/csv/export", func(w http.ResponseWriter, r *http.Request) {
 		if err := tmpl.ExecuteTemplate(w, "csv_export.html", struct {
-			Title string
+			Title    string
+			Subtitle string
 		}{
-			Title: "Exportaciones CSV",
+			Title:    "Exportaciones CSV",
+			Subtitle: "",
 		}); err != nil {
 			http.Error(w, "Error al renderizar exportaciones CSV", http.StatusInternalServerError)
 		}
