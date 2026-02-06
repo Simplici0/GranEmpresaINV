@@ -16,6 +16,7 @@
       --warning: #f59e42;
       --danger: #d64545;
       --border: #e8e4df;
+      --shadow: 0 12px 30px rgba(19, 35, 82, 0.08);
     }
 
     * {
@@ -27,16 +28,21 @@
       margin: 0;
       background: var(--bg);
       color: var(--text);
-      padding: 32px;
     }
 
-    .container {
+    a {
+      color: inherit;
+      text-decoration: none;
+    }
+
+    .page {
       max-width: 1200px;
       margin: 0 auto;
+      padding: 24px 32px 32px;
     }
 
     header {
-      margin-bottom: 32px;
+      margin-bottom: 24px;
     }
 
     h1 {
@@ -50,30 +56,64 @@
       font-size: 16px;
     }
 
-    .actions {
+    .nav-section {
       margin-bottom: 24px;
+    }
+
+    .nav-section.spaced {
+      margin-bottom: 40px;
+    }
+
+    .nav-buttons {
       display: flex;
-      gap: 16px;
+      gap: 12px;
       flex-wrap: wrap;
     }
 
+    .nav-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 16px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s ease;
+      border: 1px solid var(--primary);
+      background: var(--card);
+      color: var(--primary);
+      cursor: pointer;
+    }
+
+    .nav-button:hover {
+      background: var(--primary);
+      color: var(--card);
+    }
+
+    .nav-button.active {
+      background: var(--primary);
+      color: var(--card);
+    }
+
+    .button,
     button {
       border: none;
       padding: 12px 24px;
-      border-radius: 8px;
+      border-radius: 10px;
       font-weight: 600;
       cursor: pointer;
       font-size: 14px;
-      transition: all 0.2s;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 6px;
     }
 
     .primary {
       background: var(--primary);
       color: white;
-    }
-
-    .primary:hover {
-      background: #1d4ed8;
     }
 
     .secondary {
@@ -87,10 +127,11 @@
 
     .import-panel {
       background: var(--card);
-      border-radius: 12px;
+      border-radius: 16px;
       border: 1px solid var(--border);
       padding: 24px;
       margin-bottom: 24px;
+      box-shadow: var(--shadow);
     }
 
     .import-panel h2 {
@@ -232,33 +273,41 @@
     }
 
     @media (max-width: 768px) {
-      body {
+      .page {
         padding: 16px;
       }
-      
-      .actions {
-        flex-direction: column;
-      }
-      
+
       .import-actions {
         flex-direction: column;
         align-items: stretch;
       }
     }
+
+    @media (max-width: 480px) {
+      .button,
+      button,
+      .nav-button {
+        width: 100%;
+      }
+    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="nav-buttons" style="margin-bottom: 24px;">
-      <a href="/inventario" class="nav-button">Ver inventario</a>
-      <a href="/venta/new" class="nav-button">Registrar venta</a>
-      <a href="/cambio/new" class="nav-button">Registrar cambio</a>
-      <a href="/csv/template" class="nav-button active">Plantilla CSV</a>
-      <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
+  <div class="page">
+    <div class="nav-section">
+      <div class="nav-buttons">
+        <a href="/inventario" class="nav-button">Ver inventario</a>
+        <a href="/venta/new" class="nav-button">Registrar venta</a>
+        <a href="/cambio/new" class="nav-button">Registrar cambio</a>
+        <a href="/csv/template" class="nav-button active">Plantilla CSV</a>
+        <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
+      </div>
     </div>
-    
-    <div class="nav-buttons" style="margin-bottom: 48px;">
-      <button class="nav-button" onclick="window.close()">Cerrar ventana</button>
+
+    <div class="nav-section spaced">
+      <div class="nav-buttons">
+        <button class="nav-button" onclick="window.close()">Cerrar ventana</button>
+      </div>
     </div>
 
     <header>
@@ -272,11 +321,11 @@
         <p>Descarga la plantilla con las columnas mínimas para registrar productos y crear unidades DISPONIBLE.</p>
       </div>
       <div class="import-actions">
-        <button class="primary" id="download-template">Descargar plantilla CSV</button>
-        <label class="secondary" for="csv-upload">
+        <button class="button primary" id="download-template">Descargar plantilla CSV</button>
+        <label class="button secondary" for="csv-upload">
           <input id="csv-upload" type="file" accept=".csv,text/csv" />
         </label>
-        <button class="secondary" id="process-csv">Subir CSV</button>
+        <button class="button secondary" id="process-csv">Subir CSV</button>
       </div>
       <p>Regla de importación: por cada fila se crea o encuentra el producto por <strong>línea + nombre</strong> (o por SKU si tu proceso lo genera) y se crean <strong>N unidades DISPONIBLE</strong> según el campo cantidad.</p>
       
