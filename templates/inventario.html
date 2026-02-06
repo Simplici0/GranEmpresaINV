@@ -538,9 +538,6 @@
       <label for="lineFilter">Línea</label>
       <select id="lineFilter">
         <option value="all">Todas</option>
-        <option value="Nutrición">Nutrición</option>
-        <option value="Dermocosmética">Dermocosmética</option>
-        <option value="Pediatría">Pediatría</option>
       </select>
     </div>
     <div class="filter-group">
@@ -594,51 +591,7 @@
   </main>
 
   <script>
-    const products = [
-      {
-        id: "P-001",
-        name: "Proteína Balance 500g",
-        line: "Nutrición",
-        status: "available",
-        units: [
-          { id: "U-001", received: "2024-05-10", expires: "2024-11-10", location: "A-01", status: "available" },
-          { id: "U-002", received: "2024-06-02", expires: "2024-12-02", location: "A-01", status: "available" },
-          { id: "U-003", received: "2024-07-12", expires: "2025-01-12", location: "A-02", status: "available" }
-        ]
-      },
-      {
-        id: "P-002",
-        name: "Crema Regeneradora",
-        line: "Dermocosmética",
-        status: "available",
-        units: [
-          { id: "U-101", received: "2024-04-01", expires: "2024-09-08", location: "B-11", status: "available" },
-          { id: "U-102", received: "2024-04-18", expires: "2024-09-25", location: "B-11", status: "available" },
-          { id: "U-103", received: "2024-05-05", expires: "2024-11-02", location: "B-12", status: "available" },
-          { id: "U-104", received: "2024-05-20", expires: "2024-12-09", location: "B-13", status: "available" }
-        ]
-      },
-      {
-        id: "P-003",
-        name: "Leche Pediátrica Premium",
-        line: "Pediatría",
-        status: "swapped",
-        units: [
-          { id: "U-201", received: "2024-03-15", expires: "2024-08-20", location: "C-02", status: "available" },
-          { id: "U-202", received: "2024-04-02", expires: "2024-10-18", location: "C-03", status: "swapped" }
-        ]
-      },
-      {
-        id: "P-004",
-        name: "Shampoo Suave",
-        line: "Dermocosmética",
-        status: "sold",
-        units: [
-          { id: "U-301", received: "2024-01-22", expires: "2024-07-01", location: "B-21", status: "sold" },
-          { id: "U-302", received: "2024-02-15", expires: "2024-08-18", location: "B-22", status: "sold" }
-        ]
-      }
-    ];
+    const products = {{.ProductsJSON}};
 
     const statusFilter = document.getElementById("statusFilter");
     const lineFilter = document.getElementById("lineFilter");
@@ -661,6 +614,16 @@
 
     const formatDate = (value) => new Date(value).toLocaleDateString("es-ES");
     const formatDateISO = (value) => new Date(value).toISOString().slice(0, 10);
+
+    const populateLineFilter = () => {
+      const lines = Array.from(new Set(products.map((product) => product.line))).sort();
+      lines.forEach((line) => {
+        const option = document.createElement("option");
+        option.value = line;
+        option.textContent = line;
+        lineFilter.appendChild(option);
+      });
+    };
 
     const updateSummary = (visibleProducts) => {
       const totalProducts = visibleProducts.length;
@@ -864,6 +827,7 @@
       input.addEventListener("change", applyFilters);
     });
 
+    populateLineFilter();
     applyFilters();
 
     downloadTemplateButton.addEventListener("click", () => {
