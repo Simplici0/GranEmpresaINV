@@ -413,16 +413,42 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	if err := db.QueryRow("SELECT COUNT(*) FROM users").Scan(&usersCount); err != nil {
 		return nil, err
 	}
+
+	if _, err := ensureDefaultAdmin(db); err != nil {
+		return nil, err
+	}
 	if usersCount == 0 {
-		if _, err := createUser(db, "Administrador", "admin@granempresa.local", "admin", "admin123", true); err != nil {
-			return nil, err
-		}
 		if _, err := createUser(db, "Empleado", "empleado@granempresa.local", "employee", "empleado123", true); err != nil {
 			return nil, err
 		}
 	}
 
 	return db, nil
+}
+
+func ensureDefaultAdmin(db *sql.DB) (bool, error) {
+	var adminCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM users WHERE role = 'admin'").Scan(&adminCount); err != nil {
+		return false, err
+	}
+	if adminCount > 0 {
+		return false, nil
+	}
+
+	email := strings.TrimSpace(os.Getenv("ADMIN_EMAIL"))
+	if email == "" {
+		email = "admin@local"
+	}
+	password := os.Getenv("ADMIN_PASSWORD")
+	if password == "" {
+		password = "Admin123!"
+	}
+
+	if _, err := createUser(db, "Administrador", email, "admin", password, true); err != nil {
+		return false, err
+	}
+	log.Printf("Admin user auto-created: %s", email)
+	return true, nil
 }
 
 func seedVentas(db *sql.DB, paymentMethods []string) error {
