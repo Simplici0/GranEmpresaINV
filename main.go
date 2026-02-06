@@ -111,15 +111,17 @@ type dashboardData struct {
 	Title           string
 	Subtitle        string
 	EstadoConteos   []estadoCount
-	PeriodosTotales []periodTotal
 	MetodosPago     []metodoPagoTotal
 	PieSlices       []pieSlice
 	PieTotal        string
-	MaxPeriodo      float64
 	MaxTimeline     float64
 	MaxTimelineText string
 	TimelinePoints  string
 	Timeline        []timelinePoint
+	RangeStart      string
+	RangeEnd        string
+	RangeTotal      string
+	RangeCount      int
 }
 
 func findProduct(products []productOption, id string) (productOption, bool) {
@@ -149,6 +151,24 @@ func buildSalientesMap(salientes []string) map[string]bool {
 
 func formatCurrency(value float64) string {
 	return fmt.Sprintf("$%.0f", value)
+}
+
+func makePlaceholders(count int) string {
+	if count <= 0 {
+		return ""
+	}
+	return strings.TrimRight(strings.Repeat("?,", count), ",")
+}
+
+func parseDateOrDefault(value string, fallback time.Time) time.Time {
+	if value == "" {
+		return fallback
+	}
+	parsed, err := time.Parse("2006-01-02", value)
+	if err != nil {
+		return fallback
+	}
+	return parsed
 }
 
 func buildTimelinePoints(timeline []timelinePoint, width, height, padding float64) string {
@@ -285,7 +305,7 @@ func seedUnidades(db *sql.DB) error {
 	}
 	defer stmt.Close()
 
-	statuses := []string{"Disponible", "Vendida", "Cambio"}
+	statuses := []string{"Disponible", "Vendido", "Cambio"}
 	products := []string{"P-001", "P-002", "P-003"}
 	now := time.Now().Format(time.RFC3339)
 	for i := 1; i <= 36; i++ {
@@ -376,9 +396,9 @@ func main() {
 
 	http.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
 		estadoRows, err := db.Query(`
-			SELECT estado, COUNT(*)
+			SELECT CASE WHEN estado = 'Vendida' THEN 'Vendido' ELSE estado END, COUNT(*)
 			FROM unidades
-			GROUP BY estado
+			GROUP BY CASE WHEN estado = 'Vendida' THEN 'Vendido' ELSE estado END
 			ORDER BY estado`)
 		if err != nil {
 			http.Error(w, "Error al consultar estados", http.StatusInternalServerError)
@@ -386,7 +406,7 @@ func main() {
 		}
 		defer estadoRows.Close()
 
-		estadoConteos := []estadoCount{}
+		estadoMap := map[string]int{}
 		for estadoRows.Next() {
 			var estado string
 			var cantidad int
@@ -394,51 +414,52 @@ func main() {
 				http.Error(w, "Error al leer estados", http.StatusInternalServerError)
 				return
 			}
-			estadoConteos = append(estadoConteos, estadoCount{
-				Estado:   estado,
-				Cantidad: cantidad,
-				Link:     "/inventario?estado=" + estado,
-			})
+			estadoMap[estado] = cantidad
 		}
 		if err := estadoRows.Err(); err != nil {
 			http.Error(w, "Error al procesar estados", http.StatusInternalServerError)
 			return
 		}
 
-		var hoyTotal, semanaTotal, mesTotal float64
+		estadoOrden := []string{"Disponible", "Cambio", "Vendido"}
+		estadoConteos := make([]estadoCount, 0, len(estadoOrden))
+		for _, estado := range estadoOrden {
+			estadoConteos = append(estadoConteos, estadoCount{
+				Estado:   estado,
+				Cantidad: estadoMap[estado],
+				Link:     "/inventario?estado=" + estado,
+			})
+		}
+
+		now := time.Now()
+		endDate := parseDateOrDefault(r.URL.Query().Get("end_date"), now)
+		startDate := parseDateOrDefault(r.URL.Query().Get("start_date"), endDate.AddDate(0, 0, -6))
+		if startDate.After(endDate) {
+			startDate, endDate = endDate, startDate
+		}
+		startDate = time.Date(startDate.Year(), startDate.Month(), startDate.Day(), 0, 0, 0, 0, startDate.Location())
+		endDate = time.Date(endDate.Year(), endDate.Month(), endDate.Day(), 0, 0, 0, 0, endDate.Location())
+		startStr := startDate.Format("2006-01-02")
+		endStr := endDate.Format("2006-01-02")
+
+		var rangeTotal float64
+		var rangeCount int
 		err = db.QueryRow(`
 			SELECT
-				COALESCE(SUM(CASE WHEN fecha = date('now') THEN precio_final END), 0),
-				COALESCE(SUM(CASE WHEN fecha >= date('now','-6 days') THEN precio_final END), 0),
-				COALESCE(SUM(CASE WHEN fecha >= date('now','start of month') THEN precio_final END), 0)
-			FROM ventas`).Scan(&hoyTotal, &semanaTotal, &mesTotal)
+				COALESCE(SUM(precio_final * cantidad), 0),
+				COALESCE(COUNT(*), 0)
+			FROM ventas
+			WHERE fecha BETWEEN ? AND ?`, startStr, endStr).Scan(&rangeTotal, &rangeCount)
 		if err != nil {
-			http.Error(w, "Error al consultar ventas", http.StatusInternalServerError)
+			http.Error(w, "Error al consultar ventas por rango", http.StatusInternalServerError)
 			return
 		}
 
-		periodosTotales := []periodTotal{
-			{Label: "Hoy", Total: formatCurrency(hoyTotal), Range: "Ventas del día", Value: hoyTotal},
-			{Label: "Últimos 7 días", Total: formatCurrency(semanaTotal), Range: "Acumulado semanal", Value: semanaTotal},
-			{Label: "Mes actual", Total: formatCurrency(mesTotal), Range: "Acumulado del mes", Value: mesTotal},
-		}
-		maxPeriodo := 0.0
-		for _, periodo := range periodosTotales {
-			if periodo.Value > maxPeriodo {
-				maxPeriodo = periodo.Value
-			}
-		}
-		if maxPeriodo > 0 {
-			for i := range periodosTotales {
-				periodosTotales[i].Percent = (periodosTotales[i].Value / maxPeriodo) * 100
-			}
-		}
-
 		metodoRows, err := db.Query(`
-			SELECT metodo_pago, COUNT(*), SUM(precio_final)
+			SELECT metodo_pago, COUNT(*), SUM(precio_final * cantidad)
 			FROM ventas
 			GROUP BY metodo_pago
-			ORDER BY SUM(precio_final) DESC`)
+			ORDER BY SUM(precio_final * cantidad) DESC`)
 		if err != nil {
 			http.Error(w, "Error al consultar métodos de pago", http.StatusInternalServerError)
 			return
@@ -490,20 +511,18 @@ func main() {
 		}
 
 		timeRows, err := db.Query(`
-			SELECT fecha, COUNT(*), SUM(precio_final)
+			SELECT fecha, COUNT(*), SUM(precio_final * cantidad)
 			FROM ventas
-			WHERE fecha >= date('now','-13 days')
+			WHERE fecha BETWEEN ? AND ?
 			GROUP BY fecha
-			ORDER BY fecha`)
+			ORDER BY fecha`, startStr, endStr)
 		if err != nil {
 			http.Error(w, "Error al consultar timeline", http.StatusInternalServerError)
 			return
 		}
 		defer timeRows.Close()
 
-		timeline := []timelinePoint{}
-		maxTimeline := 0.0
-		index := 0
+		timelineByDate := make(map[string]timelinePoint)
 		for timeRows.Next() {
 			var fecha string
 			var cantidad int
@@ -512,22 +531,40 @@ func main() {
 				http.Error(w, "Error al leer timeline", http.StatusInternalServerError)
 				return
 			}
-			timeline = append(timeline, timelinePoint{
+			timelineByDate[fecha] = timelinePoint{
 				Fecha:    fecha,
 				Cantidad: cantidad,
 				Total:    formatCurrency(total),
 				Value:    total,
-				Index:    index,
-			})
-			if total > maxTimeline {
-				maxTimeline = total
 			}
-			index++
 		}
 		if err := timeRows.Err(); err != nil {
 			http.Error(w, "Error al procesar timeline", http.StatusInternalServerError)
 			return
 		}
+
+		timeline := []timelinePoint{}
+		maxTimeline := 0.0
+		index := 0
+		for cursor := startDate; !cursor.After(endDate); cursor = cursor.AddDate(0, 0, 1) {
+			fecha := cursor.Format("2006-01-02")
+			point, ok := timelineByDate[fecha]
+			if !ok {
+				point = timelinePoint{
+					Fecha:    fecha,
+					Cantidad: 0,
+					Total:    formatCurrency(0),
+					Value:    0,
+				}
+			}
+			point.Index = index
+			timeline = append(timeline, point)
+			if point.Value > maxTimeline {
+				maxTimeline = point.Value
+			}
+			index++
+		}
+
 		if maxTimeline > 0 {
 			for i := range timeline {
 				timeline[i].Percent = (timeline[i].Value / maxTimeline) * 100
@@ -538,15 +575,17 @@ func main() {
 			Title:           "Dashboard SSR",
 			Subtitle:        "Resumen agregado de inventario y ventas.",
 			EstadoConteos:   estadoConteos,
-			PeriodosTotales: periodosTotales,
 			MetodosPago:     metodosPago,
 			PieSlices:       pieSlices,
 			PieTotal:        formatCurrency(totalPago),
-			MaxPeriodo:      maxPeriodo,
 			MaxTimeline:     maxTimeline,
 			MaxTimelineText: formatCurrency(maxTimeline),
 			TimelinePoints:  buildTimelinePoints(timeline, 560, 180, 24),
 			Timeline:        timeline,
+			RangeStart:      startStr,
+			RangeEnd:        endStr,
+			RangeTotal:      formatCurrency(rangeTotal),
+			RangeCount:      rangeCount,
 		}
 
 		if err := tmpl.ExecuteTemplate(w, "dashboard.html", data); err != nil {
@@ -689,6 +728,106 @@ func main() {
 			return
 		}
 
+		precioFinal, err := strconv.ParseFloat(precioValue, 64)
+		if err != nil || precioFinal <= 0 {
+			errors["precio_final_venta"] = "El precio debe ser un número mayor a 0."
+			data := ventaFormData{
+				Title:       "Registrar venta",
+				ProductoID:  productID,
+				Cantidad:    cantidad,
+				PrecioFinal: precioValue,
+				MetodoPago:  metodoPago,
+				Notas:       notas,
+				Errors:      errors,
+				MetodoPagos: paymentMethods,
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			if err := tmpl.ExecuteTemplate(w, "venta_new.html", data); err != nil {
+				http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
+			}
+			return
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			http.Error(w, "Error al iniciar la venta", http.StatusInternalServerError)
+			return
+		}
+
+		unitRows, err := tx.Query(`
+			SELECT id
+			FROM unidades
+			WHERE producto_id = ? AND estado = 'Disponible'
+			ORDER BY creado_en, id
+			LIMIT ?`, productID, cantidad)
+		if err != nil {
+			_ = tx.Rollback()
+			http.Error(w, "Error al validar inventario disponible", http.StatusInternalServerError)
+			return
+		}
+
+		unitIDs := []string{}
+		for unitRows.Next() {
+			var id string
+			if err := unitRows.Scan(&id); err != nil {
+				unitRows.Close()
+				_ = tx.Rollback()
+				http.Error(w, "Error al leer unidades disponibles", http.StatusInternalServerError)
+				return
+			}
+			unitIDs = append(unitIDs, id)
+		}
+		unitRows.Close()
+		if err := unitRows.Err(); err != nil {
+			_ = tx.Rollback()
+			http.Error(w, "Error al procesar unidades disponibles", http.StatusInternalServerError)
+			return
+		}
+
+		if len(unitIDs) < cantidad {
+			_ = tx.Rollback()
+			errors["cantidad"] = "No hay suficientes unidades disponibles para completar la venta."
+			data := ventaFormData{
+				Title:       "Registrar venta",
+				ProductoID:  productID,
+				Cantidad:    cantidad,
+				PrecioFinal: precioValue,
+				MetodoPago:  metodoPago,
+				Notas:       notas,
+				Errors:      errors,
+				MetodoPagos: paymentMethods,
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			if err := tmpl.ExecuteTemplate(w, "venta_new.html", data); err != nil {
+				http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
+			}
+			return
+		}
+
+		ventaFecha := time.Now().Format("2006-01-02")
+		if _, err := tx.Exec(`INSERT INTO ventas (producto_id, cantidad, precio_final, metodo_pago, fecha)
+			VALUES (?, ?, ?, ?, ?)`, productID, cantidad, precioFinal, metodoPago, ventaFecha); err != nil {
+			_ = tx.Rollback()
+			http.Error(w, "Error al registrar la venta", http.StatusInternalServerError)
+			return
+		}
+
+		placeholders := makePlaceholders(len(unitIDs))
+		args := make([]interface{}, 0, len(unitIDs))
+		for _, id := range unitIDs {
+			args = append(args, id)
+		}
+		if _, err := tx.Exec(fmt.Sprintf(`UPDATE unidades SET estado = 'Vendido' WHERE id IN (%s)`, placeholders), args...); err != nil {
+			_ = tx.Rollback()
+			http.Error(w, "Error al actualizar el inventario", http.StatusInternalServerError)
+			return
+		}
+
+		if err := tx.Commit(); err != nil {
+			http.Error(w, "Error al guardar la venta", http.StatusInternalServerError)
+			return
+		}
+
 		confirmData := ventaConfirmData{
 			Title:       "Venta registrada",
 			ProductoID:  productID,
@@ -812,6 +951,108 @@ func main() {
 			if err := tmpl.ExecuteTemplate(w, "cambio_new.html", data); err != nil {
 				http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
 			}
+			return
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			http.Error(w, "Error al iniciar el cambio", http.StatusInternalServerError)
+			return
+		}
+
+		salientesPlaceholders := makePlaceholders(len(salientes))
+		args := make([]interface{}, 0, len(salientes)+1)
+		for _, id := range salientes {
+			args = append(args, id)
+		}
+		args = append(args, productID)
+		verifyQuery := fmt.Sprintf(`SELECT id FROM unidades WHERE id IN (%s) AND producto_id = ? AND estado = 'Disponible'`, salientesPlaceholders)
+		verifyRows, err := tx.Query(verifyQuery, args...)
+		if err != nil {
+			_ = tx.Rollback()
+			http.Error(w, "Error al validar unidades salientes", http.StatusInternalServerError)
+			return
+		}
+
+		validCount := 0
+		for verifyRows.Next() {
+			validCount++
+		}
+		verifyRows.Close()
+		if err := verifyRows.Err(); err != nil {
+			_ = tx.Rollback()
+			http.Error(w, "Error al revisar unidades salientes", http.StatusInternalServerError)
+			return
+		}
+		if validCount != len(salientes) {
+			_ = tx.Rollback()
+			errors["salientes"] = "Algunas unidades ya no están disponibles para cambio."
+			data := cambioFormData{
+				Title:               "Registrar cambio",
+				ProductoID:          productID,
+				Productos:           products,
+				Unidades:            selectedProduct.Units,
+				PersonaCambio:       personaCambio,
+				Notas:               notas,
+				Salientes:           salientes,
+				SalientesMap:        buildSalientesMap(salientes),
+				IncomingMode:        incomingMode,
+				IncomingExistingID:  incomingExistingID,
+				IncomingExistingQty: incomingExistingQty,
+				IncomingNewSKU:      incomingNewSKU,
+				IncomingNewName:     incomingNewName,
+				IncomingNewLine:     incomingNewLine,
+				IncomingNewQty:      incomingNewQty,
+				Errors:              errors,
+			}
+			w.WriteHeader(http.StatusBadRequest)
+			if err := tmpl.ExecuteTemplate(w, "cambio_new.html", data); err != nil {
+				http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
+			}
+			return
+		}
+
+		updateQuery := fmt.Sprintf(`UPDATE unidades SET estado = 'Cambio' WHERE id IN (%s)`, salientesPlaceholders)
+		updateArgs := make([]interface{}, 0, len(salientes))
+		for _, id := range salientes {
+			updateArgs = append(updateArgs, id)
+		}
+		if _, err := tx.Exec(updateQuery, updateArgs...); err != nil {
+			_ = tx.Rollback()
+			http.Error(w, "Error al actualizar unidades salientes", http.StatusInternalServerError)
+			return
+		}
+
+		incomingProductID := incomingExistingID
+		incomingQty := incomingExistingQty
+		if incomingMode == "new" {
+			incomingProductID = incomingNewSKU
+			incomingQty = incomingNewQty
+		}
+
+		if incomingQty > 0 {
+			insertStmt, err := tx.Prepare(`INSERT INTO unidades (id, producto_id, estado, creado_en)
+				VALUES (?, ?, 'Disponible', ?)`)
+			if err != nil {
+				_ = tx.Rollback()
+				http.Error(w, "Error al preparar unidades entrantes", http.StatusInternalServerError)
+				return
+			}
+			defer insertStmt.Close()
+
+			now := time.Now()
+			for i := 1; i <= incomingQty; i++ {
+				unitID := fmt.Sprintf("ENT-%s-%d-%d", incomingProductID, now.UnixNano(), i)
+				if _, err := insertStmt.Exec(unitID, incomingProductID, now.Format(time.RFC3339)); err != nil {
+					_ = tx.Rollback()
+					http.Error(w, "Error al registrar unidades entrantes", http.StatusInternalServerError)
+					return
+				}
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			http.Error(w, "Error al guardar el cambio", http.StatusInternalServerError)
 			return
 		}
 
