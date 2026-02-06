@@ -748,7 +748,9 @@ func main() {
 				validSalientes = append(validSalientes, unitID)
 			}
 		}
-		if len(validSalientes) == 0 {
+		if len(selectedProduct.Units) == 0 {
+			errors["salientes"] = "No hay unidades disponibles para el producto seleccionado."
+		} else if len(validSalientes) == 0 {
 			errors["salientes"] = "Selecciona al menos una unidad disponible como saliente."
 		}
 		salientes = validSalientes
