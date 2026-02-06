@@ -34,6 +34,7 @@ type productOption struct {
 
 type cambioFormData struct {
 	Title               string
+	Subtitle            string
 	ProductoID          string
 	Productos           []productOption
 	Unidades            []unitOption
@@ -53,6 +54,7 @@ type cambioFormData struct {
 
 type cambioConfirmData struct {
 	Title               string
+	Subtitle            string
 	ProductoID          string
 	ProductoNombre      string
 	PersonaCambio       string
@@ -149,6 +151,22 @@ func buildSalientesMap(salientes []string) map[string]bool {
 
 func formatCurrency(value float64) string {
 	return fmt.Sprintf("$%.0f", value)
+}
+
+func statusLabel(estado string) string {
+	labels := map[string]string{
+		"available":  "Disponible",
+		"sold":       "Vendido",
+		"swapped":    "Cambio",
+		"Disponible": "Disponible",
+		"Vendida":    "Vendido",
+		"Vendido":    "Vendido",
+		"Cambio":     "Cambio",
+	}
+	if label, ok := labels[estado]; ok {
+		return label
+	}
+	return estado
 }
 
 func buildTimelinePoints(timeline []timelinePoint, width, height, padding float64) string {
@@ -285,7 +303,7 @@ func seedUnidades(db *sql.DB) error {
 	}
 	defer stmt.Close()
 
-	statuses := []string{"Disponible", "Vendida", "Cambio"}
+	statuses := []string{"available", "sold", "swapped"}
 	products := []string{"P-001", "P-002", "P-003"}
 	now := time.Now().Format(time.RFC3339)
 	for i := 1; i <= 36; i++ {
@@ -322,6 +340,7 @@ func main() {
 		"templates/cambio_confirm.html",
 		"templates/csv_template.html",
 		"templates/csv_export.html",
+		"templates/partials/header.html",
 	))
 
 	paymentMethods := []string{"Efectivo", "Transferencia", "Tarjeta", "Nequi", "Daviplata", "Bre-B"}
@@ -355,6 +374,7 @@ func main() {
 
 	type ventaFormData struct {
 		Title       string
+		Subtitle    string
 		ProductoID  string
 		Cantidad    int
 		PrecioFinal string
@@ -367,6 +387,7 @@ func main() {
 
 	type ventaConfirmData struct {
 		Title       string
+		Subtitle    string
 		ProductoID  string
 		Cantidad    int
 		PrecioFinal string
@@ -394,8 +415,9 @@ func main() {
 				http.Error(w, "Error al leer estados", http.StatusInternalServerError)
 				return
 			}
+			label := statusLabel(estado)
 			estadoConteos = append(estadoConteos, estadoCount{
-				Estado:   estado,
+				Estado:   label,
 				Cantidad: cantidad,
 				Link:     "/inventario?estado=" + estado,
 			})
@@ -848,9 +870,11 @@ func main() {
 
 	http.HandleFunc("/csv/template", func(w http.ResponseWriter, r *http.Request) {
 		if err := tmpl.ExecuteTemplate(w, "csv_template.html", struct {
-			Title string
+			Title    string
+			Subtitle string
 		}{
-			Title: "Plantilla CSV - Carga masiva",
+			Title:    "Plantilla CSV - Carga masiva",
+			Subtitle: "",
 		}); err != nil {
 			http.Error(w, "Error al renderizar plantilla CSV", http.StatusInternalServerError)
 		}
@@ -858,9 +882,11 @@ func main() {
 
 	http.HandleFunc("/csv/export", func(w http.ResponseWriter, r *http.Request) {
 		if err := tmpl.ExecuteTemplate(w, "csv_export.html", struct {
-			Title string
+			Title    string
+			Subtitle string
 		}{
-			Title: "Exportaciones CSV",
+			Title:    "Exportaciones CSV",
+			Subtitle: "",
 		}); err != nil {
 			http.Error(w, "Error al renderizar exportaciones CSV", http.StatusInternalServerError)
 		}
