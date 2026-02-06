@@ -293,13 +293,18 @@
               <div class="hint">Selecciona un producto y su cantidad.</div>
             </div>
           </label>
-          <label class="radio-card">
-            <input type="radio" name="incoming_mode" value="new" {{if eq .IncomingMode "new"}}checked{{end}} />
-            <div>
-              <strong>Producto nuevo</strong>
-              <div class="hint">Crea un SKU y agrega la cantidad.</div>
-            </div>
-          </label>
+          {{if .IsAdmin}}
+            <label class="radio-card">
+              <input type="radio" name="incoming_mode" value="new" {{if eq .IncomingMode "new"}}checked{{end}} />
+              <div>
+                <strong>Producto nuevo</strong>
+                <div class="hint">Crea un SKU y agrega la cantidad.</div>
+              </div>
+            </label>
+          {{else}}
+            <input type="hidden" name="incoming_mode" value="existing" />
+            <div class="hint">Solo administración puede crear productos nuevos.</div>
+          {{end}}
         </div>
         {{with index .Errors "incoming_mode"}}
           <div class="error">{{.}}</div>
@@ -326,36 +331,38 @@
           </div>
         </div>
 
-        <div class="row">
-          <div>
-            <label for="incoming_new_sku">SKU nuevo</label>
-            <input id="incoming_new_sku" name="incoming_new_sku" type="text" value="{{.IncomingNewSKU}}" placeholder="SKU o código interno" />
-            {{with index .Errors "incoming_new_sku"}}
-              <div class="error">{{.}}</div>
-            {{end}}
+        {{if .IsAdmin}}
+          <div class="row">
+            <div>
+              <label for="incoming_new_sku">SKU nuevo</label>
+              <input id="incoming_new_sku" name="incoming_new_sku" type="text" value="{{.IncomingNewSKU}}" placeholder="SKU o código interno" />
+              {{with index .Errors "incoming_new_sku"}}
+                <div class="error">{{.}}</div>
+              {{end}}
+            </div>
+            <div>
+              <label for="incoming_new_name">Nombre del producto nuevo</label>
+              <input id="incoming_new_name" name="incoming_new_name" type="text" value="{{.IncomingNewName}}" placeholder="Nombre comercial" />
+              {{with index .Errors "incoming_new_name"}}
+                <div class="error">{{.}}</div>
+              {{end}}
+            </div>
           </div>
-          <div>
-            <label for="incoming_new_name">Nombre del producto nuevo</label>
-            <input id="incoming_new_name" name="incoming_new_name" type="text" value="{{.IncomingNewName}}" placeholder="Nombre comercial" />
-            {{with index .Errors "incoming_new_name"}}
-              <div class="error">{{.}}</div>
-            {{end}}
-          </div>
-        </div>
 
-        <div class="row">
-          <div>
-            <label for="incoming_new_line">Línea</label>
-            <input id="incoming_new_line" name="incoming_new_line" type="text" value="{{.IncomingNewLine}}" placeholder="Ej. Dermocosmética" />
+          <div class="row">
+            <div>
+              <label for="incoming_new_line">Línea</label>
+              <input id="incoming_new_line" name="incoming_new_line" type="text" value="{{.IncomingNewLine}}" placeholder="Ej. Dermocosmética" />
+            </div>
+            <div>
+              <label for="incoming_new_qty">Cantidad entrante</label>
+              <input id="incoming_new_qty" name="incoming_new_qty" type="number" min="1" value="{{.IncomingNewQty}}" />
+              {{with index .Errors "incoming_new_qty"}}
+                <div class="error">{{.}}</div>
+              {{end}}
+            </div>
           </div>
-          <div>
-            <label for="incoming_new_qty">Cantidad entrante</label>
-            <input id="incoming_new_qty" name="incoming_new_qty" type="number" min="1" value="{{.IncomingNewQty}}" />
-            {{with index .Errors "incoming_new_qty"}}
-              <div class="error">{{.}}</div>
-            {{end}}
-          </div>
-        </div>
+        {{end}}
       </div>
 
       <div>

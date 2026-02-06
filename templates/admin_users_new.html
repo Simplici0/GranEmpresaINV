@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{.Title}}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #faf9f7;
+      --card: #ffffff;
+      --text: #2a2826;
+      --muted: #6b6560;
+      --primary: #e85d3c;
+      --border: #e8e4df;
+      --success: #2d9d78;
+      --danger: #d64545;
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: "Inter", "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    header {
+      padding: 24px 32px 16px;
+    }
+
+    header h1 {
+      margin: 0;
+      font-size: 24px;
+    }
+
+    .nav-buttons {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+      margin-top: 12px;
+    }
+
+    .nav-button {
+      display: inline-block;
+      padding: 8px 16px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s ease;
+      border: 1px solid var(--primary);
+      background: var(--card);
+      color: var(--primary);
+      cursor: pointer;
+    }
+
+    .nav-button.primary {
+      background: var(--primary);
+      color: var(--card);
+    }
+
+    .flash {
+      margin-top: 16px;
+      background: #e9f7f1;
+      color: #1a6b4b;
+      border: 1px solid #bde4d2;
+      padding: 12px 16px;
+      border-radius: 10px;
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .warning {
+      margin-top: 12px;
+      padding: 12px 16px;
+      border-radius: 10px;
+      background: #fff4e1;
+      color: #7a4b00;
+      border: 1px solid #f1d6a6;
+      font-size: 14px;
+    }
+
+    main {
+      padding: 0 32px 32px;
+    }
+
+    form {
+      background: var(--card);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      padding: 24px;
+      display: grid;
+      gap: 16px;
+      max-width: 560px;
+    }
+
+    label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    input,
+    select {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 8px;
+      border: 1px solid var(--border);
+      font-size: 14px;
+    }
+
+    .error {
+      color: var(--danger);
+      font-size: 13px;
+      margin-top: 6px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>{{.Title}}</h1>
+    <div class="nav-buttons">
+      <a class="nav-button" href="/admin/users">Volver al listado</a>
+      <a class="nav-button" href="/inventario">Inventario</a>
+      <a class="nav-button" href="/dashboard">Dashboard</a>
+    </div>
+    {{if .Flash}}
+      <div class="flash">{{.Flash}}</div>
+    {{end}}
+    {{if .NewPassword}}
+      <div class="warning">Contraseña temporal generada: <strong>{{.NewPassword}}</strong></div>
+    {{end}}
+  </header>
+  <main>
+    <form action="/admin/users" method="post">
+      <div>
+        <label for="name">Nombre completo</label>
+        <input id="name" name="name" type="text" value="{{.User.Name}}" />
+        {{with index .Errors "name"}}
+          <div class="error">{{.}}</div>
+        {{end}}
+      </div>
+      <div>
+        <label for="email">Email</label>
+        <input id="email" name="email" type="email" value="{{.User.Email}}" />
+        {{with index .Errors "email"}}
+          <div class="error">{{.}}</div>
+        {{end}}
+      </div>
+      <div>
+        <label for="role">Rol</label>
+        <select id="role" name="role">
+          <option value="admin" {{if eq .User.Role "admin"}}selected{{end}}>Administrador</option>
+          <option value="employee" {{if or (eq .User.Role "") (eq .User.Role "employee")}}selected{{end}}>Empleado</option>
+        </select>
+        {{with index .Errors "role"}}
+          <div class="error">{{.}}</div>
+        {{end}}
+      </div>
+      <div>
+        <label for="password">Contraseña temporal (opcional)</label>
+        <input id="password" name="password" type="text" placeholder="Si se deja vacío, se genera automáticamente" />
+      </div>
+      {{with index .Errors "form"}}
+        <div class="error">{{.}}</div>
+      {{end}}
+      <div>
+        <button class="nav-button primary" type="submit">Crear usuario</button>
+      </div>
+    </form>
+  </main>
+</body>
+</html>
