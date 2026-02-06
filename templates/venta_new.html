@@ -151,6 +151,48 @@
       font-size: 12px;
       margin-top: 6px;
     }
+
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .user-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .role-pill {
+      background: #f4f6fb;
+      color: #2054c6;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .logout-button {
+      border: 1px solid var(--primary);
+      background: var(--card);
+      color: var(--primary);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .logout-button:hover {
+      background: var(--primary);
+      color: var(--card);
+    }
   </style>
 </head>
 <body>
@@ -159,12 +201,31 @@
       <a href="/inventario" class="nav-button">Volver a inventario</a>
       <a href="/venta/new" class="nav-button active">Registrar venta</a>
       <a href="/cambio/new" class="nav-button">Registrar cambio</a>
-      <a href="/csv/template" class="nav-button" target="_blank">Plantilla CSV</a>
-      <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
+      {{if .CurrentUser}}
+        {{if eq .CurrentUser.Role "admin"}}
+          <a href="/productos/new" class="nav-button">Nuevo producto</a>
+          <a href="/admin/users" class="nav-button">Usuarios</a>
+          <a href="/csv/template" class="nav-button" target="_blank">Plantilla CSV</a>
+          <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
+        {{end}}
+      {{end}}
     </div>
     
-    <h1>{{.Title}}</h1>
-    <p>Completa los datos de venta desde inventario.</p>
+    <div class="header-top">
+      <div>
+        <h1>{{.Title}}</h1>
+        <p>Completa los datos de venta desde inventario.</p>
+      </div>
+      {{if .CurrentUser}}
+      <div class="user-bar">
+        <span>{{.CurrentUser.Username}}</span>
+        <span class="role-pill">{{.CurrentUser.Role}}</span>
+        <form method="POST" action="/logout">
+          <button class="logout-button" type="submit">Cerrar sesión</button>
+        </form>
+      </div>
+      {{end}}
+    </div>
 
     <form action="/venta" method="POST">
       <div class="row">

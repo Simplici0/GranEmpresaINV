@@ -1,0 +1,180 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{.Title}}</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #faf9f7;
+      --card: #ffffff;
+      --text: #2a2826;
+      --muted: #6b6560;
+      --primary: #e85d3c;
+      --border: #e8e4df;
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: "Inter", "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+    }
+
+    header {
+      padding: 24px 32px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .header-top {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      flex-wrap: wrap;
+    }
+
+    .user-bar {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .role-pill {
+      background: #f4f6fb;
+      color: #2054c6;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 11px;
+      text-transform: uppercase;
+      letter-spacing: 0.08em;
+    }
+
+    .logout-button {
+      border: 1px solid var(--primary);
+      background: var(--card);
+      color: var(--primary);
+      padding: 8px 12px;
+      border-radius: 8px;
+      font-size: 13px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .logout-button:hover {
+      background: var(--primary);
+      color: var(--card);
+    }
+
+    .nav-buttons {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .nav-button {
+      display: inline-block;
+      padding: 8px 16px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s ease;
+      border: 1px solid var(--primary);
+      background: var(--card);
+      color: var(--primary);
+      cursor: pointer;
+    }
+
+    .nav-button:hover {
+      background: var(--primary);
+      color: var(--card);
+    }
+
+    main {
+      padding: 0 32px 32px;
+    }
+
+    .card {
+      background: var(--card);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      padding: 20px;
+      max-width: 640px;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 6px;
+      color: var(--muted);
+    }
+
+    input {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      font-size: 14px;
+      margin-bottom: 16px;
+    }
+
+    .note {
+      font-size: 13px;
+      color: var(--muted);
+      margin-top: 8px;
+    }
+  </style>
+</head>
+<body>
+  <header>
+    <div class="header-top">
+      <div>
+        <h1>{{.Title}}</h1>
+        <p>{{.Subtitle}}</p>
+      </div>
+      {{if .CurrentUser}}
+      <div class="user-bar">
+        <span>{{.CurrentUser.Username}}</span>
+        <span class="role-pill">{{.CurrentUser.Role}}</span>
+        <form method="POST" action="/logout">
+          <button class="logout-button" type="submit">Cerrar sesión</button>
+        </form>
+      </div>
+      {{end}}
+    </div>
+    <div class="nav-buttons">
+      <a href="/inventario" class="nav-button">Ver inventario</a>
+      <a href="/dashboard" class="nav-button">Ver dashboard</a>
+      <a href="/admin/users" class="nav-button">Usuarios</a>
+      <a href="/csv/template" class="nav-button" target="_blank">Plantilla CSV</a>
+      <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
+    </div>
+  </header>
+
+  <main>
+    <div class="card">
+      <form method="POST" action="/productos">
+        <label for="sku">SKU</label>
+        <input id="sku" name="sku" type="text" placeholder="SKU único" disabled />
+        <label for="nombre">Nombre</label>
+        <input id="nombre" name="nombre" type="text" placeholder="Nombre del producto" disabled />
+        <label for="linea">Línea</label>
+        <input id="linea" name="linea" type="text" placeholder="Línea o categoría" disabled />
+      </form>
+      <p class="note">Este formulario es un placeholder para el flujo de creación de productos. La persistencia se implementará junto con el catálogo.</p>
+    </div>
+  </main>
+</body>
+</html>

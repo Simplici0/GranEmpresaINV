@@ -1,7 +1,10 @@
 package main
 
 import (
+	"context"
+	"crypto/rand"
 	"database/sql"
+	"encoding/base64"
 	"fmt"
 	"html/template"
 	"log"
@@ -12,6 +15,8 @@ import (
 	"time"
 
 	_ "modernc.org/sqlite"
+
+	"golang.org/x/crypto/bcrypt"
 )
 
 type inventoryPageData struct {
@@ -19,6 +24,7 @@ type inventoryPageData struct {
 	Subtitle    string
 	RoutePrefix string
 	Flash       string
+	CurrentUser *User
 }
 
 type unitOption struct {
@@ -49,6 +55,7 @@ type cambioFormData struct {
 	IncomingNewLine     string
 	IncomingNewQty      int
 	Errors              map[string]string
+	CurrentUser         *User
 }
 
 type cambioConfirmData struct {
@@ -66,6 +73,7 @@ type cambioConfirmData struct {
 	IncomingNewName     string
 	IncomingNewLine     string
 	IncomingNewQty      int
+	CurrentUser         *User
 }
 
 type estadoCount struct {
@@ -120,7 +128,19 @@ type dashboardData struct {
 	MaxTimelineText string
 	TimelinePoints  string
 	Timeline        []timelinePoint
+	CurrentUser     *User
 }
+
+type User struct {
+	ID       int
+	Username string
+	Role     string
+	IsActive bool
+}
+
+type contextKey string
+
+const userContextKey contextKey = "user"
 
 func findProduct(products []productOption, id string) (productOption, bool) {
 	for _, product := range products {
@@ -170,6 +190,107 @@ func buildTimelinePoints(timeline []timelinePoint, width, height, padding float6
 	return strings.Join(points, " ")
 }
 
+func generateToken() (string, error) {
+	tokenBytes := make([]byte, 32)
+	if _, err := rand.Read(tokenBytes); err != nil {
+		return "", err
+	}
+	return base64.RawURLEncoding.EncodeToString(tokenBytes), nil
+}
+
+func setSessionCookie(w http.ResponseWriter, token string, expiresAt time.Time, secure bool) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_token",
+		Value:    token,
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
+		Expires:  expiresAt,
+	})
+}
+
+func clearSessionCookie(w http.ResponseWriter) {
+	http.SetCookie(w, &http.Cookie{
+		Name:     "session_token",
+		Value:    "",
+		Path:     "/",
+		HttpOnly: true,
+		SameSite: http.SameSiteLaxMode,
+		MaxAge:   -1,
+	})
+}
+
+func userFromContext(r *http.Request) *User {
+	if user, ok := r.Context().Value(userContextKey).(*User); ok {
+		return user
+	}
+	return nil
+}
+
+func userFromRequest(db *sql.DB, r *http.Request) (*User, error) {
+	cookie, err := r.Cookie("session_token")
+	if err != nil {
+		return nil, err
+	}
+
+	var (
+		user       User
+		isActive   int
+		expiresRaw string
+	)
+	query := `
+		SELECT u.id, u.username, u.role, u.is_active, s.expires_at
+		FROM sessions s
+		JOIN users u ON u.id = s.user_id
+		WHERE s.token = ?`
+	if err := db.QueryRow(query, cookie.Value).Scan(&user.ID, &user.Username, &user.Role, &isActive, &expiresRaw); err != nil {
+		return nil, err
+	}
+	expiresAt, err := time.Parse(time.RFC3339, expiresRaw)
+	if err != nil {
+		return nil, err
+	}
+	if time.Now().After(expiresAt) {
+		_, _ = db.Exec("DELETE FROM sessions WHERE token = ?", cookie.Value)
+		return nil, sql.ErrNoRows
+	}
+	user.IsActive = isActive == 1
+	if !user.IsActive {
+		_, _ = db.Exec("DELETE FROM sessions WHERE token = ?", cookie.Value)
+		return nil, sql.ErrNoRows
+	}
+	return &user, nil
+}
+
+func authMiddleware(db *sql.DB, next http.Handler) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/login" || r.URL.Path == "/health" {
+			next.ServeHTTP(w, r)
+			return
+		}
+
+		user, err := userFromRequest(db, r)
+		if err != nil {
+			http.Redirect(w, r, "/login", http.StatusSeeOther)
+			return
+		}
+		ctx := context.WithValue(r.Context(), userContextKey, user)
+		next.ServeHTTP(w, r.WithContext(ctx))
+	})
+}
+
+func adminOnly(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		user := userFromContext(r)
+		if user == nil || user.Role != "admin" {
+			http.Error(w, "Acceso restringido a administradores.", http.StatusForbidden)
+			return
+		}
+		next(w, r)
+	}
+}
+
 func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -202,6 +323,24 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 		creado_en TEXT NOT NULL
 	);
 	CREATE INDEX IF NOT EXISTS idx_unidades_estado ON unidades (estado);
+
+	CREATE TABLE IF NOT EXISTS users (
+		id INTEGER PRIMARY KEY AUTOINCREMENT,
+		username TEXT NOT NULL UNIQUE,
+		password_hash TEXT NOT NULL,
+		role TEXT NOT NULL CHECK (role IN ('admin', 'empleado')),
+		created_at TEXT NOT NULL,
+		is_active INTEGER NOT NULL DEFAULT 1
+	);
+	CREATE INDEX IF NOT EXISTS idx_users_role ON users (role);
+
+	CREATE TABLE IF NOT EXISTS sessions (
+		token TEXT PRIMARY KEY,
+		user_id INTEGER NOT NULL,
+		created_at TEXT NOT NULL,
+		expires_at TEXT NOT NULL,
+		FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+	);
 	`
 
 	if _, err := db.Exec(schema); err != nil {
@@ -228,6 +367,10 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 		if err := seedUnidades(db); err != nil {
 			return nil, err
 		}
+	}
+
+	if err := seedAdminUser(db); err != nil {
+		return nil, err
 	}
 
 	return db, nil
@@ -303,6 +446,34 @@ func seedUnidades(db *sql.DB) error {
 	return tx.Commit()
 }
 
+func seedAdminUser(db *sql.DB) error {
+	adminUser := os.Getenv("ADMIN_USER")
+	adminPass := os.Getenv("ADMIN_PASS")
+	if adminUser == "" || adminPass == "" {
+		log.Print("ADMIN_USER/ADMIN_PASS no configurados, omitiendo creación automática de admin.")
+		return nil
+	}
+
+	var existingID int
+	err := db.QueryRow("SELECT id FROM users WHERE username = ?", adminUser).Scan(&existingID)
+	if err == nil {
+		return nil
+	}
+	if err != sql.ErrNoRows {
+		return err
+	}
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte(adminPass), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+	_, err = db.Exec(`
+		INSERT INTO users (username, password_hash, role, created_at, is_active)
+		VALUES (?, ?, 'admin', ?, 1)
+	`, adminUser, string(hashed), time.Now().Format(time.RFC3339))
+	return err
+}
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -314,8 +485,11 @@ func main() {
 	}
 
 	tmpl := template.Must(template.ParseFiles(
+		"templates/admin_users.html",
 		"templates/dashboard.html",
 		"templates/inventario.html",
+		"templates/login.html",
+		"templates/product_new.html",
 		"templates/venta_new.html",
 		"templates/venta_confirm.html",
 		"templates/cambio_new.html",
@@ -363,6 +537,7 @@ func main() {
 		Errors      map[string]string
 		MetodoPagos []string
 		RoutePrefix string
+		CurrentUser *User
 	}
 
 	type ventaConfirmData struct {
@@ -372,9 +547,194 @@ func main() {
 		PrecioFinal string
 		MetodoPago  string
 		Notas       string
+		CurrentUser *User
 	}
 
-	http.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
+	type loginPageData struct {
+		Title    string
+		Error    string
+		Username string
+	}
+
+	type adminUserRow struct {
+		ID        int
+		Username  string
+		Role      string
+		IsActive  bool
+		CreatedAt string
+	}
+
+	type adminUsersData struct {
+		Title       string
+		Subtitle    string
+		Users       []adminUserRow
+		CurrentUser *User
+	}
+
+	type productNewData struct {
+		Title       string
+		Subtitle    string
+		CurrentUser *User
+	}
+
+	mux := http.NewServeMux()
+
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write([]byte("ok"))
+	})
+
+	mux.HandleFunc("/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodGet {
+			if user, err := userFromRequest(db, r); err == nil && user != nil {
+				http.Redirect(w, r, "/inventario", http.StatusSeeOther)
+				return
+			}
+			data := loginPageData{
+				Title: "Iniciar sesión",
+			}
+			if err := tmpl.ExecuteTemplate(w, "login.html", data); err != nil {
+				http.Error(w, "Error al renderizar login", http.StatusInternalServerError)
+			}
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
+			return
+		}
+
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "No se pudo leer el formulario", http.StatusBadRequest)
+			return
+		}
+
+		username := strings.TrimSpace(r.FormValue("username"))
+		password := r.FormValue("password")
+
+		var (
+			user     User
+			hash     string
+			isActive int
+		)
+		err := db.QueryRow(`
+			SELECT id, username, password_hash, role, is_active, created_at
+			FROM users
+			WHERE username = ?
+		`, username).Scan(&user.ID, &user.Username, &hash, &user.Role, &isActive)
+		if err != nil || isActive != 1 {
+			data := loginPageData{
+				Title:    "Iniciar sesión",
+				Error:    "Credenciales inválidas.",
+				Username: username,
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+			if err := tmpl.ExecuteTemplate(w, "login.html", data); err != nil {
+				http.Error(w, "Error al renderizar login", http.StatusInternalServerError)
+			}
+			return
+		}
+
+		if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
+			data := loginPageData{
+				Title:    "Iniciar sesión",
+				Error:    "Credenciales inválidas.",
+				Username: username,
+			}
+			w.WriteHeader(http.StatusUnauthorized)
+			if err := tmpl.ExecuteTemplate(w, "login.html", data); err != nil {
+				http.Error(w, "Error al renderizar login", http.StatusInternalServerError)
+			}
+			return
+		}
+
+		token, err := generateToken()
+		if err != nil {
+			http.Error(w, "No se pudo generar sesión", http.StatusInternalServerError)
+			return
+		}
+		expiresAt := time.Now().Add(24 * time.Hour)
+		_, err = db.Exec(`
+			INSERT INTO sessions (token, user_id, created_at, expires_at)
+			VALUES (?, ?, ?, ?)
+		`, token, user.ID, time.Now().Format(time.RFC3339), expiresAt.Format(time.RFC3339))
+		if err != nil {
+			http.Error(w, "No se pudo guardar la sesión", http.StatusInternalServerError)
+			return
+		}
+
+		setSessionCookie(w, token, expiresAt, r.TLS != nil)
+		http.Redirect(w, r, "/inventario", http.StatusSeeOther)
+	})
+
+	mux.HandleFunc("/logout", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost && r.Method != http.MethodGet {
+			http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
+			return
+		}
+		if cookie, err := r.Cookie("session_token"); err == nil {
+			_, _ = db.Exec("DELETE FROM sessions WHERE token = ?", cookie.Value)
+		}
+		clearSessionCookie(w)
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+	})
+
+	mux.HandleFunc("/admin/users", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		rows, err := db.Query(`SELECT id, username, role, is_active, created_at FROM users ORDER BY id`)
+		if err != nil {
+			http.Error(w, "Error al consultar usuarios", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		users := []adminUserRow{}
+		for rows.Next() {
+			var user adminUserRow
+			var isActive int
+			if err := rows.Scan(&user.ID, &user.Username, &user.Role, &isActive, &user.CreatedAt); err != nil {
+				http.Error(w, "Error al leer usuarios", http.StatusInternalServerError)
+				return
+			}
+			user.IsActive = isActive == 1
+			users = append(users, user)
+		}
+		if err := rows.Err(); err != nil {
+			http.Error(w, "Error al procesar usuarios", http.StatusInternalServerError)
+			return
+		}
+
+		data := adminUsersData{
+			Title:       "Gestión de usuarios",
+			Subtitle:    "Control de accesos y roles del inventario.",
+			Users:       users,
+			CurrentUser: userFromContext(r),
+		}
+		if err := tmpl.ExecuteTemplate(w, "admin_users.html", data); err != nil {
+			http.Error(w, "Error al renderizar usuarios", http.StatusInternalServerError)
+		}
+	}))
+
+	mux.HandleFunc("/productos/new", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		data := productNewData{
+			Title:       "Crear producto",
+			Subtitle:    "Acción reservada para administradores.",
+			CurrentUser: userFromContext(r),
+		}
+		if err := tmpl.ExecuteTemplate(w, "product_new.html", data); err != nil {
+			http.Error(w, "Error al renderizar productos", http.StatusInternalServerError)
+		}
+	}))
+
+	mux.HandleFunc("/productos", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			http.Redirect(w, r, "/productos/new", http.StatusSeeOther)
+			return
+		}
+		http.Error(w, "Creación de productos pendiente de implementación.", http.StatusNotImplemented)
+	}))
+
+	mux.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
+		currentUser := userFromContext(r)
 		estadoRows, err := db.Query(`
 			SELECT estado, COUNT(*)
 			FROM unidades
@@ -547,6 +907,7 @@ func main() {
 			MaxTimelineText: formatCurrency(maxTimeline),
 			TimelinePoints:  buildTimelinePoints(timeline, 560, 180, 24),
 			Timeline:        timeline,
+			CurrentUser:     currentUser,
 		}
 
 		if err := tmpl.ExecuteTemplate(w, "dashboard.html", data); err != nil {
@@ -554,20 +915,23 @@ func main() {
 		}
 	})
 
-	http.HandleFunc("/inventario", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/inventario", func(w http.ResponseWriter, r *http.Request) {
+		currentUser := userFromContext(r)
 		flash := r.URL.Query().Get("mensaje")
 		data := inventoryPageData{
 			Title:       "Pantalla Inventario (por producto)",
 			Subtitle:    "Control por producto con ventas, cambios y auditoría de unidades en FIFO.",
 			RoutePrefix: "",
 			Flash:       flash,
+			CurrentUser: currentUser,
 		}
 		if err := tmpl.ExecuteTemplate(w, "inventario.html", data); err != nil {
 			http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
 		}
 	})
 
-	http.HandleFunc("/venta/new", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/venta/new", func(w http.ResponseWriter, r *http.Request) {
+		currentUser := userFromContext(r)
 		productID := r.URL.Query().Get("producto_id")
 		cantidad := 1
 		if qty := r.URL.Query().Get("cantidad"); qty != "" {
@@ -582,6 +946,7 @@ func main() {
 			Cantidad:    cantidad,
 			MetodoPago:  paymentMethods[0],
 			MetodoPagos: paymentMethods,
+			CurrentUser: currentUser,
 		}
 
 		if err := tmpl.ExecuteTemplate(w, "venta_new.html", data); err != nil {
@@ -589,7 +954,8 @@ func main() {
 		}
 	})
 
-	http.HandleFunc("/cambio/new", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/cambio/new", func(w http.ResponseWriter, r *http.Request) {
+		currentUser := userFromContext(r)
 		productID := r.URL.Query().Get("producto_id")
 		if productID == "" {
 			productID = products[0].ID
@@ -622,6 +988,7 @@ func main() {
 			IncomingMode:        "existing",
 			IncomingExistingID:  products[0].ID,
 			IncomingExistingQty: cantidad,
+			CurrentUser:         currentUser,
 		}
 
 		if err := tmpl.ExecuteTemplate(w, "cambio_new.html", data); err != nil {
@@ -629,7 +996,8 @@ func main() {
 		}
 	})
 
-	http.HandleFunc("/venta", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/venta", func(w http.ResponseWriter, r *http.Request) {
+		currentUser := userFromContext(r)
 		if r.Method != http.MethodPost {
 			http.Redirect(w, r, "/venta/new", http.StatusSeeOther)
 			return
@@ -681,6 +1049,7 @@ func main() {
 				Notas:       notas,
 				Errors:      errors,
 				MetodoPagos: paymentMethods,
+				CurrentUser: currentUser,
 			}
 			w.WriteHeader(http.StatusBadRequest)
 			if err := tmpl.ExecuteTemplate(w, "venta_new.html", data); err != nil {
@@ -696,13 +1065,15 @@ func main() {
 			PrecioFinal: precioValue,
 			MetodoPago:  metodoPago,
 			Notas:       notas,
+			CurrentUser: currentUser,
 		}
 		if err := tmpl.ExecuteTemplate(w, "venta_confirm.html", confirmData); err != nil {
 			http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
 		}
 	})
 
-	http.HandleFunc("/cambio", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/cambio", func(w http.ResponseWriter, r *http.Request) {
+		currentUser := userFromContext(r)
 		if r.Method != http.MethodPost {
 			http.Redirect(w, r, "/cambio/new", http.StatusSeeOther)
 			return
@@ -807,6 +1178,7 @@ func main() {
 				IncomingNewLine:     incomingNewLine,
 				IncomingNewQty:      incomingNewQty,
 				Errors:              errors,
+				CurrentUser:         currentUser,
 			}
 			w.WriteHeader(http.StatusBadRequest)
 			if err := tmpl.ExecuteTemplate(w, "cambio_new.html", data); err != nil {
@@ -837,6 +1209,7 @@ func main() {
 			IncomingNewName:     incomingNewName,
 			IncomingNewLine:     incomingNewLine,
 			IncomingNewQty:      incomingNewQty,
+			CurrentUser:         currentUser,
 		}
 
 		if err := tmpl.ExecuteTemplate(w, "cambio_confirm.html", confirmData); err != nil {
@@ -844,33 +1217,37 @@ func main() {
 		}
 	})
 
-	http.HandleFunc("/csv/template", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/csv/template", adminOnly(func(w http.ResponseWriter, r *http.Request) {
 		if err := tmpl.ExecuteTemplate(w, "csv_template.html", struct {
-			Title string
+			Title       string
+			CurrentUser *User
 		}{
-			Title: "Plantilla CSV - Carga masiva",
+			Title:       "Plantilla CSV - Carga masiva",
+			CurrentUser: userFromContext(r),
 		}); err != nil {
 			http.Error(w, "Error al renderizar plantilla CSV", http.StatusInternalServerError)
 		}
-	})
+	}))
 
-	http.HandleFunc("/csv/export", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/csv/export", adminOnly(func(w http.ResponseWriter, r *http.Request) {
 		if err := tmpl.ExecuteTemplate(w, "csv_export.html", struct {
-			Title string
+			Title       string
+			CurrentUser *User
 		}{
-			Title: "Exportaciones CSV",
+			Title:       "Exportaciones CSV",
+			CurrentUser: userFromContext(r),
 		}); err != nil {
 			http.Error(w, "Error al renderizar exportaciones CSV", http.StatusInternalServerError)
 		}
-	})
+	}))
 
-	http.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
 		http.Redirect(w, r, "/inventario", http.StatusFound)
 	})
 
 	addr := ":" + port
 	log.Printf("Servidor activo en http://localhost:%s/inventario", port)
-	if err := http.ListenAndServe(addr, nil); err != nil {
+	if err := http.ListenAndServe(addr, authMiddleware(db, mux)); err != nil {
 		log.Fatal(err)
 	}
 }
