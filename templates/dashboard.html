@@ -149,6 +149,44 @@
       gap: 12px;
     }
 
+    .range-form {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      align-items: end;
+    }
+
+    .range-form label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .range-form input {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      font-size: 13px;
+    }
+
+    .range-summary {
+      margin-top: 12px;
+      display: grid;
+      gap: 6px;
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: #f9faff;
+    }
+
+    .range-summary strong {
+      font-size: 20px;
+    }
+
     .bar-chart {
       display: grid;
       gap: 12px;
@@ -288,23 +326,24 @@
     </article>
 
     <article class="card">
-      <h2>Ventas totales por periodo</h2>
-      <div class="bar-chart">
-        {{range .PeriodosTotales}}
-        <div class="bar-row">
-          <div>{{.Label}}</div>
-          <div class="bar"><span style="width: {{printf "%.1f" .Percent}}%;"></span></div>
+      <h2>Ventas totales (rango)</h2>
+      <form class="range-form" action="/dashboard" method="GET">
+        <div>
+          <label for="start_date">Desde</label>
+          <input id="start_date" name="start_date" type="date" value="{{.RangeStart}}" />
         </div>
-        {{end}}
-      </div>
-      <div class="periods">
-        {{range .PeriodosTotales}}
-        <div class="period">
-          <div>{{.Label}}</div>
-          <strong>{{.Total}}</strong>
-          <div class="badge">{{.Range}}</div>
+        <div>
+          <label for="end_date">Hasta</label>
+          <input id="end_date" name="end_date" type="date" value="{{.RangeEnd}}" />
         </div>
-        {{end}}
+        <div>
+          <button class="nav-button primary" type="submit">Actualizar</button>
+        </div>
+      </form>
+      <div class="range-summary">
+        <div>Rango seleccionado</div>
+        <strong>{{.RangeTotal}}</strong>
+        <div class="badge">{{.RangeStart}} → {{.RangeEnd}} · {{.RangeCount}} ventas</div>
       </div>
     </article>
 
