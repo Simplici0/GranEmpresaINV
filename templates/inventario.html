@@ -343,6 +343,66 @@
       font-weight: 600;
     }
 
+    .pricing-panel {
+      margin: 0 32px 24px;
+      background: var(--card);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      padding: 16px;
+      display: grid;
+      gap: 16px;
+    }
+
+    .pricing-panel h2 {
+      margin: 0;
+      font-size: 18px;
+    }
+
+    .pricing-table {
+      width: 100%;
+      border-collapse: collapse;
+      background: #fff;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      overflow: hidden;
+    }
+
+    .pricing-table th,
+    .pricing-table td {
+      padding: 10px 12px;
+      font-size: 13px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+
+    .pricing-table thead {
+      background: #f4f6fb;
+      text-align: left;
+    }
+
+    .pricing-table tbody tr:last-child td {
+      border-bottom: none;
+    }
+
+    .pricing-form {
+      display: contents;
+    }
+
+    .pricing-form input[type="text"] {
+      width: 120px;
+    }
+
+    .pricing-muted {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .pricing-actions {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
     main {
       padding: 0 32px 32px;
     }
@@ -523,6 +583,45 @@
     {{end}}
   </header>
 
+  <section class="pricing-panel">
+    <div>
+      <h2>Precios por producto</h2>
+      <p class="pricing-muted">Edita precio venta, precio consultora y descuento personalizado. El precio base es inalterable.</p>
+    </div>
+    <table class="pricing-table" aria-label="Tabla de precios">
+      <thead>
+        <tr>
+          <th>SKU</th>
+          <th>Producto</th>
+          <th>Línea</th>
+          <th>Precio base</th>
+          <th>Precio venta actual</th>
+          <th>Precio consultora</th>
+          <th>Descuento personalizado</th>
+          <th></th>
+        </tr>
+      </thead>
+      <tbody>
+        {{range .Pricing}}
+        <tr>
+          <form class="pricing-form" method="post" action="/productos/{{.ID}}/edit-pricing">
+            <td><strong>{{.ID}}</strong></td>
+            <td>{{.Name}}</td>
+            <td>{{.Line}}</td>
+            <td>${{printf "%.0f" .PrecioBase}}</td>
+            <td><input type="text" name="precio_venta_actual" value="{{printf "%.0f" .PrecioVentaActual}}" inputmode="decimal" /></td>
+            <td><input type="text" name="precio_consultora" value="{{printf "%.0f" .PrecioConsultora}}" inputmode="decimal" /></td>
+            <td><input type="text" name="descuento_personalizado" value="{{printf "%.0f" .DescuentoPersonalizado}}" inputmode="decimal" /></td>
+            <td class="pricing-actions">
+              <button class="primary" type="submit">Guardar</button>
+            </td>
+          </form>
+        </tr>
+        {{end}}
+      </tbody>
+    </table>
+  </section>
+
   <!-- Estado - Sección de filtros -->
   <section class="filters">
     <div class="filter-group">
@@ -558,25 +657,6 @@
 
   <!-- Resumen - Sección de métricas -->
   <!-- Listado de productos -->
-  <main>
-    <table>
-      <thead>
-        <tr>
-          <th>Producto</th>
-          <th>Línea</th>
-          <th>Estado</th>
-          <th>Stock disponible</th>
-          <th>Acciones rápidas</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody id="productTable"></tbody>
-    </table>
-  </main>
-  
-</body>
-</html>
-
   <main>
     <table>
       <thead>
