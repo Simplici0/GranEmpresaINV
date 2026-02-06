@@ -29,17 +29,52 @@
       color: var(--text);
     }
 
-    header {
-      padding: 24px 32px 8px;
+    .page-content {
+      padding: 16px 32px 32px;
     }
 
-    header h1 {
+    .global-banner {
+      background: #f47a24;
+      padding: 6px 32px;
+    }
+
+    .banner-logos {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .logo-placeholder {
+      height: 22px;
+      min-width: 76px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px dashed rgba(255, 255, 255, 0.7);
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .page-header {
+      padding: 16px 32px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .page-header h1 {
       margin: 0;
       font-size: 24px;
     }
 
-    header p {
-      margin: 8px 0 0;
+    .page-header p {
+      margin: 0;
       color: var(--muted);
     }
 
@@ -82,13 +117,6 @@
 
     .nav-button.primary:hover {
       background: #d84a2b;
-    }
-
-    header nav a {
-      text-decoration: none;
-      color: var(--primary);
-      font-size: 13px;
-      font-weight: 600;
     }
 
     .filters {
@@ -274,30 +302,20 @@
   </style>
 </head>
 <body>
-  <header>
-    <h1>{{.Title}}</h1>
-    <p>{{.Subtitle}}</p>
-    <div class="nav-buttons">
-      <a href="/dashboard" class="nav-button">Ver dashboard</a>
-      <a href="/venta/new" class="nav-button">Registrar venta</a>
-      <a href="/cambio/new" class="nav-button">Registrar cambio</a>
-      <a href="/csv/template" class="nav-button" target="_blank">Plantilla CSV</a>
-      <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
-    </div>
+  {{template "header" .}}
+  <div class="page-content">
     {{if .Flash}}
       <div class="flash">{{.Flash}}</div>
     {{end}}
-  </header>
-
-  <!-- Estado - Sección de filtros -->
-  <section class="filters">
+    <!-- Estado - Sección de filtros -->
+    <section class="filters">
     <div class="filter-group">
       <label for="statusFilter">Estado</label>
       <select id="statusFilter">
         <option value="all">Todos</option>
-        <option value="available">Available</option>
-        <option value="sold">Sold</option>
-        <option value="swapped">Swapped</option>
+        <option value="available">Disponible</option>
+        <option value="sold">Vendido</option>
+        <option value="swapped">Cambio</option>
       </select>
     </div>
     <div class="filter-group">
@@ -320,7 +338,7 @@
         <span>Mostrar próximos 45 días</span>
       </div>
     </div>
-  </section>
+    </section>
 
   <main>
     <table>
@@ -334,28 +352,178 @@
           <th></th>
         </tr>
       </thead>
-      <tbody>
-        {{range .Products}}
-        <tr>
+      <tbody id="productTable"></tbody>
+    </table>
+  </main>
+
+  <script>
+    const products = [
+      {
+        id: "P-001",
+        name: "Proteína Balance 500g",
+        line: "Nutrición",
+        status: "available",
+        units: [
+          { id: "U-001", received: "2024-05-10", expires: "2024-11-10", location: "A-01", status: "available" },
+          { id: "U-002", received: "2024-06-02", expires: "2024-12-02", location: "A-01", status: "available" },
+          { id: "U-003", received: "2024-07-12", expires: "2025-01-12", location: "A-02", status: "available" }
+        ]
+      },
+      {
+        id: "P-002",
+        name: "Crema Regeneradora",
+        line: "Dermocosmética",
+        status: "available",
+        units: [
+          { id: "U-101", received: "2024-04-01", expires: "2024-09-08", location: "B-11", status: "available" },
+          { id: "U-102", received: "2024-04-18", expires: "2024-09-25", location: "B-11", status: "available" },
+          { id: "U-103", received: "2024-05-05", expires: "2024-11-02", location: "B-12", status: "available" },
+          { id: "U-104", received: "2024-05-20", expires: "2024-12-09", location: "B-13", status: "available" }
+        ]
+      },
+      {
+        id: "P-003",
+        name: "Leche Pediátrica Premium",
+        line: "Pediatría",
+        status: "swapped",
+        units: [
+          { id: "U-201", received: "2024-03-15", expires: "2024-08-20", location: "C-02", status: "available" },
+          { id: "U-202", received: "2024-04-02", expires: "2024-10-18", location: "C-03", status: "swapped" }
+        ]
+      },
+      {
+        id: "P-004",
+        name: "Shampoo Suave",
+        line: "Dermocosmética",
+        status: "sold",
+        units: [
+          { id: "U-301", received: "2024-01-22", expires: "2024-07-01", location: "B-21", status: "sold" },
+          { id: "U-302", received: "2024-02-15", expires: "2024-08-18", location: "B-22", status: "sold" }
+        ]
+      }
+    ];
+
+    const statusFilter = document.getElementById("statusFilter");
+    const lineFilter = document.getElementById("lineFilter");
+    const searchFilter = document.getElementById("searchFilter");
+    const expiryToggle = document.getElementById("expiryToggle");
+    const productTable = document.getElementById("productTable");
+    const summary = document.getElementById("summary");
+    const downloadTemplateButton = document.getElementById("download-template");
+    const uploadInput = document.getElementById("csv-upload");
+    const processButton = document.getElementById("process-csv");
+    const uploadStatus = document.getElementById("upload-status");
+    const uploadPreviewBody = document.getElementById("upload-preview-body");
+    const movementLog = document.getElementById("movement-log");
+    const rangeStart = document.getElementById("range-start");
+    const rangeEnd = document.getElementById("range-end");
+    const exportInventoryAggregateButton = document.getElementById("export-inventory-aggregate");
+    const exportInventoryUnitsButton = document.getElementById("export-inventory-units");
+    const exportSalesButton = document.getElementById("export-sales");
+    const exportChangesButton = document.getElementById("export-changes");
+
+    const formatDate = (value) => new Date(value).toLocaleDateString("es-ES");
+    const formatDateISO = (value) => new Date(value).toISOString().slice(0, 10);
+    const statusLabels = {
+      available: "Disponible",
+      sold: "Vendido",
+      swapped: "Cambio",
+      Disponible: "Disponible",
+      Vendida: "Vendido",
+      Vendido: "Vendido",
+      Cambio: "Cambio"
+    };
+    const statusLabel = (status) => statusLabels[status] || status;
+
+    const updateSummary = (visibleProducts) => {
+      const totalProducts = visibleProducts.length;
+      const totalUnits = visibleProducts.reduce((acc, product) => acc + product.units.filter((unit) => unit.status === "available").length, 0);
+      const expiringUnits = visibleProducts.reduce(
+        (acc, product) => acc + product.units.filter((unit) => isExpiringSoon(unit.expires)).length,
+        0
+      );
+
+      summary.innerHTML = `
+        <div class="summary-card">
+          <h3>Productos visibles</h3>
+          <span>${totalProducts}</span>
+        </div>
+        <div class="summary-card">
+          <h3>Unidades disponibles</h3>
+          <span>${totalUnits}</span>
+        </div>
+        <div class="summary-card">
+          <h3>Próximos a caducar</h3>
+          <span>${expiringUnits}</span>
+        </div>
+      `;
+    };
+
+    const isExpiringSoon = (dateString) => {
+      const today = new Date();
+      const expiry = new Date(dateString);
+      const diffDays = (expiry - today) / (1000 * 60 * 60 * 24);
+      return diffDays <= 45;
+    };
+
+    const applyFilters = () => {
+      const statusValue = statusFilter.value;
+      const lineValue = lineFilter.value;
+      const query = searchFilter.value.toLowerCase();
+      const expiryOnly = expiryToggle.checked;
+
+      const filtered = products.filter((product) => {
+        const matchesStatus = statusValue === "all" || product.status === statusValue;
+        const matchesLine = lineValue === "all" || product.line === lineValue;
+        const matchesSearch =
+          product.name.toLowerCase().includes(query) || product.id.toLowerCase().includes(query);
+        const matchesExpiry = !expiryOnly || product.units.some((unit) => isExpiringSoon(unit.expires));
+
+        return matchesStatus && matchesLine && matchesSearch && matchesExpiry;
+      });
+
+      renderTable(filtered);
+      updateSummary(filtered);
+    };
+
+    const renderTable = (items) => {
+      productTable.innerHTML = "";
+
+      items.forEach((product) => {
+        const availableUnits = product.units.filter((unit) => unit.status === "available");
+        const row = document.createElement("tr");
+        row.innerHTML = `
           <td>
-            <div class="product-name" data-product="{{.ID}}">{{.Name}}</div>
-            <div class="fifo-note">SKU {{.ID}} · FIFO: {{.Disponible}} unidades disponibles</div>
+            <div class="product-name" data-product="${product.id}">${product.name}</div>
+            <div class="fifo-note">SKU ${product.id} · FIFO: ${availableUnits.length} unidades disponibles</div>
           </td>
-          <td>{{.Line}}</td>
-          <td><span class="status {{.EstadoClass}}">{{.EstadoLabel}}</span></td>
-          <td><strong>{{.Disponible}}</strong></td>
+          <td>${product.line}</td>
+          <td><span class="status ${product.status}">${statusLabel(product.status)}</span></td>
+          <td><strong>${availableUnits.length}</strong></td>
           <td>
-            <form class="actions" method="GET">
-              <input type="hidden" name="producto_id" value="{{.ID}}" />
-              <input type="number" name="cantidad" min="1" max="{{.Disponible}}" value="1" {{if .DisabledSale}}disabled{{end}} />
-              <button class="primary" type="submit" formaction="/venta/new" {{if .DisabledSale}}disabled{{end}}>Vender</button>
-              <button class="secondary" type="submit" formaction="/cambio/new" {{if .DisabledSale}}disabled{{end}}>Cambio</button>
-            </form>
+            <div class="actions">
+              <input type="number" min="1" max="${availableUnits.length}" value="1" data-qty="${product.id}" />
+              <button class="primary" data-action="sell" data-product="${product.id}">Vender</button>
+              <button class="secondary" data-action="swap" data-product="${product.id}">Cambio</button>
+            </div>
           </td>
-          <td></td>
-        </tr>
-        <tr>
-          <td colspan="6" class="units-panel" id="units-{{.ID}}" style="display: none;">
+          <td>
+            <div class="menu">
+              <button class="ghost" data-menu="${product.id}">⋮</button>
+              <div class="menu-panel" id="menu-${product.id}">
+                <button>Reservar unidades</button>
+                <button>Registrar daño</button>
+                <button>Ver historial</button>
+              </div>
+            </div>
+          </td>
+        `;
+
+        productTable.appendChild(row);
+
+        const unitsRow = document.createElement("tr");
+        unitsRow.innerHTML = `
+          <td colspan="6" class="units-panel" id="units-${product.id}" style="display: none;">
             <div class="units-header">
               <h4>Unidades del producto</h4>
               <span class="fifo-note">Auditoría por lote · Selección FIFO al vender</span>
@@ -370,14 +538,21 @@
                 </tr>
               </thead>
               <tbody>
-                {{range .Unidades}}
-                <tr>
-                  <td>{{.ID}}</td>
-                  <td>{{.CreadoEn}}</td>
-                  <td><span class="status {{.EstadoClass}}">{{.Estado}}</span></td>
-                  <td><span class="unit-tag">{{.FIFO}}</span></td>
-                </tr>
-                {{end}}
+                ${product.units
+                  .map((unit, index) => {
+                    const fifoOrder = unit.status === "available" ? index + 1 : "-";
+                    return `
+                      <tr>
+                        <td>${unit.id}</td>
+                        <td>${formatDate(unit.received)}</td>
+                        <td>${formatDate(unit.expires)}</td>
+                        <td>${unit.location}</td>
+                        <td>${statusLabel(unit.status)}</td>
+                        <td><span class="unit-tag">${fifoOrder}</span></td>
+                      </tr>
+                    `;
+                  })
+                  .join("")}
               </tbody>
             </table>
           </td>
