@@ -322,6 +322,16 @@
 
     // Funciones auxiliares
     const formatDateISO = (value) => new Date(value).toISOString().slice(0, 10);
+    const statusLabels = {
+      available: "Disponible",
+      sold: "Vendido",
+      swapped: "Cambio",
+      Disponible: "Disponible",
+      Vendida: "Vendido",
+      Vendido: "Vendido",
+      Cambio: "Cambio"
+    };
+    const statusLabel = (status) => statusLabels[status] || status;
     
     const escapeCSVValue = (value) => {
       const stringValue = String(value ?? "");
@@ -374,7 +384,7 @@
           product.id,
           product.name,
           product.line,
-          product.status,
+          statusLabel(product.status),
           availableUnits,
           product.units.length
         ];
@@ -390,7 +400,7 @@
           product.name,
           product.line,
           unit.id,
-          unit.status,
+          statusLabel(unit.status),
           unit.received,
           unit.expires,
           unit.location

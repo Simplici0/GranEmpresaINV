@@ -151,6 +151,22 @@ func formatCurrency(value float64) string {
 	return fmt.Sprintf("$%.0f", value)
 }
 
+func statusLabel(estado string) string {
+	labels := map[string]string{
+		"available":  "Disponible",
+		"sold":       "Vendido",
+		"swapped":    "Cambio",
+		"Disponible": "Disponible",
+		"Vendida":    "Vendido",
+		"Vendido":    "Vendido",
+		"Cambio":     "Cambio",
+	}
+	if label, ok := labels[estado]; ok {
+		return label
+	}
+	return estado
+}
+
 func buildTimelinePoints(timeline []timelinePoint, width, height, padding float64) string {
 	if len(timeline) == 0 {
 		return ""
@@ -285,7 +301,7 @@ func seedUnidades(db *sql.DB) error {
 	}
 	defer stmt.Close()
 
-	statuses := []string{"Disponible", "Vendida", "Cambio"}
+	statuses := []string{"available", "sold", "swapped"}
 	products := []string{"P-001", "P-002", "P-003"}
 	now := time.Now().Format(time.RFC3339)
 	for i := 1; i <= 36; i++ {
@@ -394,8 +410,9 @@ func main() {
 				http.Error(w, "Error al leer estados", http.StatusInternalServerError)
 				return
 			}
+			label := statusLabel(estado)
 			estadoConteos = append(estadoConteos, estadoCount{
-				Estado:   estado,
+				Estado:   label,
 				Cantidad: cantidad,
 				Link:     "/inventario?estado=" + estado,
 			})
