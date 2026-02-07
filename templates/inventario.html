@@ -29,25 +29,53 @@
       color: var(--text);
     }
 
-    header {
-      padding: 24px 32px 8px;
+    .page-content {
+      padding: 16px 32px 32px;
     }
 
-    header h1 {
+    .global-banner {
+      background: #f47a24;
+      padding: 6px 32px;
+    }
+
+    .banner-logos {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .logo-placeholder {
+      height: 22px;
+      min-width: 76px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px dashed rgba(255, 255, 255, 0.7);
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .page-header {
+      padding: 16px 32px 8px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .page-header h1 {
       margin: 0;
       font-size: 24px;
     }
 
-    header p {
-      margin: 8px 0 0;
+    .page-header p {
+      margin: 0;
       color: var(--muted);
-    }
-
-    header nav {
-      margin-top: 12px;
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
     }
 
     /* Nuevo diseño de botones de navegación */
@@ -91,13 +119,6 @@
       background: #d84a2b;
     }
 
-    header nav a {
-      text-decoration: none;
-      color: var(--primary);
-      font-size: 13px;
-      font-weight: 600;
-    }
-
     .filters {
       margin: 16px 32px;
       background: var(--card);
@@ -136,200 +157,6 @@
       align-items: center;
       gap: 8px;
       font-size: 14px;
-    }
-
-    .summary {
-      display: flex;
-      gap: 16px;
-      flex-wrap: wrap;
-      margin: 0 32px 16px;
-    }
-
-    .import-panel {
-      margin: 0 32px 24px;
-      background: var(--card);
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      padding: 16px;
-      display: grid;
-      gap: 16px;
-    }
-
-    .import-panel h2 {
-      margin: 0;
-      font-size: 18px;
-    }
-
-    .import-panel p {
-      margin: 0;
-      color: var(--muted);
-      font-size: 14px;
-    }
-
-    .import-actions {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      flex-wrap: wrap;
-    }
-
-    .import-actions input[type="file"] {
-      font-size: 13px;
-    }
-
-    .csv-columns {
-      display: grid;
-      gap: 8px;
-      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
-      font-size: 13px;
-      color: var(--muted);
-    }
-
-    .csv-columns span {
-      background: #f4f6fb;
-      border-radius: 8px;
-      padding: 6px 10px;
-      border: 1px dashed var(--border);
-    }
-
-    .example-list {
-      margin: 0;
-      padding-left: 18px;
-      color: var(--muted);
-      font-size: 13px;
-    }
-
-    .example-list code {
-      color: #2a335a;
-      background: #eef1f8;
-      padding: 2px 6px;
-      border-radius: 6px;
-    }
-
-    .import-meta {
-      display: grid;
-      gap: 12px;
-    }
-
-    .upload-status {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-      font-size: 13px;
-      color: var(--muted);
-    }
-
-    .upload-status span {
-      background: #f4f6fb;
-      border-radius: 999px;
-      padding: 6px 12px;
-      border: 1px solid var(--border);
-    }
-
-    .upload-preview {
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      overflow: hidden;
-      background: #fdfdff;
-    }
-
-    .upload-preview table {
-      border-radius: 0;
-      border: none;
-      background: transparent;
-    }
-
-    .upload-preview th,
-    .upload-preview td {
-      font-size: 12px;
-      padding: 8px 10px;
-    }
-
-    .error-tag {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 8px;
-      border-radius: 999px;
-      background: #ffeef0;
-      color: var(--danger);
-      font-size: 11px;
-      font-weight: 600;
-    }
-
-    .success-tag {
-      display: inline-flex;
-      align-items: center;
-      gap: 6px;
-      padding: 4px 8px;
-      border-radius: 999px;
-      background: #e9f7f1;
-      color: var(--success);
-      font-size: 11px;
-      font-weight: 600;
-    }
-
-    .movement-log {
-      display: grid;
-      gap: 8px;
-      font-size: 13px;
-      color: var(--muted);
-    }
-
-    .export-panel {
-      margin: 0 32px 24px;
-      background: var(--card);
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      padding: 16px;
-      display: grid;
-      gap: 16px;
-    }
-
-    .export-panel h2 {
-      margin: 0;
-      font-size: 18px;
-    }
-
-    .export-grid {
-      display: grid;
-      gap: 12px;
-      grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
-    }
-
-    .export-actions {
-      display: flex;
-      flex-wrap: wrap;
-      gap: 12px;
-    }
-
-    .export-hint {
-      font-size: 13px;
-      color: var(--muted);
-    }
-
-    .movement-log strong {
-      color: var(--text);
-    }
-
-    .summary-card {
-      background: var(--card);
-      border-radius: 12px;
-      padding: 12px 16px;
-      border: 1px solid var(--border);
-      flex: 1;
-      min-width: 180px;
-    }
-
-    .summary-card h3 {
-      margin: 0;
-      font-size: 14px;
-      color: var(--muted);
-    }
-
-    .summary-card span {
-      font-size: 20px;
-      font-weight: 600;
     }
 
     .flash {
@@ -434,35 +261,35 @@
 
     .menu {
       position: relative;
+      display: inline-flex;
+      justify-content: flex-end;
+      width: 100%;
     }
 
     .menu-panel {
       position: absolute;
       right: 0;
-      top: 40px;
-      background: white;
-      border: 1px solid var(--border);
-      border-radius: 8px;
-      box-shadow: 0 10px 20px rgba(0, 0, 0, 0.08);
-      min-width: 180px;
+      top: calc(100% + 6px);
       display: none;
-      z-index: 5;
+      min-width: 190px;
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
+      padding: 6px;
+      z-index: 20;
     }
 
     .menu-panel.open {
-      display: block;
+      display: grid;
+      gap: 4px;
     }
 
     .menu-panel button {
       width: 100%;
       text-align: left;
-      padding: 10px 14px;
-      border-radius: 0;
-      background: transparent;
-    }
-
-    .menu-panel button:hover {
-      background: #f1f4fb;
+      background: #f6f7fb;
+      color: #2a335a;
     }
 
     .product-name {
@@ -505,33 +332,53 @@
       background: #e7efff;
       color: #2054c6;
     }
+
+    .summary {
+      margin: 0 32px 16px;
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }
+
+    .summary-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .summary-card h3 {
+      margin: 0;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+
+    .summary-card span {
+      font-size: 20px;
+      font-weight: 700;
+    }
   </style>
 </head>
 <body>
-  <header>
-    <h1>{{.Title}}</h1>
-    <p>{{.Subtitle}}</p>
-    <div class="nav-buttons">
-      <a href="/dashboard" class="nav-button">Ver dashboard</a>
-      <a href="/venta/new" class="nav-button">Registrar venta</a>
-      <a href="/cambio/new" class="nav-button">Registrar cambio</a>
-      <a href="/csv/template" class="nav-button" target="_blank">Plantilla CSV</a>
-      <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
-    </div>
+  {{template "header" .}}
+  <div class="page-content">
     {{if .Flash}}
       <div class="flash">{{.Flash}}</div>
     {{end}}
-  </header>
-
-  <!-- Estado - Sección de filtros -->
-  <section class="filters">
+    <!-- Estado - Sección de filtros -->
+    <section class="filters">
     <div class="filter-group">
       <label for="statusFilter">Estado</label>
       <select id="statusFilter">
         <option value="all">Todos</option>
-        <option value="available">Available</option>
-        <option value="sold">Sold</option>
-        <option value="swapped">Swapped</option>
+        <option value="available">Disponible</option>
+        <option value="sold">Vendido</option>
+        <option value="swapped">Cambio</option>
       </select>
     </div>
     <div class="filter-group">
@@ -554,28 +401,9 @@
         <span>Mostrar próximos 45 días</span>
       </div>
     </div>
-  </section>
+    </section>
 
-  <!-- Resumen - Sección de métricas -->
-  <!-- Listado de productos -->
-  <main>
-    <table>
-      <thead>
-        <tr>
-          <th>Producto</th>
-          <th>Línea</th>
-          <th>Estado</th>
-          <th>Stock disponible</th>
-          <th>Acciones rápidas</th>
-          <th></th>
-        </tr>
-      </thead>
-      <tbody id="productTable"></tbody>
-    </table>
-  </main>
-  
-</body>
-</html>
+  <section id="summary" class="summary" aria-live="polite"></section>
 
   <main>
     <table>
@@ -595,49 +423,28 @@
 
   <script>
     const products = [
+      {{- range .Products }}
       {
-        id: "P-001",
-        name: "Proteína Balance 500g",
-        line: "Nutrición",
-        status: "available",
+        id: "{{js .ID}}",
+        name: "{{js .Name}}",
+        line: "{{js .Line}}",
+        statusClass: "{{js .EstadoClass}}",
+        statusLabel: "{{js .EstadoLabel}}",
+        available: {{.Disponible}},
         units: [
-          { id: "U-001", received: "2024-05-10", expires: "2024-11-10", location: "A-01", status: "available" },
-          { id: "U-002", received: "2024-06-02", expires: "2024-12-02", location: "A-01", status: "available" },
-          { id: "U-003", received: "2024-07-12", expires: "2025-01-12", location: "A-02", status: "available" }
+          {{- range .Unidades }}
+          {
+            id: "{{js .ID}}",
+            created: "{{js .CreadoEn}}",
+            expires: "{{js .Caducidad}}",
+            statusClass: "{{js .EstadoClass}}",
+            statusLabel: "{{js .Estado}}",
+            fifo: "{{js .FIFO}}"
+          },
+          {{- end }}
         ]
       },
-      {
-        id: "P-002",
-        name: "Crema Regeneradora",
-        line: "Dermocosmética",
-        status: "available",
-        units: [
-          { id: "U-101", received: "2024-04-01", expires: "2024-09-08", location: "B-11", status: "available" },
-          { id: "U-102", received: "2024-04-18", expires: "2024-09-25", location: "B-11", status: "available" },
-          { id: "U-103", received: "2024-05-05", expires: "2024-11-02", location: "B-12", status: "available" },
-          { id: "U-104", received: "2024-05-20", expires: "2024-12-09", location: "B-13", status: "available" }
-        ]
-      },
-      {
-        id: "P-003",
-        name: "Leche Pediátrica Premium",
-        line: "Pediatría",
-        status: "swapped",
-        units: [
-          { id: "U-201", received: "2024-03-15", expires: "2024-08-20", location: "C-02", status: "available" },
-          { id: "U-202", received: "2024-04-02", expires: "2024-10-18", location: "C-03", status: "swapped" }
-        ]
-      },
-      {
-        id: "P-004",
-        name: "Shampoo Suave",
-        line: "Dermocosmética",
-        status: "sold",
-        units: [
-          { id: "U-301", received: "2024-01-22", expires: "2024-07-01", location: "B-21", status: "sold" },
-          { id: "U-302", received: "2024-02-15", expires: "2024-08-18", location: "B-22", status: "sold" }
-        ]
-      }
+      {{- end }}
     ];
 
     const statusFilter = document.getElementById("statusFilter");
@@ -660,11 +467,31 @@
     const exportChangesButton = document.getElementById("export-changes");
 
     const formatDate = (value) => new Date(value).toLocaleDateString("es-ES");
+    const formatOptionalDate = (value) => {
+      if (!value) return "-";
+      const parsed = new Date(value);
+      if (Number.isNaN(parsed.getTime())) return "-";
+      return parsed.toLocaleDateString("es-ES");
+    };
     const formatDateISO = (value) => new Date(value).toISOString().slice(0, 10);
+    const statusLabels = {
+      available: "Disponible",
+      sold: "Vendido",
+      swapped: "Cambio",
+      Disponible: "Disponible",
+      Vendida: "Vendido",
+      Vendido: "Vendido",
+      Cambio: "Cambio"
+    };
+    const statusLabel = (status) => statusLabels[status] || status;
 
     const updateSummary = (visibleProducts) => {
+      if (!summary) {
+        console.warn("Resumen no disponible: falta el contenedor #summary.");
+        return;
+      }
       const totalProducts = visibleProducts.length;
-      const totalUnits = visibleProducts.reduce((acc, product) => acc + product.units.filter((unit) => unit.status === "available").length, 0);
+      const totalUnits = visibleProducts.reduce((acc, product) => acc + product.available, 0);
       const expiringUnits = visibleProducts.reduce(
         (acc, product) => acc + product.units.filter((unit) => isExpiringSoon(unit.expires)).length,
         0
@@ -687,20 +514,28 @@
     };
 
     const isExpiringSoon = (dateString) => {
+      if (!dateString) return false;
       const today = new Date();
+      today.setHours(0, 0, 0, 0);
       const expiry = new Date(dateString);
+      if (Number.isNaN(expiry.getTime())) return false;
+      expiry.setHours(0, 0, 0, 0);
       const diffDays = (expiry - today) / (1000 * 60 * 60 * 24);
-      return diffDays <= 45;
+      return diffDays >= 0 && diffDays <= 45;
     };
 
     const applyFilters = () => {
+      if (!statusFilter || !lineFilter || !searchFilter || !expiryToggle) {
+        console.warn("Filtros no disponibles: faltan controles de filtro en el DOM.");
+        return;
+      }
       const statusValue = statusFilter.value;
       const lineValue = lineFilter.value;
       const query = searchFilter.value.toLowerCase();
       const expiryOnly = expiryToggle.checked;
 
       const filtered = products.filter((product) => {
-        const matchesStatus = statusValue === "all" || product.status === statusValue;
+        const matchesStatus = statusValue === "all" || product.statusClass === statusValue;
         const matchesLine = lineValue === "all" || product.line === lineValue;
         const matchesSearch =
           product.name.toLowerCase().includes(query) || product.id.toLowerCase().includes(query);
@@ -714,22 +549,25 @@
     };
 
     const renderTable = (items) => {
+      if (!productTable) {
+        console.warn("Tabla de productos no disponible: falta #productTable.");
+        return;
+      }
       productTable.innerHTML = "";
 
       items.forEach((product) => {
-        const availableUnits = product.units.filter((unit) => unit.status === "available");
         const row = document.createElement("tr");
         row.innerHTML = `
           <td>
             <div class="product-name" data-product="${product.id}">${product.name}</div>
-            <div class="fifo-note">SKU ${product.id} · FIFO: ${availableUnits.length} unidades disponibles</div>
+            <div class="fifo-note">SKU ${product.id} · FIFO: ${product.available} unidades disponibles</div>
           </td>
           <td>${product.line}</td>
-          <td><span class="status ${product.status}">${product.status}</span></td>
-          <td><strong>${availableUnits.length}</strong></td>
+          <td><span class="status ${product.statusClass}">${statusLabel(product.statusLabel)}</span></td>
+          <td><strong>${product.available}</strong></td>
           <td>
             <div class="actions">
-              <input type="number" min="1" max="${availableUnits.length}" value="1" data-qty="${product.id}" />
+              <input type="number" min="1" max="${Math.max(product.available, 1)}" value="1" data-qty="${product.id}" />
               <button class="primary" data-action="sell" data-product="${product.id}">Vender</button>
               <button class="secondary" data-action="swap" data-product="${product.id}">Cambio</button>
             </div>
@@ -753,13 +591,13 @@
           <td colspan="6" class="units-panel" id="units-${product.id}" style="display: none;">
             <div class="units-header">
               <h4>Unidades del producto</h4>
-              <span class="fifo-note">Auditoría por lote · Selección FIFO al vender o cambiar</span>
+              <span class="fifo-note">Auditoría por lote · Selección FIFO al vender</span>
             </div>
-            <table class="units-table" aria-label="Unidades de ${product.name}">
+            <table class="units-table" aria-label="Unidades del producto">
               <thead>
                 <tr>
                   <th>ID unidad</th>
-                  <th>Ingreso</th>
+                  <th>Creado</th>
                   <th>Caducidad</th>
                   <th>Ubicación</th>
                   <th>Estado</th>
@@ -769,14 +607,14 @@
               <tbody>
                 ${product.units
                   .map((unit, index) => {
-                    const fifoOrder = unit.status === "available" ? index + 1 : "-";
+                    const fifoOrder = unit.fifo || (unit.statusClass === "available" ? index + 1 : "-");
                     return `
                       <tr>
                         <td>${unit.id}</td>
-                        <td>${formatDate(unit.received)}</td>
-                        <td>${formatDate(unit.expires)}</td>
-                        <td>${unit.location}</td>
-                        <td>${unit.status}</td>
+                        <td>${formatOptionalDate(unit.created)}</td>
+                        <td>${formatOptionalDate(unit.expires)}</td>
+                        <td>-</td>
+                        <td>${statusLabel(unit.statusLabel)}</td>
                         <td><span class="unit-tag">${fifoOrder}</span></td>
                       </tr>
                     `;
@@ -785,536 +623,78 @@
               </tbody>
             </table>
           </td>
+        </tr>
         `;
 
         productTable.appendChild(unitsRow);
       });
     };
 
-    const applyFifoAction = (productId, action, quantity) => {
-      const product = products.find((item) => item.id === productId);
-      if (!product) return;
+    renderTable(products);
+    updateSummary(products);
+    if (statusFilter && lineFilter && searchFilter && expiryToggle) {
+      [statusFilter, lineFilter, searchFilter, expiryToggle].forEach((input) =>
+        input.addEventListener("change", applyFilters)
+      );
+      searchFilter.addEventListener("input", applyFilters);
+    } else {
+      console.warn("Listeners de filtros no registrados por controles faltantes.");
+    }
+  </script>
 
-      const available = product.units
-        .filter((unit) => unit.status === "available")
-        .sort((a, b) => new Date(a.received) - new Date(b.received));
-
-      const selected = available.slice(0, quantity);
-      selected.forEach((unit) => {
-        unit.status = action === "sell" ? "sold" : "swapped";
-      });
-
-      product.status = product.units.every((unit) => unit.status === "sold")
-        ? "sold"
-        : product.units.every((unit) => unit.status === "swapped")
-          ? "swapped"
-          : "available";
-    };
-
+  <script>
     document.addEventListener("click", (event) => {
       const menuButton = event.target.closest("button[data-menu]");
-      const productTrigger = event.target.closest(".product-name");
-      const actionButton = event.target.closest("button[data-action]");
-
       if (menuButton) {
         const menuId = menuButton.dataset.menu;
         const panel = document.getElementById(`menu-${menuId}`);
-        panel.classList.toggle("open");
-      } else {
-        document.querySelectorAll(".menu-panel").forEach((panel) => panel.classList.remove("open"));
+        if (!panel) return;
+        const willOpen = !panel.classList.contains("open");
+        document.querySelectorAll(".menu-panel.open").forEach((openPanel) => openPanel.classList.remove("open"));
+        if (willOpen) {
+          panel.classList.add("open");
+        }
+        return;
       }
 
-      if (productTrigger) {
-        const productId = productTrigger.dataset.product;
-        const panel = document.getElementById(`units-${productId}`);
-        panel.style.display = panel.style.display === "none" ? "table-cell" : "none";
+      if (!event.target.closest(".menu")) {
+        document.querySelectorAll(".menu-panel.open").forEach((panel) => panel.classList.remove("open"));
       }
 
+      const actionButton = event.target.closest("button[data-action]");
       if (actionButton) {
         const productId = actionButton.dataset.product;
         const action = actionButton.dataset.action;
         const qtyInput = document.querySelector(`input[data-qty="${productId}"]`);
-        const quantity = parseInt(qtyInput.value, 10);
+        const quantity = parseInt(qtyInput?.value || "1", 10);
+        const maxQty = parseInt(qtyInput?.max || "0", 10);
 
-        if (!Number.isNaN(quantity) && quantity > 0) {
-          if (action === "sell") {
-            const params = new URLSearchParams({
-              producto_id: productId,
-              cantidad: quantity.toString()
-            });
-            window.location.href = `/venta/new?${params.toString()}`;
-            return;
-          }
-          if (action === "swap") {
-            const params = new URLSearchParams({
-              producto_id: productId,
-              cantidad: quantity.toString()
-            });
-            window.location.href = `/cambio/new?${params.toString()}`;
-            return;
-          }
-          applyFifoAction(productId, action, quantity);
-          applyFilters();
-        }
-      }
-    });
-
-    [statusFilter, lineFilter, searchFilter, expiryToggle].forEach((input) => {
-      input.addEventListener("input", applyFilters);
-      input.addEventListener("change", applyFilters);
-    });
-
-    applyFilters();
-
-    downloadTemplateButton.addEventListener("click", () => {
-      const header = [
-        "sku",
-        "linea",
-        "nombre",
-        "precio_base_venta",
-        "precio_consultora",
-        "caduca",
-        "fecha_caducidad",
-        "anotaciones",
-        "cantidad"
-      ];
-      const rows = [
-        [
-          "SKU-001",
-          "Nutrición",
-          "Proteína Balance 500g",
-          "120000",
-          "98000",
-          "true",
-          "2025-01-12",
-          "Lote inicial",
-          "5"
-        ],
-        ["", "Dermocosmética", "Crema Regeneradora", "89000", "70000", "false", "", "Promoción abril", "12"]
-      ];
-
-      const escapeCSV = (value) => {
-        const stringValue = String(value);
-        if (/[",\n]/.test(stringValue)) {
-          return `"${stringValue.replace(/"/g, '""')}"`;
-        }
-        return stringValue;
-      };
-
-      const csvContent = [header, ...rows]
-        .map((row) => row.map(escapeCSV).join(","))
-        .join("\n");
-
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "plantilla_productos_mvp.csv";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    });
-
-    const parseCSV = (text) => {
-      const rows = [];
-      let current = [];
-      let value = "";
-      let inQuotes = false;
-      for (let i = 0; i < text.length; i++) {
-        const char = text[i];
-        const next = text[i + 1];
-
-        if (char === '"' && inQuotes && next === '"') {
-          value += '"';
-          i++;
-          continue;
-        }
-
-        if (char === '"') {
-          inQuotes = !inQuotes;
-          continue;
-        }
-
-        if (char === "," && !inQuotes) {
-          current.push(value);
-          value = "";
-          continue;
-        }
-
-        if ((char === "\n" || char === "\r") && !inQuotes) {
-          if (value !== "" || current.length > 0) {
-            current.push(value);
-            rows.push(current);
-            current = [];
-            value = "";
-          }
-          continue;
-        }
-
-        value += char;
-      }
-
-      if (value !== "" || current.length > 0) {
-        current.push(value);
-        rows.push(current);
-      }
-
-      return rows;
-    };
-
-    const normalizeText = (value) => value.trim().toLowerCase();
-
-    const escapeCSVValue = (value) => {
-      const stringValue = String(value ?? "");
-      if (/[",\n]/.test(stringValue)) {
-        return `"${stringValue.replace(/"/g, '""')}"`;
-      }
-      return stringValue;
-    };
-
-    const downloadCSV = (filename, header, rows) => {
-      const csvContent = [header, ...rows].map((row) => row.map(escapeCSVValue).join(",")).join("\n");
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = filename;
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    };
-
-    const sales = [
-      {
-        id: "V-1001",
-        productId: "P-001",
-        productName: "Proteína Balance 500g",
-        quantity: 2,
-        total: 240000,
-        method: "Transferencia",
-        date: "2024-08-12"
-      },
-      {
-        id: "V-1002",
-        productId: "P-002",
-        productName: "Crema Regeneradora",
-        quantity: 1,
-        total: 89000,
-        method: "Efectivo",
-        date: "2024-08-18"
-      },
-      {
-        id: "V-1003",
-        productId: "P-003",
-        productName: "Leche Pediátrica Premium",
-        quantity: 3,
-        total: 315000,
-        method: "Tarjeta",
-        date: "2024-09-02"
-      }
-    ];
-
-    const changes = [
-      {
-        id: "C-2001",
-        outgoingProductId: "P-003",
-        outgoingProductName: "Leche Pediátrica Premium",
-        outgoingUnits: 1,
-        incomingProductId: "P-001",
-        incomingProductName: "Proteína Balance 500g",
-        incomingUnits: 1,
-        reason: "Cambio por referencia",
-        date: "2024-08-20"
-      },
-      {
-        id: "C-2002",
-        outgoingProductId: "P-002",
-        outgoingProductName: "Crema Regeneradora",
-        outgoingUnits: 2,
-        incomingProductId: "SKU-NUEVO-22",
-        incomingProductName: "Crema Calmante",
-        incomingUnits: 2,
-        reason: "Garantía",
-        date: "2024-09-05"
-      }
-    ];
-
-    const parseRangeDate = (value) => (value ? new Date(`${value}T00:00:00`) : null);
-    const isWithinRange = (value, start, end) => {
-      const date = new Date(`${value}T00:00:00`);
-      if (start && date < start) return false;
-      if (end && date > end) return false;
-      return true;
-    };
-
-    const validateRow = (row, index) => {
-      const errors = [];
-      const [
-        sku = "",
-        linea = "",
-        nombre = "",
-        precioBase = "",
-        precioConsultora = "",
-        caduca = "",
-        fechaCaducidad = "",
-        anotaciones = "",
-        cantidad = ""
-      ] = row.map((cell) => cell.trim());
-
-      if (!linea) errors.push("Línea es obligatoria.");
-      if (!nombre) errors.push("Nombre es obligatorio.");
-
-      const precioBaseNum = Number(precioBase.replace(",", "."));
-      if (!precioBase || Number.isNaN(precioBaseNum) || precioBaseNum <= 0) {
-        errors.push("Precio base inválido.");
-      }
-
-      const precioConsultoraNum = Number(precioConsultora.replace(",", "."));
-      if (!precioConsultora || Number.isNaN(precioConsultoraNum) || precioConsultoraNum <= 0) {
-        errors.push("Precio consultora inválido.");
-      }
-
-      const caducaLower = caduca.toLowerCase();
-      if (!caduca || (caducaLower !== "true" && caducaLower !== "false")) {
-        errors.push("Caduca debe ser true/false.");
-      }
-
-      if (caducaLower === "true" && !fechaCaducidad) {
-        errors.push("Fecha caducidad requerida si caduca.");
-      }
-      if (fechaCaducidad && !/^\d{4}-\d{2}-\d{2}$/.test(fechaCaducidad)) {
-        errors.push("Fecha caducidad debe ser YYYY-MM-DD.");
-      }
-
-      const cantidadNum = Number(cantidad);
-      if (!cantidad || !Number.isInteger(cantidadNum) || cantidadNum <= 0) {
-        errors.push("Cantidad debe ser entero mayor a 0.");
-      }
-
-      const matchKey = sku
-        ? `SKU:${normalizeText(sku)}`
-        : `LN:${normalizeText(linea)}|${normalizeText(nombre)}`;
-
-      const matchNote = sku
-        ? "SKU encontrado: solo se agrega stock (no se actualiza precio base)."
-        : "Match por línea + nombre normalizado.";
-
-      return {
-        index,
-        sku,
-        linea,
-        nombre,
-        precioBase,
-        precioConsultora,
-        caduca: caducaLower,
-        fechaCaducidad,
-        anotaciones,
-        cantidad: cantidadNum,
-        errors,
-        matchKey,
-        matchNote
-      };
-    };
-
-    const renderUploadPreview = (rows) => {
-      uploadPreviewBody.innerHTML = "";
-      const previewRows = rows.slice(0, 20);
-
-      if (previewRows.length === 0) {
-        uploadPreviewBody.innerHTML = `
-          <tr>
-            <td colspan="10" style="text-align: center; color: var(--muted);">Sin filas para mostrar.</td>
-          </tr>
-        `;
-        return;
-      }
-
-      previewRows.forEach((row) => {
-        const errorMarkup = row.errors.length
-          ? `<span class="error-tag">Errores: ${row.errors.join(" ")}</span>`
-          : `<span class="success-tag">OK · ${row.matchNote}</span>`;
-
-        const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${row.index}</td>
-          <td>${row.sku || "-"}</td>
-          <td>${row.linea || "-"}</td>
-          <td>${row.nombre || "-"}</td>
-          <td>${row.precioBase || "-"}</td>
-          <td>${row.precioConsultora || "-"}</td>
-          <td>${row.caduca || "-"}</td>
-          <td>${row.fechaCaducidad || "-"}</td>
-          <td>${row.cantidad || "-"}</td>
-          <td>${errorMarkup}</td>
-        `;
-        uploadPreviewBody.appendChild(tr);
-      });
-    };
-
-    const updateUploadStatus = (rows) => {
-      const validCount = rows.filter((row) => row.errors.length === 0).length;
-      const errorCount = rows.length - validCount;
-      uploadStatus.innerHTML = `
-        <span>Preview: ${Math.min(rows.length, 20)} filas</span>
-        <span>Válidas: ${validCount}</span>
-        <span>Errores: ${errorCount}</span>
-      `;
-    };
-
-    const updateMovementLog = (rows) => {
-      if (rows.length === 0) {
-        movementLog.innerHTML = `
-          <div><strong>Movimiento ALTA_MASIVA</strong> aún no generado.</div>
-          <div>Sube un CSV para ver el batch_id y el resumen.</div>
-        `;
-        return;
-      }
-
-      const batchId = `batch_${Date.now()}`;
-      const validRows = rows.filter((row) => row.errors.length === 0);
-      const totalUnits = validRows.reduce((acc, row) => acc + row.cantidad, 0);
-      const skuMatches = validRows.filter((row) => row.sku).length;
-      const nameMatches = validRows.length - skuMatches;
-
-      movementLog.innerHTML = `
-        <div><strong>Movimiento ALTA_MASIVA</strong></div>
-        <div>batch_id: <strong>${batchId}</strong></div>
-        <div>Filas totales: ${rows.length} · Válidas: ${validRows.length} · Con errores: ${
-          rows.length - validRows.length
-        }</div>
-        <div>Stock agregado (unidades): <strong>${totalUnits}</strong></div>
-        <div>Match por SKU: ${skuMatches} · Match por línea + nombre: ${nameMatches}</div>
-        <div>Regla MVP: si el SKU existe no se actualiza el precio base, solo stock.</div>
-      `;
-    };
-
-    const handleCSV = (file) => {
-      if (!file) {
-        renderUploadPreview([]);
-        updateUploadStatus([]);
-        updateMovementLog([]);
-        return;
-      }
-
-      const reader = new FileReader();
-      reader.onload = () => {
-        const text = reader.result;
-        const rows = parseCSV(text).filter((row) => row.some((cell) => cell.trim() !== ""));
-
-        if (rows.length === 0) {
-          renderUploadPreview([]);
-          updateUploadStatus([]);
-          updateMovementLog([]);
+        if (!productId || Number.isNaN(quantity) || quantity < 1 || (maxQty >= 1 && quantity > maxQty)) {
           return;
         }
 
-        const header = rows[0].map((cell) => cell.trim().toLowerCase());
-        const expected = [
-          "sku",
-          "linea",
-          "nombre",
-          "precio_base_venta",
-          "precio_consultora",
-          "caduca",
-          "fecha_caducidad",
-          "anotaciones",
-          "cantidad"
-        ];
+        const params = new URLSearchParams({
+          producto_id: productId,
+          cantidad: String(quantity)
+        });
 
-        const hasHeader = expected.every((column, index) => header[index] === column);
-        const dataRows = hasHeader ? rows.slice(1) : rows;
-        const validated = dataRows.map((row, index) => validateRow(row, index + 1));
+        if (action === "sell") {
+          window.location.href = `/venta/new?${params.toString()}`;
+          return;
+        }
 
-        renderUploadPreview(validated);
-        updateUploadStatus(validated);
-        updateMovementLog(validated);
-      };
-      reader.readAsText(file);
-    };
+        if (action === "swap") {
+          window.location.href = `/cambio/new?${params.toString()}`;
+          return;
+        }
+      }
 
-    processButton.addEventListener("click", () => {
-      handleCSV(uploadInput.files[0]);
-    });
-
-    exportInventoryAggregateButton.addEventListener("click", () => {
-      const header = ["sku", "nombre", "linea", "estado", "unidades_disponibles", "total_unidades"];
-      const rows = products.map((product) => {
-        const availableUnits = product.units.filter((unit) => unit.status === "available").length;
-        return [
-          product.id,
-          product.name,
-          product.line,
-          product.status,
-          availableUnits,
-          product.units.length
-        ];
-      });
-      downloadCSV(`inventario_agregado_${formatDateISO(new Date())}.csv`, header, rows);
-    });
-
-    exportInventoryUnitsButton.addEventListener("click", () => {
-      const header = ["sku", "nombre", "linea", "unidad_id", "estado", "ingreso", "caducidad", "ubicacion"];
-      const rows = products.flatMap((product) =>
-        product.units.map((unit) => [
-          product.id,
-          product.name,
-          product.line,
-          unit.id,
-          unit.status,
-          unit.received,
-          unit.expires,
-          unit.location
-        ])
-      );
-      downloadCSV(`inventario_unidades_${formatDateISO(new Date())}.csv`, header, rows);
-    });
-
-    exportSalesButton.addEventListener("click", () => {
-      const start = parseRangeDate(rangeStart.value);
-      const end = parseRangeDate(rangeEnd.value);
-      const filtered = sales.filter((sale) => isWithinRange(sale.date, start, end));
-      const header = ["venta_id", "fecha", "sku", "producto", "cantidad", "total", "metodo_pago"];
-      const rows = filtered.map((sale) => [
-        sale.id,
-        sale.date,
-        sale.productId,
-        sale.productName,
-        sale.quantity,
-        sale.total,
-        sale.method
-      ]);
-      downloadCSV(`ventas_${formatDateISO(new Date())}.csv`, header, rows);
-    });
-
-    exportChangesButton.addEventListener("click", () => {
-      const start = parseRangeDate(rangeStart.value);
-      const end = parseRangeDate(rangeEnd.value);
-      const filtered = changes.filter((change) => isWithinRange(change.date, start, end));
-      const header = [
-        "cambio_id",
-        "fecha",
-        "sku_saliente",
-        "producto_saliente",
-        "unidades_salientes",
-        "sku_entrante",
-        "producto_entrante",
-        "unidades_entrantes",
-        "motivo"
-      ];
-      const rows = filtered.map((change) => [
-        change.id,
-        change.date,
-        change.outgoingProductId,
-        change.outgoingProductName,
-        change.outgoingUnits,
-        change.incomingProductId,
-        change.incomingProductName,
-        change.incomingUnits,
-        change.reason
-      ]);
-      downloadCSV(`cambios_${formatDateISO(new Date())}.csv`, header, rows);
+      const productTrigger = event.target.closest(".product-name");
+      if (!productTrigger) return;
+      const productId = productTrigger.dataset.product;
+      const panel = document.getElementById(`units-${productId}`);
+      if (!panel) return;
+      panel.style.display = panel.style.display === "none" ? "table-cell" : "none";
     });
   </script>
 </body>
