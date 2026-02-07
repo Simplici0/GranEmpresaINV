@@ -10,6 +10,7 @@ import (
 	"log"
 	"net/http"
 	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"time"
@@ -506,6 +507,29 @@ func main() {
 	}
 	defer db.Close()
 
+	// Diagnostics to confirm which DB is being used at runtime (helps debug login issues).
+	if wd, err := os.Getwd(); err == nil {
+		if abs, err := filepath.Abs(dbPath); err == nil {
+			log.Printf("DB_PATH=%s (abs=%s) cwd=%s", dbPath, abs, wd)
+		} else {
+			log.Printf("DB_PATH=%s cwd=%s", dbPath, wd)
+		}
+	}
+	if err := db.QueryRow("SELECT COUNT(*) FROM users").Scan(new(int)); err != nil {
+		log.Printf("DB users table not queryable: %v", err)
+	} else {
+		var totalUsers int
+		if err := db.QueryRow("SELECT COUNT(*) FROM users").Scan(&totalUsers); err == nil {
+			log.Printf("Users total=%d", totalUsers)
+		}
+		var adminMatches int
+		if err := db.QueryRow("SELECT COUNT(*) FROM users WHERE username = 'admin'").Scan(&adminMatches); err == nil {
+			log.Printf("Users username=admin matches=%d", adminMatches)
+		} else {
+			log.Printf("Users username=admin query failed: %v", err)
+		}
+	}
+
 	products := []productOption{
 		{
 			ID:    "P-001",
@@ -617,29 +641,35 @@ func main() {
 			hash     string
 			isActive int
 		)
-		err := db.QueryRow(`
-			SELECT id, username, password_hash, role, is_active, created_at
-			FROM users
-			WHERE username = ?
-		`, username).Scan(&user.ID, &user.Username, &hash, &user.Role, &isActive)
-		if err != nil || isActive != 1 {
-			data := loginPageData{
-				Title:    "Iniciar sesión",
-				Error:    "Credenciales inválidas.",
-				Username: username,
+				err := db.QueryRow(`
+					SELECT id, username, password_hash, role, is_active
+					FROM users
+					WHERE username = ?
+				`, username).Scan(&user.ID, &user.Username, &hash, &user.Role, &isActive)
+			if err != nil || isActive != 1 {
+				if err != nil {
+					log.Printf("login: lookup failed username=%q err=%v", username, err)
+				} else {
+					log.Printf("login: user inactive username=%q", username)
+				}
+				data := loginPageData{
+					Title:    "Iniciar sesión",
+					Error:    "Credenciales inválidas.",
+					Username: username,
 			}
 			w.WriteHeader(http.StatusUnauthorized)
 			if err := tmpl.ExecuteTemplate(w, "login.html", data); err != nil {
 				http.Error(w, "Error al renderizar login", http.StatusInternalServerError)
 			}
 			return
-		}
+			}
 
-		if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
-			data := loginPageData{
-				Title:    "Iniciar sesión",
-				Error:    "Credenciales inválidas.",
-				Username: username,
+			if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
+				log.Printf("login: password mismatch username=%q", username)
+				data := loginPageData{
+					Title:    "Iniciar sesión",
+					Error:    "Credenciales inválidas.",
+					Username: username,
 			}
 			w.WriteHeader(http.StatusUnauthorized)
 			if err := tmpl.ExecuteTemplate(w, "login.html", data); err != nil {
