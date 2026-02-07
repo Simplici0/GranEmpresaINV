@@ -38,6 +38,7 @@ type inventoryUnit struct {
 	Estado      string
 	EstadoClass string
 	CreadoEn    string
+	Caducidad   string
 	FIFO        string
 }
 
@@ -173,11 +174,11 @@ func buildSalientesMap(salientes []string) map[string]bool {
 
 func estadoClass(estado string) string {
 	switch estado {
-	case "Disponible":
+	case "Disponible", "available":
 		return "available"
-	case "Vendida":
+	case "Vendida", "Vendido", "sold":
 		return "sold"
-	case "Cambio":
+	case "Cambio", "swapped":
 		return "swapped"
 	default:
 		return "available"
@@ -185,6 +186,10 @@ func estadoClass(estado string) string {
 }
 
 func selectAndMarkUnitsSold(tx *sql.Tx, productID string, qty int) ([]string, error) {
+	return selectAndMarkUnitsByStatus(tx, productID, qty, "Vendida")
+}
+
+func selectAndMarkUnitsByStatus(tx *sql.Tx, productID string, qty int, nextStatus string) ([]string, error) {
 	if qty <= 0 {
 		return nil, fmt.Errorf("cantidad inválida")
 	}
@@ -192,7 +197,7 @@ func selectAndMarkUnitsSold(tx *sql.Tx, productID string, qty int) ([]string, er
 	rows, err := tx.Query(`
 		SELECT id
 		FROM unidades
-		WHERE producto_id = ? AND estado = 'Disponible'
+		WHERE producto_id = ? AND estado IN ('Disponible', 'available')
 		ORDER BY creado_en, id
 		LIMIT ?`, productID, qty)
 	if err != nil {
@@ -223,8 +228,11 @@ func selectAndMarkUnitsSold(tx *sql.Tx, productID string, qty int) ([]string, er
 		args = append(args, id)
 	}
 
-	query := fmt.Sprintf("UPDATE unidades SET estado = 'Vendida' WHERE id IN (%s) AND estado = 'Disponible'", strings.Join(placeholders, ","))
-	result, err := tx.Exec(query, args...)
+	query := fmt.Sprintf("UPDATE unidades SET estado = ? WHERE id IN (%s) AND estado IN ('Disponible', 'available')", strings.Join(placeholders, ","))
+	updateArgs := make([]interface{}, 0, len(args)+1)
+	updateArgs = append(updateArgs, nextStatus)
+	updateArgs = append(updateArgs, args...)
+	result, err := tx.Exec(query, updateArgs...)
 	if err != nil {
 		return nil, fmt.Errorf("update unidades: %w", err)
 	}
@@ -237,6 +245,31 @@ func selectAndMarkUnitsSold(tx *sql.Tx, productID string, qty int) ([]string, er
 	}
 
 	return ids, nil
+}
+
+func availableUnitsByProduct(db *sql.DB, productID string) ([]unitOption, error) {
+	rows, err := db.Query(`
+		SELECT id
+		FROM unidades
+		WHERE producto_id = ? AND estado IN ('Disponible', 'available')
+		ORDER BY creado_en, id`, productID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	units := []unitOption{}
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		units = append(units, unitOption{ID: id})
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return units, nil
 }
 
 func formatCurrency(value float64) string {
@@ -308,7 +341,8 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 		id TEXT PRIMARY KEY,
 		producto_id TEXT NOT NULL,
 		estado TEXT NOT NULL,
-		creado_en TEXT NOT NULL
+		creado_en TEXT NOT NULL,
+		caducidad TEXT
 	);
 	CREATE INDEX IF NOT EXISTS idx_unidades_estado ON unidades (estado);
 	`
@@ -323,6 +357,16 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	}
 	if notasColumn == "" {
 		if _, err := db.Exec("ALTER TABLE ventas ADD COLUMN notas TEXT NOT NULL DEFAULT ''"); err != nil {
+			return nil, err
+		}
+	}
+
+	var caducidadColumn string
+	if err := db.QueryRow("SELECT name FROM pragma_table_info('unidades') WHERE name = 'caducidad'").Scan(&caducidadColumn); err != nil && err != sql.ErrNoRows {
+		return nil, err
+	}
+	if caducidadColumn == "" {
+		if _, err := db.Exec("ALTER TABLE unidades ADD COLUMN caducidad TEXT"); err != nil {
 			return nil, err
 		}
 	}
@@ -394,8 +438,8 @@ func seedUnidades(db *sql.DB) error {
 	if err != nil {
 		return err
 	}
-	stmt, err := tx.Prepare(`INSERT INTO unidades (id, producto_id, estado, creado_en)
-		VALUES (?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT INTO unidades (id, producto_id, estado, creado_en, caducidad)
+		VALUES (?, ?, ?, ?, ?)`)
 	if err != nil {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
 			return fmt.Errorf("prepare unidades: %w (rollback: %v)", err, rollbackErr)
@@ -404,14 +448,16 @@ func seedUnidades(db *sql.DB) error {
 	}
 	defer stmt.Close()
 
-	statuses := []string{"available", "sold", "swapped"}
+	statuses := []string{"Disponible", "Vendida", "Cambio"}
 	products := []string{"P-001", "P-002", "P-003"}
-	now := time.Now().Format(time.RFC3339)
+	now := time.Now()
 	for i := 1; i <= 36; i++ {
 		id := fmt.Sprintf("U-%03d", i)
 		productoID := products[i%len(products)]
 		estado := statuses[i%len(statuses)]
-		if _, err := stmt.Exec(id, productoID, estado, now); err != nil {
+		createdAt := now.AddDate(0, 0, -i).Format(time.RFC3339)
+		expiryAt := now.AddDate(0, 0, 20+i).Format("2006-01-02")
+		if _, err := stmt.Exec(id, productoID, estado, createdAt, expiryAt); err != nil {
 			if rollbackErr := tx.Rollback(); rollbackErr != nil {
 				return fmt.Errorf("insert unidades: %w (rollback: %v)", err, rollbackErr)
 			}
@@ -682,7 +728,7 @@ func main() {
 		inventoryProducts := make([]inventoryProduct, 0, len(products))
 		for _, product := range products {
 			rows, err := db.Query(`
-				SELECT id, estado, creado_en
+				SELECT id, estado, creado_en, caducidad
 				FROM unidades
 				WHERE producto_id = ?
 				ORDER BY creado_en, id`, product.ID)
@@ -693,25 +739,30 @@ func main() {
 
 			units := []inventoryUnit{}
 			availableCount := 0
+			changeCount := 0
 			fifoIndex := 1
 			for rows.Next() {
 				var id, estado, creadoEn string
-				if err := rows.Scan(&id, &estado, &creadoEn); err != nil {
+				var caducidad sql.NullString
+				if err := rows.Scan(&id, &estado, &creadoEn, &caducidad); err != nil {
 					rows.Close()
 					http.Error(w, "Error al leer unidades", http.StatusInternalServerError)
 					return
 				}
 				fifo := "-"
-				if estado == "Disponible" {
+				if estado == "Disponible" || estado == "available" {
 					fifo = strconv.Itoa(fifoIndex)
 					fifoIndex++
 					availableCount++
+				} else if estado == "Cambio" || estado == "swapped" {
+					changeCount++
 				}
 				units = append(units, inventoryUnit{
 					ID:          id,
 					Estado:      estado,
 					EstadoClass: estadoClass(estado),
 					CreadoEn:    creadoEn,
+					Caducidad:   caducidad.String,
 					FIFO:        fifo,
 				})
 			}
@@ -725,8 +776,13 @@ func main() {
 			estadoLabel := "Disponible"
 			estadoClass := "available"
 			if availableCount == 0 {
-				estadoLabel = "Vendido"
-				estadoClass = "sold"
+				if changeCount > 0 {
+					estadoLabel = "Cambio"
+					estadoClass = "swapped"
+				} else {
+					estadoLabel = "Vendido"
+					estadoClass = "sold"
+				}
 			}
 
 			inventoryProducts = append(inventoryProducts, inventoryProduct{
@@ -792,16 +848,22 @@ func main() {
 			productID = selectedProduct.ID
 		}
 
+		availableUnits, err := availableUnitsByProduct(db, productID)
+		if err != nil {
+			http.Error(w, "Error al consultar unidades disponibles", http.StatusInternalServerError)
+			return
+		}
+
 		salientes := make([]string, 0, cantidad)
-		for i := 0; i < cantidad && i < len(selectedProduct.Units); i++ {
-			salientes = append(salientes, selectedProduct.Units[i].ID)
+		for i := 0; i < cantidad && i < len(availableUnits); i++ {
+			salientes = append(salientes, availableUnits[i].ID)
 		}
 
 		data := cambioFormData{
 			Title:               "Registrar cambio",
 			ProductoID:          productID,
 			Productos:           products,
-			Unidades:            selectedProduct.Units,
+			Unidades:            availableUnits,
 			Salientes:           salientes,
 			SalientesMap:        buildSalientesMap(salientes),
 			IncomingMode:        "existing",
@@ -974,8 +1036,14 @@ func main() {
 			errors["persona_del_cambio"] = "Ingresa la persona responsable del cambio."
 		}
 
+		availableUnits, err := availableUnitsByProduct(db, productID)
+		if err != nil {
+			http.Error(w, "Error al consultar unidades disponibles", http.StatusInternalServerError)
+			return
+		}
+
 		unitLookup := make(map[string]struct{})
-		for _, unit := range selectedProduct.Units {
+		for _, unit := range availableUnits {
 			unitLookup[unit.ID] = struct{}{}
 		}
 		validSalientes := make([]string, 0, len(salientes))
@@ -984,7 +1052,7 @@ func main() {
 				validSalientes = append(validSalientes, unitID)
 			}
 		}
-		if len(selectedProduct.Units) == 0 {
+		if len(availableUnits) == 0 {
 			errors["salientes"] = "No hay unidades disponibles para el producto seleccionado."
 		} else if len(validSalientes) == 0 {
 			errors["salientes"] = "Selecciona al menos una unidad disponible como saliente."
@@ -1032,7 +1100,7 @@ func main() {
 				Title:               "Registrar cambio",
 				ProductoID:          productID,
 				Productos:           products,
-				Unidades:            selectedProduct.Units,
+				Unidades:            availableUnits,
 				PersonaCambio:       personaCambio,
 				Notas:               notas,
 				Salientes:           salientes,
@@ -1053,11 +1121,81 @@ func main() {
 			return
 		}
 
+		tx, err := db.Begin()
+		if err != nil {
+			http.Error(w, "Error al iniciar el cambio", http.StatusInternalServerError)
+			return
+		}
+
+		outgoingQty := len(salientes)
+		salientesMarcadas, err := selectAndMarkUnitsByStatus(tx, productID, outgoingQty, "Cambio")
+		if err != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				log.Printf("rollback cambio: %v", rollbackErr)
+			}
+			if err == errInsufficientStock {
+				errors["salientes"] = "No hay stock disponible suficiente para completar el cambio."
+				data := cambioFormData{
+					Title:               "Registrar cambio",
+					ProductoID:          productID,
+					Productos:           products,
+					Unidades:            availableUnits,
+					PersonaCambio:       personaCambio,
+					Notas:               notas,
+					Salientes:           salientes,
+					SalientesMap:        buildSalientesMap(salientes),
+					IncomingMode:        incomingMode,
+					IncomingExistingID:  incomingExistingID,
+					IncomingExistingQty: incomingExistingQty,
+					IncomingNewSKU:      incomingNewSKU,
+					IncomingNewName:     incomingNewName,
+					IncomingNewLine:     incomingNewLine,
+					IncomingNewQty:      incomingNewQty,
+					Errors:              errors,
+				}
+				w.WriteHeader(http.StatusBadRequest)
+				if err := tmpl.ExecuteTemplate(w, "cambio_new.html", data); err != nil {
+					http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
+				}
+				return
+			}
+			http.Error(w, "Error al actualizar unidades salientes", http.StatusInternalServerError)
+			return
+		}
+
 		entrantes := []string{}
 		if incomingMode == "existing" {
 			entrantes = buildEntranteIDs("ENT-"+incomingExistingID, incomingExistingQty)
 		} else {
 			entrantes = buildEntranteIDs("ENT-"+incomingNewSKU, incomingNewQty)
+		}
+
+		incomingProductID := incomingExistingID
+		incomingQty := incomingExistingQty
+		if incomingMode == "new" {
+			incomingProductID = incomingNewSKU
+			incomingQty = incomingNewQty
+		}
+
+		now := time.Now().Format(time.RFC3339)
+		for i := 0; i < incomingQty; i++ {
+			unitID := fmt.Sprintf("U-%d-%d", time.Now().UnixNano(), i+1)
+			if _, err := tx.Exec(
+				`INSERT INTO unidades (id, producto_id, estado, creado_en, caducidad)
+				VALUES (?, ?, ?, ?, ?)`,
+				unitID, incomingProductID, "Disponible", now, nil,
+			); err != nil {
+				if rollbackErr := tx.Rollback(); rollbackErr != nil {
+					log.Printf("rollback cambio insert: %v", rollbackErr)
+				}
+				http.Error(w, "Error al registrar unidades entrantes", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			http.Error(w, "Error al confirmar el cambio", http.StatusInternalServerError)
+			return
 		}
 
 		confirmData := cambioConfirmData{
@@ -1066,7 +1204,7 @@ func main() {
 			ProductoNombre:      selectedProduct.Name,
 			PersonaCambio:       personaCambio,
 			Notas:               notas,
-			Salientes:           salientes,
+			Salientes:           salientesMarcadas,
 			Entrantes:           entrantes,
 			IncomingMode:        incomingMode,
 			IncomingExistingID:  incomingExistingID,

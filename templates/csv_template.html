@@ -391,6 +391,7 @@
   </main>
 
   <script>
+    const downloadTemplateButton = document.getElementById("download-template");
     const uploadStatus = document.getElementById("upload-status");
     const uploadPreviewBody = document.getElementById("upload-preview-body");
     const movementLog = document.getElementById("movement-log");
@@ -453,47 +454,49 @@
       return rows;
     };
 
-    downloadTemplateButton.addEventListener("click", () => {
-      const header = [
-        "sku",
-        "linea",
-        "nombre",
-        "precio_base_venta",
-        "precio_consultora",
-        "caduca",
-        "fecha_caducidad",
-        "anotaciones",
-        "cantidad"
-      ];
-      const rows = [
-        [
-          "SKU-001",
-          "Nutrición",
-          "Proteína Balance 500g",
-          "120000",
-          "98000",
-          "true",
-          "2025-01-12",
-          "Lote inicial",
-          "5"
-        ],
-        ["", "Dermocosmética", "Crema Regeneradora", "89000", "70000", "false", "", "Promoción abril", "12"]
-      ];
+    if (downloadTemplateButton) {
+      downloadTemplateButton.addEventListener("click", () => {
+        const header = [
+          "sku",
+          "linea",
+          "nombre",
+          "precio_base_venta",
+          "precio_consultora",
+          "caduca",
+          "fecha_caducidad",
+          "anotaciones",
+          "cantidad"
+        ];
+        const rows = [
+          [
+            "SKU-001",
+            "Nutrición",
+            "Proteína Balance 500g",
+            "120000",
+            "98000",
+            "true",
+            "2025-01-12",
+            "Lote inicial",
+            "5"
+          ],
+          ["", "Dermocosmética", "Crema Regeneradora", "89000", "70000", "false", "", "Promoción abril", "12"]
+        ];
 
-      const csvContent = [header, ...rows]
-        .map((row) => row.map(escapeCSV).join(","))
-        .join("\n");
+        const csvContent = [header, ...rows]
+          .map((row) => row.map(escapeCSV).join(","))
+          .join("\n");
 
-      const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
-      const url = URL.createObjectURL(blob);
-      const link = document.createElement("a");
-      link.href = url;
-      link.download = "plantilla_productos_mvp.csv";
-      document.body.appendChild(link);
-      link.click();
-      link.remove();
-      URL.revokeObjectURL(url);
-    });
+        const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement("a");
+        link.href = url;
+        link.download = "plantilla_productos_mvp.csv";
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
+      });
+    }
 
     const validateRow = (row, index) => {
       const errors = [];
