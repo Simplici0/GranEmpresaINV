@@ -30,69 +30,49 @@
       color: var(--text);
     }
 
-    header {
-      padding: 24px 32px 12px;
+    .global-banner {
+      background: #f47a24;
+      padding: 6px 32px;
+    }
+
+    .banner-logos {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .logo-placeholder {
+      height: 22px;
+      min-width: 76px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px dashed rgba(255, 255, 255, 0.7);
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .page-header {
+      padding: 16px 32px 12px;
       display: flex;
       flex-direction: column;
       gap: 12px;
     }
 
-    .header-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 16px;
-      flex-wrap: wrap;
-    }
-
-    .user-bar {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 13px;
-      color: var(--muted);
-    }
-
-    .role-pill {
-      background: #f4f6fb;
-      color: #2054c6;
-      padding: 4px 10px;
-      border-radius: 999px;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-
-    .logout-button {
-      border: 1px solid var(--primary);
-      background: var(--card);
-      color: var(--primary);
-      padding: 8px 12px;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-
-    .logout-button:hover {
-      background: var(--primary);
-      color: var(--card);
-    }
-
-    header h1 {
+    .page-header h1 {
       margin: 0;
       font-size: 26px;
     }
 
-    header p {
+    .page-header p {
       margin: 0;
       color: var(--muted);
-    }
-
-    nav {
-      display: flex;
-      gap: 12px;
-      flex-wrap: wrap;
     }
 
     /* Nuevo diseño de botones de navegación */
@@ -133,13 +113,6 @@
 
     .nav-button.primary:hover {
       background: #d84a2b;
-    }
-
-    nav a {
-      text-decoration: none;
-      color: var(--primary);
-      font-size: 14px;
-      font-weight: 600;
     }
 
     .grid {
@@ -189,6 +162,44 @@
     .periods {
       display: grid;
       gap: 12px;
+    }
+
+    .range-form {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
+      align-items: end;
+    }
+
+    .range-form label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .range-form input {
+      width: 100%;
+      padding: 8px 10px;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      font-size: 13px;
+    }
+
+    .range-summary {
+      margin-top: 12px;
+      display: grid;
+      gap: 6px;
+      padding: 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: #f9faff;
+    }
+
+    .range-summary strong {
+      font-size: 20px;
     }
 
     .bar-chart {
@@ -302,36 +313,7 @@
   </style>
 </head>
 <body>
-  <header>
-    <div class="header-top">
-      <div>
-        <h1>{{.Title}}</h1>
-        <p>{{.Subtitle}}</p>
-      </div>
-      {{if .CurrentUser}}
-      <div class="user-bar">
-        <span>{{.CurrentUser.Username}}</span>
-        <span class="role-pill">{{.CurrentUser.Role}}</span>
-        <form method="POST" action="/logout">
-          <button class="logout-button" type="submit">Cerrar sesión</button>
-        </form>
-      </div>
-      {{end}}
-    </div>
-    <div class="nav-buttons">
-      <a href="/inventario" class="nav-button">Ver inventario</a>
-      <a href="/venta/new" class="nav-button">Registrar venta</a>
-      <a href="/cambio/new" class="nav-button">Registrar cambio</a>
-      {{if .CurrentUser}}
-        {{if eq .CurrentUser.Role "admin"}}
-          <a href="/productos/new" class="nav-button">Nuevo producto</a>
-          <a href="/admin/users" class="nav-button">Usuarios</a>
-          <a href="/csv/template" class="nav-button" target="_blank">Plantilla CSV</a>
-          <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
-        {{end}}
-      {{end}}
-    </div>
-  </header>
+  {{template "header" .}}
 
   <section class="grid">
     <article class="card">
@@ -347,23 +329,24 @@
     </article>
 
     <article class="card">
-      <h2>Ventas totales por periodo</h2>
-      <div class="bar-chart">
-        {{range .PeriodosTotales}}
-        <div class="bar-row">
-          <div>{{.Label}}</div>
-          <div class="bar"><span style="width: {{printf "%.1f" .Percent}}%;"></span></div>
+      <h2>Ventas totales (rango)</h2>
+      <form class="range-form" action="/dashboard" method="GET">
+        <div>
+          <label for="start_date">Desde</label>
+          <input id="start_date" name="start_date" type="date" value="{{.RangeStart}}" />
         </div>
-        {{end}}
-      </div>
-      <div class="periods">
-        {{range .PeriodosTotales}}
-        <div class="period">
-          <div>{{.Label}}</div>
-          <strong>{{.Total}}</strong>
-          <div class="badge">{{.Range}}</div>
+        <div>
+          <label for="end_date">Hasta</label>
+          <input id="end_date" name="end_date" type="date" value="{{.RangeEnd}}" />
         </div>
-        {{end}}
+        <div>
+          <button class="nav-button primary" type="submit">Actualizar</button>
+        </div>
+      </form>
+      <div class="range-summary">
+        <div>Rango seleccionado</div>
+        <strong>{{.RangeTotal}}</strong>
+        <div class="badge">{{.RangeStart}} → {{.RangeEnd}} · {{.RangeCount}} ventas</div>
       </div>
     </article>
 

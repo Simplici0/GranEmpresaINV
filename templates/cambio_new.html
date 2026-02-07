@@ -26,7 +26,55 @@
       margin: 0;
       background: var(--bg);
       color: var(--text);
-      padding: 24px;
+    }
+
+    .global-banner {
+      background: #f47a24;
+      padding: 6px 32px;
+    }
+
+    .banner-logos {
+      display: flex;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .logo-placeholder {
+      height: 22px;
+      min-width: 76px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px dashed rgba(255, 255, 255, 0.7);
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .page-header {
+      padding: 16px 32px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .page-header h1 {
+      margin: 0;
+      font-size: 24px;
+    }
+
+    .page-header p {
+      margin: 0;
+      color: var(--muted);
+    }
+
+    .page-content {
+      padding: 24px 32px 32px;
     }
 
     /* Nuevo diseño de botones de navegación */
@@ -140,46 +188,56 @@
       font-size: 16px;
     }
 
-    .chips {
+    .multi-select {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: white;
+      padding: 8px 12px;
+    }
+
+    .multi-select summary {
+      list-style: none;
+      cursor: pointer;
       display: flex;
-      gap: 8px;
-      flex-wrap: wrap;
-    }
-
-    .chip {
-      padding: 6px 10px;
-      border-radius: 999px;
-      background: #e9f7f1;
-      color: #1b6d4c;
-      font-size: 12px;
-      font-weight: 600;
-      display: inline-flex;
       align-items: center;
-      gap: 6px;
+      justify-content: space-between;
+      font-size: 14px;
+      color: var(--text);
     }
 
-    .chips input {
+    .multi-select summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .multi-select .summary-meta {
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .multi-select .options {
+      margin-top: 10px;
+      display: grid;
+      gap: 8px;
+      max-height: 200px;
+      overflow-y: auto;
+      padding-right: 4px;
+    }
+
+    .multi-select .option {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--text);
+    }
+
+    .multi-select input[type="checkbox"] {
       width: auto;
     }
 
-    .radio-group {
-      display: flex;
-      gap: 16px;
-      flex-wrap: wrap;
-    }
-
-    .radio-card {
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 10px 12px;
-      display: flex;
-      gap: 8px;
-      align-items: flex-start;
-      background: white;
-    }
-
-    .radio-card input {
-      margin-top: 4px;
+    .selection-count {
+      font-weight: 600;
+      color: var(--info);
     }
 
     .hint {
@@ -190,6 +248,10 @@
     .error {
       color: var(--danger);
       font-size: 12px;
+    }
+
+    .is-hidden {
+      display: none;
     }
 
     .actions {
@@ -226,81 +288,14 @@
       color: var(--info);
       font-weight: 600;
     }
-
-    .header-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 16px;
-      flex-wrap: wrap;
-    }
-
-    .user-bar {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 13px;
-      color: var(--muted);
-    }
-
-    .role-pill {
-      background: #f4f6fb;
-      color: #2054c6;
-      padding: 4px 10px;
-      border-radius: 999px;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-
-    .logout-button {
-      border: 1px solid var(--primary);
-      background: var(--card);
-      color: var(--primary);
-      padding: 8px 12px;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-
-    .logout-button:hover {
-      background: var(--primary);
-      color: var(--card);
-    }
   </style>
 </head>
 <body>
-  <div class="nav-buttons">
-    <a href="/inventario" class="nav-button">Volver a inventario</a>
-    <a href="/venta/new" class="nav-button">Registrar venta</a>
-    <a href="/cambio/new" class="nav-button active">Registrar cambio</a>
-    {{if .CurrentUser}}
-      {{if eq .CurrentUser.Role "admin"}}
-        <a href="/productos/new" class="nav-button">Nuevo producto</a>
-        <a href="/admin/users" class="nav-button">Usuarios</a>
-        <a href="/csv/template" class="nav-button" target="_blank">Plantilla CSV</a>
-        <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
-      {{end}}
-    {{end}}
-  </div>
-
-  <div class="card">
-    <div class="header-top">
-      <div>
-        <h1>{{.Title}}</h1>
-        <p>Define el flujo de cambio desde inventario, sin registrar dinero.</p>
-      </div>
-      {{if .CurrentUser}}
-      <div class="user-bar">
-        <span>{{.CurrentUser.Username}}</span>
-        <span class="role-pill">{{.CurrentUser.Role}}</span>
-        <form method="POST" action="/logout">
-          <button class="logout-button" type="submit">Cerrar sesión</button>
-        </form>
-      </div>
-      {{end}}
-    </div>
+  {{template "header" .}}
+  <main class="page-content">
+    <div class="card">
+    <h1>{{.Title}}</h1>
+    <p>Define el flujo de cambio desde inventario, sin registrar dinero.</p>
 
     <div class="alert">
       Este flujo solo registra el movimiento de cambio. Si hay dinero de por medio, utiliza el flujo de ventas.
@@ -330,15 +325,25 @@
 
       <div class="section">
         <h2>Unidades salientes (DISPONIBLE → CAMBIO)</h2>
-        <div class="hint">Selecciona una o varias unidades disponibles.</div>
-        <div class="chips">
-          {{range .Unidades}}
-            <label class="chip">
-              <input type="checkbox" name="salientes" value="{{.ID}}" {{if index $.SalientesMap .ID}}checked{{end}} />
-              {{.ID}}
-            </label>
-          {{end}}
-        </div>
+        <div class="hint">Selecciona una o varias unidades disponibles. Disponible: {{len .Unidades}} unidades.</div>
+        {{if .Unidades}}
+          <details class="multi-select" data-multi-select>
+            <summary>
+              <span>Seleccionar unidades</span>
+              <span class="summary-meta"><span class="selection-count" data-selection-count>0</span> de {{len .Unidades}} seleccionadas</span>
+            </summary>
+            <div class="options" role="listbox" aria-label="Unidades disponibles">
+              {{range .Unidades}}
+                <label class="option">
+                  <input type="checkbox" name="salientes" value="{{.ID}}" {{if index $.SalientesMap .ID}}checked{{end}} />
+                  {{.ID}}
+                </label>
+              {{end}}
+            </div>
+          </details>
+        {{else}}
+          <div class="error">No hay unidades disponibles para este producto.</div>
+        {{end}}
         {{with index .Errors "salientes"}}
           <div class="error">{{.}}</div>
         {{end}}
@@ -346,27 +351,19 @@
 
       <div class="section">
         <h2>Entrantes (se crean como DISPONIBLE)</h2>
-        <div class="radio-group">
-          <label class="radio-card">
-            <input type="radio" name="incoming_mode" value="existing" {{if or (eq .IncomingMode "") (eq .IncomingMode "existing")}}checked{{end}} />
-            <div>
-              <strong>Producto existente</strong>
-              <div class="hint">Selecciona un producto y su cantidad.</div>
-            </div>
-          </label>
-          <label class="radio-card">
-            <input type="radio" name="incoming_mode" value="new" {{if eq .IncomingMode "new"}}checked{{end}} />
-            <div>
-              <strong>Producto nuevo</strong>
-              <div class="hint">Crea un SKU y agrega la cantidad.</div>
-            </div>
-          </label>
+        <div>
+          <label for="incoming_mode">Tipo de entrada</label>
+          <select id="incoming_mode" name="incoming_mode">
+            <option value="existing" {{if or (eq .IncomingMode "") (eq .IncomingMode "existing")}}selected{{end}}>Producto existente</option>
+            <option value="new" {{if eq .IncomingMode "new"}}selected{{end}}>Producto nuevo</option>
+          </select>
+          <div class="hint">Elige si entra un producto existente o uno nuevo.</div>
         </div>
         {{with index .Errors "incoming_mode"}}
           <div class="error">{{.}}</div>
         {{end}}
 
-        <div class="row">
+        <div class="row" id="incoming_existing_fields">
           <div>
             <label for="incoming_existing_id">Producto entrante</label>
             <select id="incoming_existing_id" name="incoming_existing_id">
@@ -387,7 +384,7 @@
           </div>
         </div>
 
-        <div class="row">
+        <div class="row" id="incoming_new_fields">
           <div>
             <label for="incoming_new_sku">SKU nuevo</label>
             <input id="incoming_new_sku" name="incoming_new_sku" type="text" value="{{.IncomingNewSKU}}" placeholder="SKU o código interno" />
@@ -404,7 +401,7 @@
           </div>
         </div>
 
-        <div class="row">
+        <div class="row" id="incoming_new_qty_fields">
           <div>
             <label for="incoming_new_line">Línea</label>
             <input id="incoming_new_line" name="incoming_new_line" type="text" value="{{.IncomingNewLine}}" placeholder="Ej. Dermocosmética" />
@@ -431,21 +428,47 @@
         <a class="button secondary" href="/inventario">Volver a inventario</a>
       </div>
     </form>
-  </div>
+    </div>
+  </main>
   <script>
-    const incomingModeInputs = document.querySelectorAll('input[name="incoming_mode"]');
+    const incomingModeSelect = document.querySelector('#incoming_mode');
     const existingFields = document.querySelectorAll('#incoming_existing_id, #incoming_existing_qty');
     const newFields = document.querySelectorAll('#incoming_new_sku, #incoming_new_name, #incoming_new_line, #incoming_new_qty');
+    const existingFieldGroup = document.querySelector('#incoming_existing_fields');
+    const newFieldGroup = document.querySelector('#incoming_new_fields');
+    const newQtyFieldGroup = document.querySelector('#incoming_new_qty_fields');
+    const multiSelect = document.querySelector('[data-multi-select]');
+    const selectionCount = document.querySelector('[data-selection-count]');
 
-    const updateIncomingMode = () => {
-      const selected = document.querySelector('input[name="incoming_mode"]:checked');
-      const mode = selected ? selected.value : "existing";
-      existingFields.forEach((field) => field.toggleAttribute("disabled", mode !== "existing"));
-      newFields.forEach((field) => field.toggleAttribute("disabled", mode !== "new"));
+    const updateSelectionCount = () => {
+      if (!multiSelect || !selectionCount) return;
+      const checked = multiSelect.querySelectorAll('input[type="checkbox"]:checked').length;
+      selectionCount.textContent = checked;
     };
 
-    incomingModeInputs.forEach((input) => input.addEventListener("change", updateIncomingMode));
+    const updateIncomingMode = () => {
+      const mode = incomingModeSelect ? incomingModeSelect.value : "existing";
+      existingFields.forEach((field) => field.toggleAttribute("disabled", mode !== "existing"));
+      newFields.forEach((field) => field.toggleAttribute("disabled", mode !== "new"));
+      if (existingFieldGroup) {
+        existingFieldGroup.classList.toggle("is-hidden", mode !== "existing");
+      }
+      if (newFieldGroup) {
+        newFieldGroup.classList.toggle("is-hidden", mode !== "new");
+      }
+      if (newQtyFieldGroup) {
+        newQtyFieldGroup.classList.toggle("is-hidden", mode !== "new");
+      }
+    };
+
+    if (incomingModeSelect) {
+      incomingModeSelect.addEventListener("change", updateIncomingMode);
+    }
     updateIncomingMode();
+    if (multiSelect) {
+      multiSelect.addEventListener("change", updateSelectionCount);
+      updateSelectionCount();
+    }
   </script>
 </body>
 </html>

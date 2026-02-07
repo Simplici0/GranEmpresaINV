@@ -27,7 +27,6 @@
       margin: 0;
       background: var(--bg);
       color: var(--text);
-      padding: 32px;
     }
 
     .container {
@@ -35,19 +34,80 @@
       margin: 0 auto;
     }
 
-    header {
-      margin-bottom: 32px;
+    .global-banner {
+      background: #f47a24;
+      padding: 6px 32px;
     }
 
-    h1 {
-      margin: 0 0 8px 0;
-      font-size: 28px;
+    .banner-logos {
+      display: flex;
+      gap: 12px;
+      align-items: center;
     }
 
-    .subtitle {
+    .logo-placeholder {
+      height: 22px;
+      min-width: 76px;
+      padding: 0 10px;
+      border-radius: 999px;
+      border: 1px dashed rgba(255, 255, 255, 0.7);
+      color: #ffffff;
+      font-size: 11px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      background: rgba(255, 255, 255, 0.2);
+    }
+
+    .page-header {
+      padding: 16px 32px 12px;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .page-header h1 {
+      margin: 0;
+      font-size: 24px;
+    }
+
+    .page-header p {
       margin: 0;
       color: var(--muted);
-      font-size: 16px;
+    }
+
+    .page-content {
+      padding: 24px 32px 32px;
+    }
+
+    .nav-buttons {
+      display: flex;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .nav-button {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      padding: 8px 16px;
+      border-radius: 8px;
+      text-decoration: none;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s ease;
+      border: 1px solid var(--primary);
+      background: var(--card);
+      color: var(--primary);
+      cursor: pointer;
+    }
+
+    .nav-button:hover {
+      background: var(--primary);
+      color: var(--card);
     }
 
     .actions {
@@ -167,7 +227,7 @@
     }
 
     @media (max-width: 768px) {
-      body {
+      .page-content {
         padding: 16px;
       }
       
@@ -183,87 +243,15 @@
         flex-direction: column;
       }
     }
-
-    .header-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 16px;
-      flex-wrap: wrap;
-    }
-
-    .user-bar {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 13px;
-      color: var(--muted);
-    }
-
-    .role-pill {
-      background: #f4f6fb;
-      color: #2054c6;
-      padding: 4px 10px;
-      border-radius: 999px;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-    }
-
-    .logout-button {
-      border: 1px solid var(--primary);
-      background: var(--card);
-      color: var(--primary);
-      padding: 8px 12px;
-      border-radius: 8px;
-      font-size: 13px;
-      font-weight: 600;
-      cursor: pointer;
-    }
-
-    .logout-button:hover {
-      background: var(--primary);
-      color: var(--card);
-    }
   </style>
 </head>
 <body>
-  <div class="container">
-    <div class="nav-buttons" style="margin-bottom: 24px;">
-      <a href="/inventario" class="nav-button">Ver inventario</a>
-      <a href="/venta/new" class="nav-button">Registrar venta</a>
-      <a href="/cambio/new" class="nav-button">Registrar cambio</a>
-      {{if .CurrentUser}}
-        {{if eq .CurrentUser.Role "admin"}}
-          <a href="/productos/new" class="nav-button">Nuevo producto</a>
-          <a href="/admin/users" class="nav-button">Usuarios</a>
-          <a href="/csv/template" class="nav-button" target="_blank">Plantilla CSV</a>
-          <a href="/csv/export" class="nav-button active">Exportaciones CSV</a>
-        {{end}}
-      {{end}}
-    </div>
-    
-    <div class="nav-buttons" style="margin-bottom: 48px;">
-      <button class="nav-button" onclick="window.close()">Cerrar ventana</button>
-    </div>
-
-    <header>
-      <div class="header-top">
-        <div>
-          <h1>Exportaciones CSV</h1>
-          <p class="subtitle">Genera reportes para inventario, ventas y cambios</p>
-        </div>
-        {{if .CurrentUser}}
-        <div class="user-bar">
-          <span>{{.CurrentUser.Username}}</span>
-          <span class="role-pill">{{.CurrentUser.Role}}</span>
-          <form method="POST" action="/logout">
-            <button class="logout-button" type="submit">Cerrar sesión</button>
-          </form>
-        </div>
-        {{end}}
+  {{template "header" .}}
+  <main class="page-content">
+    <div class="container">
+      <div class="nav-buttons" style="margin-bottom: 24px;">
+        <button class="nav-button" onclick="window.close()">Cerrar ventana</button>
       </div>
-    </header>
 
     <section class="export-panel">
       <div>
@@ -315,8 +303,9 @@
           </button>
         </div>
       </div>
-    </section>
-  </div>
+      </section>
+    </div>
+  </main>
 
   <script>
     // Datos de ejemplo (similares a los del archivo original)
@@ -383,6 +372,16 @@
 
     // Funciones auxiliares
     const formatDateISO = (value) => new Date(value).toISOString().slice(0, 10);
+    const statusLabels = {
+      available: "Disponible",
+      sold: "Vendido",
+      swapped: "Cambio",
+      Disponible: "Disponible",
+      Vendida: "Vendido",
+      Vendido: "Vendido",
+      Cambio: "Cambio"
+    };
+    const statusLabel = (status) => statusLabels[status] || status;
     
     const escapeCSVValue = (value) => {
       const stringValue = String(value ?? "");
@@ -435,7 +434,7 @@
           product.id,
           product.name,
           product.line,
-          product.status,
+          statusLabel(product.status),
           availableUnits,
           product.units.length
         ];
@@ -451,7 +450,7 @@
           product.name,
           product.line,
           unit.id,
-          unit.status,
+          statusLabel(unit.status),
           unit.received,
           unit.expires,
           unit.location
