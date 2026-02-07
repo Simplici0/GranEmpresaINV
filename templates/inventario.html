@@ -299,6 +299,36 @@
       background: #e7efff;
       color: #2054c6;
     }
+
+    .summary {
+      margin: 0 32px 16px;
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+    }
+
+    .summary-card {
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 16px;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .summary-card h3 {
+      margin: 0;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+    }
+
+    .summary-card span {
+      font-size: 20px;
+      font-weight: 700;
+    }
   </style>
 </head>
 <body>
@@ -339,6 +369,8 @@
       </div>
     </div>
     </section>
+
+  <section id="summary" class="summary" aria-live="polite"></section>
 
   <main>
     <table>
@@ -436,6 +468,10 @@
     const statusLabel = (status) => statusLabels[status] || status;
 
     const updateSummary = (visibleProducts) => {
+      if (!summary) {
+        console.warn("Resumen no disponible: falta el contenedor #summary.");
+        return;
+      }
       const totalProducts = visibleProducts.length;
       const totalUnits = visibleProducts.reduce((acc, product) => acc + product.units.filter((unit) => unit.status === "available").length, 0);
       const expiringUnits = visibleProducts.reduce(
@@ -467,6 +503,10 @@
     };
 
     const applyFilters = () => {
+      if (!statusFilter || !lineFilter || !searchFilter || !expiryToggle) {
+        console.warn("Filtros no disponibles: faltan controles de filtro en el DOM.");
+        return;
+      }
       const statusValue = statusFilter.value;
       const lineValue = lineFilter.value;
       const query = searchFilter.value.toLowerCase();
@@ -487,6 +527,10 @@
     };
 
     const renderTable = (items) => {
+      if (!productTable) {
+        console.warn("Tabla de productos no disponible: falta #productTable.");
+        return;
+      }
       productTable.innerHTML = "";
 
       items.forEach((product) => {
@@ -565,10 +609,14 @@
 
     renderTable(products);
     updateSummary(products);
-    [statusFilter, lineFilter, searchFilter, expiryToggle].forEach((input) =>
-      input.addEventListener("change", applyFilters)
-    );
-    searchFilter.addEventListener("input", applyFilters);
+    if (statusFilter && lineFilter && searchFilter && expiryToggle) {
+      [statusFilter, lineFilter, searchFilter, expiryToggle].forEach((input) =>
+        input.addEventListener("change", applyFilters)
+      );
+      searchFilter.addEventListener("input", applyFilters);
+    } else {
+      console.warn("Listeners de filtros no registrados por controles faltantes.");
+    }
   </script>
 
   <script>
