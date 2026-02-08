@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>Plantilla CSV - Carga Masiva</title>
+  <title>Agregar productos</title>
   <style>
     :root {
       color-scheme: light;
@@ -125,6 +125,11 @@
       cursor: pointer;
       font-size: 14px;
       transition: all 0.2s;
+    }
+
+    button:disabled {
+      cursor: not-allowed;
+      opacity: 0.6;
     }
 
     .primary {
@@ -291,6 +296,43 @@
       color: var(--text);
     }
 
+    .status-card {
+      background: #f9fafc;
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+      display: grid;
+      gap: 10px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+
+    .status-card ul {
+      margin: 0;
+      padding-left: 18px;
+    }
+
+    .status-card li {
+      margin-bottom: 4px;
+    }
+
+    .status-row {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 12px;
+      align-items: center;
+    }
+
+    .status-pill {
+      background: #eef1f8;
+      color: #2a335a;
+      padding: 4px 10px;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      font-size: 12px;
+      font-weight: 600;
+    }
+
     @media (max-width: 768px) {
       .page-content {
         padding: 16px;
@@ -317,38 +359,40 @@
 
       <section class="import-panel">
       <div>
-        <h2>Plantilla CSV MVP para carga masiva</h2>
-        <p>Descarga la plantilla con las columnas mínimas para registrar productos y crear unidades DISPONIBLE.</p>
+        <h2>Agregar productos con CSV</h2>
+        <p>Carga un CSV para crear/actualizar productos y crear unidades según cantidad.</p>
       </div>
       <div class="import-actions">
-        <button class="primary" id="download-template">Descargar plantilla CSV</button>
+        <button class="secondary" id="download-template">Descargar plantilla CSV</button>
         <label class="secondary" for="csv-upload">
           <input id="csv-upload" type="file" accept=".csv,text/csv" />
         </label>
-        <button class="secondary" id="process-csv">Subir CSV</button>
+        <button class="primary" id="upload-products" disabled>Subir productos</button>
       </div>
-      <p>Regla de importación: por cada fila se crea o encuentra el producto por <strong>línea + nombre</strong> (o por SKU si tu proceso lo genera) y se crean <strong>N unidades DISPONIBLE</strong> según el campo cantidad.</p>
+      <p>Regla de importación: por cada fila se crea o encuentra el producto por <strong>SKU</strong> y se crean <strong>N unidades DISPONIBLE</strong> según el campo cantidad.</p>
       
       <div>
         <p>Columnas requeridas y opcionales:</p>
         <div class="csv-columns">
-          <span>sku (opcional)</span>
+          <span>sku</span>
           <span>linea</span>
           <span>nombre</span>
-          <span>precio_base_venta</span>
+          <span>cantidad</span>
+          <span>precio_base</span>
+          <span>precio_venta</span>
           <span>precio_consultora</span>
-          <span>caduca (true/false)</span>
-          <span>fecha_caducidad (YYYY-MM-DD, opcional)</span>
+          <span>descuento (opcional)</span>
           <span>anotaciones (opcional)</span>
-          <span>cantidad (entero > 0)</span>
+          <span>fecha_caducidad (YYYY-MM-DD, opcional)</span>
+          <span>aplica_caducidad (true/false opcional)</span>
         </div>
       </div>
       
       <div>
         <p>Ejemplos válidos:</p>
         <ul class="example-list">
-          <li><code>SKU-001,Nutrición,Proteína Balance 500g,120000,98000,true,2025-01-12,Lote inicial,5</code></li>
-          <li><code>,Dermocosmética,Crema Regeneradora,89000,70000,false,,Promoción abril,12</code></li>
+          <li><code>SKU-001,Nutrición,Proteína Balance 500g,5,120000,135000,98000,0,Lote inicial,2025-01-12,true</code></li>
+          <li><code>SKU-002,Dermocosmética,Crema Regeneradora,12,89000,99000,70000,10,Promoción abril,,false</code></li>
         </ul>
       </div>
       
@@ -358,9 +402,17 @@
           <span>Válidas: 0</span>
           <span>Errores: 0</span>
         </div>
+        <div class="status-card" id="validation-summary">
+          <div class="status-row">
+            <span class="status-pill" id="validation-pill">Validación pendiente</span>
+            <span>Sube un CSV para validar columnas y filas.</span>
+          </div>
+          <ul id="validation-errors"></ul>
+        </div>
         <div class="movement-log" id="movement-log">
-          <div><strong>Movimiento ALTA_MASIVA</strong> aún no generado.</div>
-          <div>Sube un CSV para ver el batch_id y el resumen.</div>
+          <div><strong>Resultado de carga</strong></div>
+          <div id="upload-result">Aún no se ha subido ningún archivo.</div>
+          <div><a href="/inventario" class="nav-button" id="inventory-link" style="display: none;">Ver inventario</a></div>
         </div>
         <div class="upload-preview" id="upload-preview">
           <table>
@@ -370,17 +422,20 @@
                 <th>SKU</th>
                 <th>Línea</th>
                 <th>Nombre</th>
-                <th>Precio base</th>
-                <th>Precio consultora</th>
-                <th>Caduca</th>
-                <th>Fecha caducidad</th>
                 <th>Cantidad</th>
+                <th>Precio base</th>
+                <th>Precio venta</th>
+                <th>Precio consultora</th>
+                <th>Descuento</th>
+                <th>Anotaciones</th>
+                <th>Fecha caducidad</th>
+                <th>Aplica caducidad</th>
                 <th>Resultado</th>
               </tr>
             </thead>
             <tbody id="upload-preview-body">
               <tr>
-                <td colspan="10" style="text-align: center; color: var(--muted);">Sin archivo cargado.</td>
+                <td colspan="13" style="text-align: center; color: var(--muted);">Sin archivo cargado.</td>
               </tr>
             </tbody>
           </table>
@@ -394,10 +449,12 @@
     const downloadTemplateButton = document.getElementById("download-template");
     const uploadStatus = document.getElementById("upload-status");
     const uploadPreviewBody = document.getElementById("upload-preview-body");
-    const movementLog = document.getElementById("movement-log");
-    
-    const formatDateISO = (value) => new Date(value).toISOString().slice(0, 10);
-    
+    const validationErrors = document.getElementById("validation-errors");
+    const validationPill = document.getElementById("validation-pill");
+    const uploadResult = document.getElementById("upload-result");
+    const inventoryLink = document.getElementById("inventory-link");
+    const uploadButton = document.getElementById("upload-products");
+    const fileInput = document.getElementById("csv-upload");
     const escapeCSV = (value) => {
       const stringValue = String(value);
       if (/[",\n]/.test(stringValue)) {
@@ -460,26 +517,30 @@
           "sku",
           "linea",
           "nombre",
-          "precio_base_venta",
+          "cantidad",
+          "precio_base",
+          "precio_venta",
           "precio_consultora",
-          "caduca",
-          "fecha_caducidad",
+          "descuento",
           "anotaciones",
-          "cantidad"
+          "fecha_caducidad",
+          "aplica_caducidad"
         ];
         const rows = [
           [
             "SKU-001",
             "Nutrición",
             "Proteína Balance 500g",
+            "5",
             "120000",
+            "135000",
             "98000",
-            "true",
-            "2025-01-12",
+            "0",
             "Lote inicial",
-            "5"
+            "2025-01-12",
+            "true"
           ],
-          ["", "Dermocosmética", "Crema Regeneradora", "89000", "70000", "false", "", "Promoción abril", "12"]
+          ["SKU-002", "Dermocosmética", "Crema Regeneradora", "12", "89000", "99000", "70000", "10", "Promoción abril", "", "false"]
         ];
 
         const csvContent = [header, ...rows]
@@ -498,67 +559,187 @@
       });
     }
 
-    const validateRow = (row, index) => {
-      const errors = [];
-      const [
-        sku = "",
-        linea = "",
-        nombre = "",
-        precioBase = "",
-        precioConsultora = "",
-        caduca = "",
-        fechaCaducidad = "",
-        anotaciones = "",
-        cantidad = ""
-      ] = row.map((cell) => cell.trim());
-
-      if (!linea) errors.push("Línea es obligatoria.");
-      if (!nombre) errors.push("Nombre es obligatorio.");
-
-      const precioBaseNum = Number(precioBase.replace(",", "."));
-      if (!precioBase || Number.isNaN(precioBaseNum) || precioBaseNum <= 0) {
-        errors.push("Precio base inválido.");
+    const validateRows = (rows) => {
+      const header = rows[0].map((cell) => cell.trim().toLowerCase());
+      const required = [
+        "sku",
+        "linea",
+        "nombre",
+        "cantidad",
+        "precio_base",
+        "precio_venta",
+        "precio_consultora"
+      ];
+      const missingColumns = required.filter((column) => !header.includes(column));
+      if (missingColumns.length) {
+        return {
+          rows: [],
+          errors: [`Faltan columnas requeridas: ${missingColumns.join(", ")}`]
+        };
       }
 
-      const precioConsultoraNum = Number(precioConsultora.replace(",", "."));
-      if (!precioConsultora || Number.isNaN(precioConsultoraNum) || precioConsultoraNum <= 0) {
-        errors.push("Precio consultora inválido.");
-      }
+      const indexMap = header.reduce((map, column, idx) => {
+        map[column] = idx;
+        return map;
+      }, {});
 
-      const caducaLower = caduca.toLowerCase();
-      if (!caduca || (caducaLower !== "true" && caducaLower !== "false")) {
-        errors.push("Caduca debe ser true/false.");
-      }
+      const dataRows = rows.slice(1);
+      const parsedRows = [];
+      dataRows.forEach((row, idx) => {
+        const get = (column) => (row[indexMap[column]] || "").trim();
+        const sku = get("sku");
+        const linea = get("linea");
+        const nombre = get("nombre");
+        const cantidad = get("cantidad");
+        const precioBase = get("precio_base");
+        const precioVenta = get("precio_venta");
+        const precioConsultora = get("precio_consultora");
+        const descuento = get("descuento");
+        const anotaciones = get("anotaciones");
+        const fechaCaducidad = get("fecha_caducidad");
+        const aplicaCaducidad = get("aplica_caducidad");
 
-      if (caducaLower === "true" && !fechaCaducidad) {
-        errors.push("Fecha caducidad requerida si caduca.");
-      }
-      if (fechaCaducidad && !/^\d{4}-\d{2}-\d{2}$/.test(fechaCaducidad)) {
-        errors.push("Fecha caducidad debe ser YYYY-MM-DD.");
-      }
+        const errors = [];
+        if (!sku) errors.push("SKU obligatorio.");
+        if (!linea) errors.push("Línea obligatoria.");
+        if (!nombre) errors.push("Nombre obligatorio.");
 
-      const cantidadNum = Number(cantidad);
-      if (!cantidad || !Number.isInteger(cantidadNum) || cantidadNum <= 0) {
-        errors.push("Cantidad debe ser entero mayor a 0.");
-      }
+        const cantidadNum = Number(cantidad);
+        if (!cantidad || !Number.isInteger(cantidadNum) || cantidadNum <= 0) {
+          errors.push("Cantidad debe ser entero mayor a 0.");
+        }
 
-      return {
-        index,
-        sku,
-        linea,
-        nombre,
-        precioBase,
-        precioConsultora,
-        caduca: caducaLower,
-        fechaCaducidad,
-        anotaciones,
-        cantidad: cantidadNum,
-        errors
-      };
+        const parseNumber = (value) => Number(String(value).replace(",", "."));
+        const precioBaseNum = parseNumber(precioBase);
+        if (precioBase === "" || Number.isNaN(precioBaseNum) || precioBaseNum < 0) {
+          errors.push("Precio base inválido.");
+        }
+        const precioVentaNum = parseNumber(precioVenta);
+        if (precioVenta === "" || Number.isNaN(precioVentaNum) || precioVentaNum < 0) {
+          errors.push("Precio venta inválido.");
+        }
+        const precioConsultoraNum = parseNumber(precioConsultora);
+        if (precioConsultora === "" || Number.isNaN(precioConsultoraNum) || precioConsultoraNum < 0) {
+          errors.push("Precio consultora inválido.");
+        }
+
+        if (descuento) {
+          const descuentoNum = parseNumber(descuento);
+          if (Number.isNaN(descuentoNum) || descuentoNum < 0) {
+            errors.push("Descuento inválido.");
+          }
+        }
+
+        if (aplicaCaducidad) {
+          const aplicaValue = aplicaCaducidad.toLowerCase();
+          if (aplicaValue !== "true" && aplicaValue !== "false") {
+            errors.push("Aplica caducidad debe ser true/false.");
+          }
+          if (aplicaValue === "true" && !fechaCaducidad) {
+            errors.push("Fecha caducidad requerida si aplica.");
+          }
+        }
+
+        if (fechaCaducidad && !/^\d{4}-\d{2}-\d{2}$/.test(fechaCaducidad)) {
+          errors.push("Fecha caducidad debe ser YYYY-MM-DD.");
+        }
+
+        parsedRows.push({
+          index: idx + 1,
+          sku,
+          linea,
+          nombre,
+          cantidad,
+          precioBase,
+          precioVenta,
+          precioConsultora,
+          descuento,
+          anotaciones,
+          fechaCaducidad,
+          aplicaCaducidad,
+          errors
+        });
+      });
+
+      return { rows: parsedRows, errors: [] };
     };
+
+    const renderPreview = (rows) => {
+      const previewRows = rows.slice(0, 10);
+      uploadPreviewBody.innerHTML = "";
+      if (previewRows.length === 0) {
+        uploadPreviewBody.innerHTML = `
+          <tr>
+            <td colspan="13" style="text-align: center; color: var(--muted);">Sin filas para mostrar.</td>
+          </tr>
+        `;
+        return;
+      }
+      previewRows.forEach((row) => {
+        const errorMarkup = row.errors.length
+          ? `<span class="error-tag">Errores: ${row.errors.join(" ")}</span>`
+          : `<span class="success-tag">OK</span>`;
+        const tr = document.createElement("tr");
+        tr.innerHTML = `
+          <td>${row.index}</td>
+          <td>${row.sku || "-"}</td>
+          <td>${row.linea || "-"}</td>
+          <td>${row.nombre || "-"}</td>
+          <td>${row.cantidad || "-"}</td>
+          <td>${row.precioBase || "-"}</td>
+          <td>${row.precioVenta || "-"}</td>
+          <td>${row.precioConsultora || "-"}</td>
+          <td>${row.descuento || "-"}</td>
+          <td>${row.anotaciones || "-"}</td>
+          <td>${row.fechaCaducidad || "-"}</td>
+          <td>${row.aplicaCaducidad || "-"}</td>
+          <td>${errorMarkup}</td>
+        `;
+        uploadPreviewBody.appendChild(tr);
+      });
+    };
+
+    const updateStatus = (rows, errors) => {
+      const validCount = rows.filter((row) => row.errors.length === 0).length;
+      uploadStatus.innerHTML = `
+        <span>Preview: ${rows.length} filas</span>
+        <span>Válidas: ${validCount}</span>
+        <span>Errores: ${rows.length - validCount}</span>
+      `;
+
+      validationErrors.innerHTML = "";
+      if (errors.length) {
+        if (validationPill) validationPill.textContent = "Validación pendiente";
+        errors.forEach((error) => {
+          const li = document.createElement("li");
+          li.textContent = error;
+          validationErrors.appendChild(li);
+        });
+      } else if (rows.length === 0) {
+        if (validationPill) validationPill.textContent = "Sin datos";
+        const li = document.createElement("li");
+        li.textContent = "Aún no hay datos para validar.";
+        validationErrors.appendChild(li);
+      } else if (rows.length - validCount > 0) {
+        if (validationPill) validationPill.textContent = "Revisión requerida";
+        const li = document.createElement("li");
+        li.textContent = "Corrige las filas marcadas antes de subir.";
+        validationErrors.appendChild(li);
+      } else {
+        if (validationPill) validationPill.textContent = "Listo para subir";
+        const li = document.createElement("li");
+        li.textContent = "Archivo validado correctamente. Puedes subirlo.";
+        validationErrors.appendChild(li);
+      }
+    };
+
+    let currentFile = null;
+    let validatedRows = [];
+    let validationErrorsList = [];
 
     const handleCSV = (file) => {
       if (!file) return;
+      currentFile = file;
 
       const reader = new FileReader();
       reader.onload = () => {
@@ -568,66 +749,89 @@
         if (rows.length === 0) {
           uploadPreviewBody.innerHTML = `
             <tr>
-              <td colspan="10" style="text-align: center; color: var(--muted);">Sin filas para mostrar.</td>
+              <td colspan="13" style="text-align: center; color: var(--muted);">Sin filas para mostrar.</td>
             </tr>
           `;
+          validatedRows = [];
+          validationErrorsList = ["El archivo no contiene filas."];
+          updateStatus(validatedRows, validationErrorsList);
+          uploadButton.disabled = true;
           return;
         }
 
-        const hasHeader = rows[0].map((cell) => cell.trim().toLowerCase());
-        const expected = [
-          "sku",
-          "linea",
-          "nombre",
-          "precio_base_venta",
-          "precio_consultora",
-          "caduca",
-          "fecha_caducidad",
-          "anotaciones",
-          "cantidad"
-        ];
+        const validation = validateRows(rows);
+        validatedRows = validation.rows;
+        validationErrorsList = validation.errors;
+        renderPreview(validatedRows);
+        updateStatus(validatedRows, validationErrorsList);
 
-        const isHeaderValid = expected.every((column, index) => hasHeader[index] === column);
-        const dataRows = isHeaderValid ? rows.slice(1) : rows;
-        const validated = dataRows.map((row, idx) => validateRow(row, idx + 1));
-
-        uploadPreviewBody.innerHTML = "";
-        validated.forEach((row) => {
-          const errorMarkup = row.errors.length
-            ? `<span class="error-tag">Errores: ${row.errors.join(" ")}</span>`
-            : `<span class="success-tag">OK</span>`;
-
-          const tr = document.createElement("tr");
-          tr.innerHTML = `
-            <td>${row.index}</td>
-            <td>${row.sku || "-"}</td>
-            <td>${row.linea || "-"}</td>
-            <td>${row.nombre || "-"}</td>
-            <td>${row.precioBase || "-"}</td>
-            <td>${row.precioConsultora || "-"}</td>
-            <td>${row.caduca || "-"}</td>
-            <td>${row.fechaCaducidad || "-"}</td>
-            <td>${row.cantidad || "-"}</td>
-            <td>${errorMarkup}</td>
-          `;
-          uploadPreviewBody.appendChild(tr);
-        });
-
-        const validCount = validated.filter((row) => row.errors.length === 0).length;
-        uploadStatus.innerHTML = `
-          <span>Preview: ${validated.length} filas</span>
-          <span>Válidas: ${validCount}</span>
-          <span>Errores: ${validated.length - validCount}</span>
-        `;
+        const hasErrors = validationErrorsList.length > 0 || validatedRows.some((row) => row.errors.length > 0);
+        uploadButton.disabled = hasErrors || validatedRows.length === 0;
       };
       reader.readAsText(file);
     };
-    
-    const processButton = document.getElementById("process-csv");
-    processButton.addEventListener("click", () => {
-      const file = document.getElementById("csv-upload").files[0];
-      handleCSV(file);
-    });
+
+    if (fileInput) {
+      fileInput.addEventListener("change", (event) => {
+        const file = event.target.files[0];
+        handleCSV(file);
+      });
+    }
+
+    if (uploadButton) {
+      uploadButton.addEventListener("click", async () => {
+        if (!currentFile || uploadButton.disabled) return;
+
+        uploadButton.disabled = true;
+        uploadButton.textContent = "Subiendo...";
+        uploadResult.textContent = "Procesando archivo, espera unos segundos...";
+        inventoryLink.style.display = "none";
+
+        const formData = new FormData();
+        formData.append("file", currentFile);
+
+        try {
+          const response = await fetch("/productos/csv", {
+            method: "POST",
+            body: formData
+          });
+          let result = {};
+          try {
+            result = await response.json();
+          } catch (error) {
+            result = {};
+          }
+
+          if (!response.ok) {
+            uploadResult.textContent = result.error || "No se pudo subir el archivo.";
+            return;
+          }
+
+          const errorCount = result.failed_rows ? result.failed_rows.length : 0;
+          uploadResult.innerHTML = `
+            <strong>Resumen:</strong>
+            Productos creados: ${result.created_products || 0} ·
+            Productos actualizados: ${result.updated_products || 0} ·
+            Unidades creadas: ${result.created_units || 0} ·
+            Errores: ${errorCount}
+          `;
+
+          if (errorCount > 0) {
+            const errorItems = result.failed_rows
+              .map((row) => `<li>Fila ${row.row} (SKU: ${row.sku || "-"}) → ${row.error}</li>`)
+              .join("");
+            uploadResult.insertAdjacentHTML("beforeend", `<ul>${errorItems}</ul>`);
+          }
+
+          inventoryLink.style.display = "inline-flex";
+        } catch (error) {
+          uploadResult.textContent = "Error inesperado al subir el archivo.";
+        } finally {
+          uploadButton.textContent = "Subir productos";
+          uploadButton.disabled = validatedRows.length === 0 || validationErrorsList.length > 0 || validatedRows.some((row) => row.errors.length > 0);
+        }
+      });
+    }
   </script>
 </body>
 </html>
