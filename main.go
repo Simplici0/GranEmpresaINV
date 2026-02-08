@@ -44,6 +44,18 @@ type productOption struct {
 	Units []unitOption
 }
 
+type productRecord struct {
+	SKU              string
+	Line             string
+	Name             string
+	PrecioBase       float64
+	PrecioVenta      float64
+	PrecioConsultora float64
+	Descuento        float64
+	Anotaciones      string
+	AplicaCaducidad  bool
+}
+
 type inventoryUnit struct {
 	ID          string
 	Estado      string
@@ -549,6 +561,18 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	);
 	CREATE INDEX IF NOT EXISTS idx_unidades_estado ON unidades (estado);
 
+	CREATE TABLE IF NOT EXISTS productos (
+		sku TEXT PRIMARY KEY,
+		linea TEXT NOT NULL,
+		nombre TEXT NOT NULL,
+		precio_base REAL NOT NULL DEFAULT 0,
+		precio_venta REAL NOT NULL DEFAULT 0,
+		precio_consultora REAL NOT NULL DEFAULT 0,
+		descuento REAL NOT NULL DEFAULT 0,
+		anotaciones TEXT NOT NULL DEFAULT '',
+		aplica_caducidad INTEGER NOT NULL DEFAULT 0
+	);
+
 	CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		username TEXT NOT NULL UNIQUE,
@@ -610,6 +634,59 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 
 	if unidadesCount == 0 {
 		if err := seedUnidades(db); err != nil {
+			return nil, err
+		}
+	}
+
+	var productosCount int
+	if err := db.QueryRow("SELECT COUNT(*) FROM productos").Scan(&productosCount); err != nil {
+		return nil, err
+	}
+	if productosCount == 0 {
+		tx, err := db.Begin()
+		if err != nil {
+			return nil, err
+		}
+		stmt, err := tx.Prepare(`
+			INSERT INTO productos (sku, linea, nombre, precio_base, precio_venta, precio_consultora, descuento, anotaciones, aplica_caducidad)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+		`)
+		if err != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				return nil, fmt.Errorf("prepare productos: %w (rollback: %v)", err, rollbackErr)
+			}
+			return nil, err
+		}
+		for _, product := range defaultProducts() {
+			aplica := 0
+			if product.AplicaCaducidad {
+				aplica = 1
+			}
+			if _, err := stmt.Exec(
+				product.SKU,
+				product.Line,
+				product.Name,
+				product.PrecioBase,
+				product.PrecioVenta,
+				product.PrecioConsultora,
+				product.Descuento,
+				product.Anotaciones,
+				aplica,
+			); err != nil {
+				stmt.Close()
+				if rollbackErr := tx.Rollback(); rollbackErr != nil {
+					return nil, fmt.Errorf("insert productos: %w (rollback: %v)", err, rollbackErr)
+				}
+				return nil, err
+			}
+		}
+		if err := stmt.Close(); err != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				return nil, fmt.Errorf("close productos: %w (rollback: %v)", err, rollbackErr)
+			}
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
 	}
