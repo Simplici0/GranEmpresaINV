@@ -7,16 +7,19 @@
   <style>
     :root {
       color-scheme: light;
-      --bg: #faf9f7;
+      --bg: #f7f5f2;
       --card: #ffffff;
-      --text: #2a2826;
-      --muted: #6b6560;
+      --text: #26221f;
+      --muted: #6f6a65;
       --primary: #e85d3c;
+      --primary-strong: #cf4528;
+      --primary-soft: #fff1e6;
       --success: #2d9d78;
       --warning: #f59e42;
       --danger: #d64545;
-      --border: #e8e4df;
-      --shadow: 0 12px 30px rgba(19, 35, 82, 0.08);
+      --border: #e6dfd8;
+      --shadow: 0 16px 30px rgba(18, 23, 38, 0.08);
+      --shadow-soft: 0 8px 18px rgba(18, 23, 38, 0.08);
     }
 
     * {
@@ -32,7 +35,11 @@
 
     .global-banner {
       background: #f47a24;
-      padding: 6px 32px;
+      padding: 10px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
     }
 
     .banner-logos {
@@ -42,7 +49,7 @@
     }
 
     .logo-placeholder {
-      height: 22px;
+      height: 26px;
       min-width: 76px;
       padding: 0 10px;
       border-radius: 999px;
@@ -59,10 +66,12 @@
     }
 
     .page-header {
-      padding: 16px 32px 12px;
+      padding: 18px 32px 16px;
       display: flex;
       flex-direction: column;
       gap: 12px;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
     }
 
     .page-header h1 {
@@ -78,56 +87,58 @@
     /* Nuevo diseño de botones de navegación */
     .nav-buttons {
       display: flex;
-      gap: 12px;
+      gap: 10px;
       flex-wrap: wrap;
+      padding: 8px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      box-shadow: var(--shadow-soft);
+      width: fit-content;
     }
 
     .nav-button {
-      display: inline-block;
-      padding: 8px 16px;
-      border-radius: 8px;
+      display: inline-flex;
+      padding: 8px 14px;
+      border-radius: 999px;
       text-decoration: none;
       font-size: 13px;
       font-weight: 600;
       transition: all 0.2s ease;
-      border: 1px solid var(--primary);
-      background: var(--card);
+      border: 1px solid transparent;
+      background: var(--primary-soft);
       color: var(--primary);
       cursor: pointer;
     }
 
     .nav-button:hover {
       background: var(--primary);
-      color: var(--card);
+      color: #ffffff;
     }
 
     .nav-button.active {
       background: var(--primary);
-      color: var(--card);
+      color: #ffffff;
     }
 
-    .nav-button.primary {
-      background: var(--primary);
-      color: var(--card);
-    }
-
-    .nav-button.primary:hover {
-      background: #d84a2b;
+    .page-content {
+      padding: 24px 32px 40px;
+      max-width: 1200px;
+      margin: 0 auto;
     }
 
     .grid {
       display: grid;
       gap: 20px;
-      padding: 0 32px 32px;
       grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
     }
 
     .card {
       background: var(--card);
-      border-radius: 16px;
-      padding: 16px;
+      border-radius: 18px;
+      padding: 20px;
       border: 1px solid var(--border);
-      box-shadow: var(--shadow);
+      box-shadow: var(--shadow-soft);
       display: flex;
       flex-direction: column;
       gap: 12px;
@@ -150,9 +161,9 @@
       text-decoration: none;
       color: inherit;
       padding: 10px 12px;
-      border-radius: 12px;
+      border-radius: 14px;
       border: 1px solid var(--border);
-      background: #f9faff;
+      background: #fbfaf8;
     }
 
     .state-list span {
@@ -182,8 +193,8 @@
 
     .range-form input {
       width: 100%;
-      padding: 8px 10px;
-      border-radius: 10px;
+      padding: 9px 12px;
+      border-radius: 12px;
       border: 1px solid var(--border);
       font-size: 13px;
     }
@@ -192,10 +203,10 @@
       margin-top: 12px;
       display: grid;
       gap: 6px;
-      padding: 12px;
-      border-radius: 12px;
+      padding: 14px;
+      border-radius: 14px;
       border: 1px solid var(--border);
-      background: #f9faff;
+      background: #fbfaf8;
     }
 
     .range-summary strong {
@@ -264,11 +275,12 @@
     }
 
     .badge {
-      background: #eef2ff;
+      background: var(--primary-soft);
       color: var(--primary);
       padding: 2px 8px;
       border-radius: 999px;
       font-size: 12px;
+      font-weight: 600;
     }
 
     .pie-wrap {
@@ -299,7 +311,7 @@
     .line-chart {
       width: 100%;
       height: auto;
-      background: #f9faff;
+      background: #fbfaf8;
       border-radius: 12px;
       border: 1px solid var(--border);
     }
@@ -310,45 +322,69 @@
       font-size: 12px;
       color: var(--muted);
     }
+
+    .button,
+    button {
+      border: 1px solid var(--border);
+      background: var(--card);
+      color: var(--text);
+      padding: 8px 14px;
+      border-radius: 12px;
+      font-weight: 600;
+      cursor: pointer;
+    }
+
+    .button.primary,
+    button.primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #ffffff;
+    }
+
+    .button.primary:hover,
+    button.primary:hover {
+      background: var(--primary-strong);
+    }
   </style>
 </head>
 <body>
   {{template "header" .}}
 
-  <section class="grid">
-    <article class="card">
-      <h2>Conteo por estado</h2>
-      <div class="state-list">
-        {{range .EstadoConteos}}
-        <a href="{{.Link}}">
-          <div>{{.Estado}}</div>
-          <span class="badge">{{.Cantidad}}</span>
-        </a>
-        {{end}}
-      </div>
-    </article>
+  <main class="page-content">
+    <section class="grid">
+      <article class="card">
+        <h2>Conteo por estado</h2>
+        <div class="state-list">
+          {{range .EstadoConteos}}
+          <a href="{{.Link}}">
+            <div>{{.Estado}}</div>
+            <span class="badge">{{.Cantidad}}</span>
+          </a>
+          {{end}}
+        </div>
+      </article>
 
-    <article class="card">
-      <h2>Ventas totales (rango)</h2>
-      <form class="range-form" action="/dashboard" method="GET">
-        <div>
-          <label for="start_date">Desde</label>
-          <input id="start_date" name="start_date" type="date" value="{{.RangeStart}}" />
+      <article class="card">
+        <h2>Ventas totales (rango)</h2>
+        <form class="range-form" action="/dashboard" method="GET">
+          <div>
+            <label for="start_date">Desde</label>
+            <input id="start_date" name="start_date" type="date" value="{{.RangeStart}}" />
+          </div>
+          <div>
+            <label for="end_date">Hasta</label>
+            <input id="end_date" name="end_date" type="date" value="{{.RangeEnd}}" />
+          </div>
+          <div>
+            <button class="button primary" type="submit">Actualizar</button>
+          </div>
+        </form>
+        <div class="range-summary">
+          <div>Rango seleccionado</div>
+          <strong>{{.RangeTotal}}</strong>
+          <div class="badge">{{.RangeStart}} → {{.RangeEnd}} · {{.RangeCount}} ventas</div>
         </div>
-        <div>
-          <label for="end_date">Hasta</label>
-          <input id="end_date" name="end_date" type="date" value="{{.RangeEnd}}" />
-        </div>
-        <div>
-          <button class="nav-button primary" type="submit">Actualizar</button>
-        </div>
-      </form>
-      <div class="range-summary">
-        <div>Rango seleccionado</div>
-        <strong>{{.RangeTotal}}</strong>
-        <div class="badge">{{.RangeStart}} → {{.RangeEnd}} · {{.RangeCount}} ventas</div>
-      </div>
-    </article>
+      </article>
 
     <article class="card">
       <h2>Ventas por método de pago</h2>
@@ -421,6 +457,7 @@
         </tbody>
       </table>
     </article>
-  </section>
+    </section>
+  </main>
 </body>
 </html>
