@@ -7,15 +7,18 @@
   <style>
     :root {
       color-scheme: light;
-      --bg: #faf9f7;
+      --bg: #f7f5f2;
       --card: #ffffff;
-      --text: #2a2826;
-      --muted: #6b6560;
+      --text: #26221f;
+      --muted: #6f6a65;
       --primary: #e85d3c;
+      --primary-strong: #cf4528;
+      --primary-soft: #fff1e6;
       --success: #2d9d78;
       --warning: #f59e42;
       --danger: #d64545;
-      --border: #e8e4df;
+      --border: #e6dfd8;
+      --shadow-soft: 0 8px 18px rgba(18, 23, 38, 0.08);
     }
 
     * {
@@ -30,12 +33,18 @@
     }
 
     .page-content {
-      padding: 16px 32px 32px;
+      padding: 24px 32px 40px;
+      max-width: 1400px;
+      margin: 0 auto;
     }
 
     .global-banner {
       background: #f47a24;
-      padding: 6px 32px;
+      padding: 10px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
     }
 
     .banner-logos {
@@ -45,7 +54,7 @@
     }
 
     .logo-placeholder {
-      height: 22px;
+      height: 26px;
       min-width: 76px;
       padding: 0 10px;
       border-radius: 999px;
@@ -62,10 +71,12 @@
     }
 
     .page-header {
-      padding: 16px 32px 8px;
+      padding: 18px 32px 16px;
       display: flex;
       flex-direction: column;
       gap: 12px;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
     }
 
     .page-header h1 {
@@ -81,53 +92,50 @@
     /* Nuevo diseño de botones de navegación */
     .nav-buttons {
       display: flex;
-      gap: 12px;
+      gap: 10px;
       flex-wrap: wrap;
-      margin-top: 12px;
+      padding: 8px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      box-shadow: var(--shadow-soft);
+      width: fit-content;
     }
 
     .nav-button {
-      display: inline-block;
-      padding: 8px 16px;
-      border-radius: 8px;
+      display: inline-flex;
+      padding: 8px 14px;
+      border-radius: 999px;
       text-decoration: none;
       font-size: 13px;
       font-weight: 600;
       transition: all 0.2s ease;
-      border: 1px solid var(--primary);
-      background: var(--card);
+      border: 1px solid transparent;
+      background: var(--primary-soft);
       color: var(--primary);
       cursor: pointer;
     }
 
     .nav-button:hover {
       background: var(--primary);
-      color: var(--card);
+      color: #ffffff;
     }
 
     .nav-button.active {
       background: var(--primary);
-      color: var(--card);
-    }
-
-    .nav-button.primary {
-      background: var(--primary);
-      color: var(--card);
-    }
-
-    .nav-button.primary:hover {
-      background: #d84a2b;
+      color: #ffffff;
     }
 
     .filters {
-      margin: 16px 32px;
+      margin: 0;
       background: var(--card);
-      border-radius: 12px;
-      padding: 16px;
+      border-radius: 18px;
+      padding: 20px;
       display: grid;
       gap: 16px;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       border: 1px solid var(--border);
+      box-shadow: var(--shadow-soft);
     }
 
     .filter-group {
@@ -139,17 +147,26 @@
     label {
       font-size: 12px;
       text-transform: uppercase;
-      letter-spacing: 0.04em;
+      letter-spacing: 0.05em;
       color: var(--muted);
     }
 
     select,
     input[type="search"],
     input[type="number"] {
-      padding: 8px 12px;
-      border-radius: 8px;
+      padding: 10px 12px;
+      border-radius: 12px;
       border: 1px solid var(--border);
       font-size: 14px;
+      background: #ffffff;
+    }
+
+    select:focus,
+    input[type="search"]:focus,
+    input[type="number"]:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(232, 93, 60, 0.16);
     }
 
     .toggle {
@@ -161,30 +178,36 @@
 
     .flash {
       margin-top: 16px;
-      background: #e9f7f1;
-      color: #1a6b4b;
-      border: 1px solid #bde4d2;
+      background: #eaf7f1;
+      color: #1f6b4f;
+      border: 1px solid #c7e6d7;
       padding: 12px 16px;
-      border-radius: 10px;
+      border-radius: 12px;
       font-size: 14px;
       font-weight: 600;
     }
 
     main {
-      padding: 0 32px 32px;
+      padding: 0;
+    }
+
+    .table-wrap {
+      overflow-x: auto;
+      border-radius: 18px;
+      border: 1px solid var(--border);
+      box-shadow: var(--shadow-soft);
+      background: var(--card);
     }
 
     table {
       width: 100%;
+      min-width: 920px;
       border-collapse: collapse;
-      background: var(--card);
-      border-radius: 12px;
-      overflow: hidden;
-      border: 1px solid var(--border);
+      background: transparent;
     }
 
     thead {
-      background: #eef1f8;
+      background: #f9f7f4;
       text-align: left;
     }
 
@@ -207,21 +230,25 @@
       display: inline-flex;
       align-items: center;
       gap: 6px;
+      border: 1px solid transparent;
     }
 
     .status.available {
       background: #e9f7f1;
-      color: var(--success);
+      color: #1f7a5f;
+      border-color: #bfe7d6;
     }
 
     .status.sold {
-      background: #ffeef0;
-      color: var(--danger);
+      background: #ffecef;
+      color: #b73a3a;
+      border-color: #f5c6cf;
     }
 
     .status.swapped {
       background: #fff4e1;
-      color: var(--warning);
+      color: #b36a1c;
+      border-color: #f2d1a5;
     }
 
     .actions {
@@ -236,26 +263,33 @@
     }
 
     button {
-      border: none;
+      border: 1px solid var(--border);
       padding: 8px 12px;
-      border-radius: 8px;
+      border-radius: 12px;
       font-weight: 600;
       cursor: pointer;
+      background: var(--card);
+      color: var(--text);
     }
 
     button.primary {
       background: var(--primary);
-      color: white;
+      border-color: var(--primary);
+      color: #ffffff;
+    }
+
+    button.primary:hover {
+      background: var(--primary-strong);
     }
 
     button.secondary {
-      background: #e7ebf6;
-      color: #2a335a;
+      background: var(--primary-soft);
+      color: var(--primary);
+      border-color: #f2c6a8;
     }
 
     button.ghost {
       background: transparent;
-      border: 1px solid var(--border);
       color: var(--muted);
     }
 
@@ -299,7 +333,7 @@
     }
 
     .units-panel {
-      background: #f9fafc;
+      background: #fbfaf8;
       padding: 12px 16px 20px;
     }
 
@@ -329,12 +363,12 @@
       padding: 2px 8px;
       border-radius: 999px;
       font-size: 11px;
-      background: #e7efff;
-      color: #2054c6;
+      background: #eef2ff;
+      color: #3a4bb3;
     }
 
     .summary {
-      margin: 0 32px 16px;
+      margin: 16px 0;
       display: grid;
       gap: 12px;
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
@@ -343,11 +377,12 @@
     .summary-card {
       background: var(--card);
       border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 14px 16px;
+      border-radius: 16px;
+      padding: 16px;
       display: flex;
       flex-direction: column;
       gap: 6px;
+      box-shadow: var(--shadow-soft);
     }
 
     .summary-card h3 {
@@ -406,6 +441,7 @@
   <section id="summary" class="summary" aria-live="polite"></section>
 
   <main>
+    <div class="table-wrap">
     <table>
       <thead>
         <tr>
@@ -419,6 +455,7 @@
       </thead>
       <tbody id="productTable"></tbody>
     </table>
+    </div>
   </main>
 
   <script>

@@ -7,15 +7,18 @@
   <style>
     :root {
       color-scheme: light;
-      --bg: #faf9f7;
+      --bg: #f7f5f2;
       --card: #ffffff;
-      --text: #2a2826;
-      --muted: #6b6560;
+      --text: #26221f;
+      --muted: #6f6a65;
       --primary: #e85d3c;
+      --primary-strong: #cf4528;
+      --primary-soft: #fff1e6;
       --success: #2d9d78;
       --warning: #f59e42;
       --danger: #d64545;
-      --border: #e8e4df;
+      --border: #e6dfd8;
+      --shadow-soft: 0 8px 18px rgba(18, 23, 38, 0.08);
     }
 
     * {
@@ -36,7 +39,11 @@
 
     .global-banner {
       background: #f47a24;
-      padding: 6px 32px;
+      padding: 10px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
     }
 
     .banner-logos {
@@ -46,7 +53,7 @@
     }
 
     .logo-placeholder {
-      height: 22px;
+      height: 26px;
       min-width: 76px;
       padding: 0 10px;
       border-radius: 999px;
@@ -63,10 +70,12 @@
     }
 
     .page-header {
-      padding: 16px 32px 12px;
+      padding: 18px 32px 16px;
       display: flex;
       flex-direction: column;
       gap: 12px;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
     }
 
     .page-header h1 {
@@ -80,34 +89,42 @@
     }
 
     .page-content {
-      padding: 24px 32px 32px;
+      padding: 24px 32px 40px;
+      max-width: 1400px;
+      margin: 0 auto;
     }
 
     .nav-buttons {
       display: flex;
-      gap: 12px;
+      gap: 10px;
       flex-wrap: wrap;
+      padding: 8px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      box-shadow: var(--shadow-soft);
+      width: fit-content;
     }
 
     .nav-button {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      padding: 8px 16px;
-      border-radius: 8px;
+      padding: 8px 14px;
+      border-radius: 999px;
       text-decoration: none;
       font-size: 13px;
       font-weight: 600;
       transition: all 0.2s ease;
-      border: 1px solid var(--primary);
-      background: var(--card);
+      border: 1px solid transparent;
+      background: var(--primary-soft);
       color: var(--primary);
       cursor: pointer;
     }
 
     .nav-button:hover {
       background: var(--primary);
-      color: var(--card);
+      color: #ffffff;
     }
 
     .actions {
@@ -118,13 +135,15 @@
     }
 
     button {
-      border: none;
+      border: 1px solid var(--border);
       padding: 12px 24px;
-      border-radius: 8px;
+      border-radius: 12px;
       font-weight: 600;
       cursor: pointer;
       font-size: 14px;
       transition: all 0.2s;
+      background: var(--card);
+      color: var(--text);
     }
 
     button:disabled {
@@ -134,16 +153,18 @@
 
     .primary {
       background: var(--primary);
-      color: white;
+      border-color: var(--primary);
+      color: #ffffff;
     }
 
     .primary:hover {
-      background: #1d4ed8;
+      background: var(--primary-strong);
     }
 
     .secondary {
-      background: #e7ebf6;
-      color: #2a335a;
+      background: var(--primary-soft);
+      color: var(--primary);
+      border-color: #f2c6a8;
     }
 
     .secondary:hover {
@@ -206,9 +227,9 @@
 
     .example-list code {
       color: #2a335a;
-      background: #eef1f8;
+      background: #f3f2f0;
       padding: 2px 6px;
-      border-radius: 6px;
+      border-radius: 8px;
     }
 
     .import-meta {
@@ -226,7 +247,7 @@
     }
 
     .upload-status span {
-      background: #f4f6fb;
+      background: #fbfaf8;
       border-radius: 999px;
       padding: 6px 12px;
       border: 1px solid var(--border);
@@ -234,14 +255,16 @@
 
     .upload-preview {
       border: 1px solid var(--border);
-      border-radius: 12px;
-      overflow: hidden;
-      background: #fdfdff;
+      border-radius: 16px;
+      overflow-x: auto;
+      background: var(--card);
+      box-shadow: var(--shadow-soft);
       margin-top: 12px;
     }
 
     .upload-preview table {
       width: 100%;
+      min-width: 720px;
       border-collapse: collapse;
       border: none;
       background: transparent;
@@ -256,7 +279,7 @@
     }
 
     .upload-preview th {
-      background: #eef1f8;
+      background: #f9f7f4;
       font-weight: 600;
     }
 

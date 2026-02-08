@@ -7,14 +7,17 @@
   <style>
     :root {
       color-scheme: light;
-      ----bg: #faf9f7;
+      --bg: #f7f5f2;
       --card: #ffffff;
-      --text: #2a2826;
-      --muted: #6b6560;
+      --text: #26221f;
+      --muted: #6f6a65;
       --primary: #e85d3c;
+      --primary-strong: #cf4528;
+      --primary-soft: #fff1e6;
       --danger: #d64545;
-      --border: #e8e4df;
+      --border: #e6dfd8;
       --info: #1f6feb;
+      --shadow-soft: 0 8px 18px rgba(18, 23, 38, 0.08);
     }
 
     * {
@@ -30,7 +33,11 @@
 
     .global-banner {
       background: #f47a24;
-      padding: 6px 32px;
+      padding: 10px 32px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      gap: 16px;
     }
 
     .banner-logos {
@@ -40,7 +47,7 @@
     }
 
     .logo-placeholder {
-      height: 22px;
+      height: 26px;
       min-width: 76px;
       padding: 0 10px;
       border-radius: 999px;
@@ -57,10 +64,12 @@
     }
 
     .page-header {
-      padding: 16px 32px 12px;
+      padding: 18px 32px 16px;
       display: flex;
       flex-direction: column;
       gap: 12px;
+      background: var(--card);
+      border-bottom: 1px solid var(--border);
     }
 
     .page-header h1 {
@@ -74,49 +83,56 @@
     }
 
     .page-content {
-      padding: 24px 32px 32px;
+      padding: 24px 32px 40px;
+      max-width: 1100px;
+      margin: 0 auto;
     }
 
     /* Nuevo diseño de botones de navegación */
     .nav-buttons {
       display: flex;
-      gap: 12px;
+      gap: 10px;
       flex-wrap: wrap;
-      margin-top: 12px;
+      padding: 8px;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      background: var(--card);
+      box-shadow: var(--shadow-soft);
+      width: fit-content;
     }
 
     .nav-button {
-      display: inline-block;
-      padding: 8px 16px;
-      border-radius: 8px;
+      display: inline-flex;
+      padding: 8px 14px;
+      border-radius: 999px;
       text-decoration: none;
       font-size: 13px;
       font-weight: 600;
       transition: all 0.2s ease;
-      border: 1px solid var(--primary);
-      background: var(--card);
+      border: 1px solid transparent;
+      background: var(--primary-soft);
       color: var(--primary);
       cursor: pointer;
     }
 
     .nav-button:hover {
       background: var(--primary);
-      color: var(--card);
+      color: #ffffff;
     }
 
     .nav-button.active {
       background: var(--primary);
-      color: var(--card);
+      color: #ffffff;
     }
 
     .card {
       max-width: 900px;
       margin: 0 auto;
       background: var(--card);
-      border-radius: 16px;
+      border-radius: 18px;
       border: 1px solid var(--border);
       padding: 24px;
-      box-shadow: 0 12px 30px rgba(30, 41, 59, 0.08);
+      box-shadow: var(--shadow-soft);
     }
 
     h1 {
@@ -158,9 +174,18 @@
     textarea {
       width: 100%;
       padding: 10px 12px;
-      border-radius: 10px;
+      border-radius: 12px;
       border: 1px solid var(--border);
       font-size: 14px;
+      background: #ffffff;
+    }
+
+    input:focus,
+    select:focus,
+    textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(232, 93, 60, 0.16);
     }
 
     textarea {
@@ -176,11 +201,11 @@
 
     .section {
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: 14px;
       padding: 16px;
       display: grid;
       gap: 12px;
-      background: #f9fafc;
+      background: #fbfaf8;
     }
 
     .section h2 {
@@ -190,8 +215,8 @@
 
     .multi-select {
       border: 1px solid var(--border);
-      border-radius: 10px;
-      background: white;
+      border-radius: 12px;
+      background: #ffffff;
       padding: 8px 12px;
     }
 
@@ -258,29 +283,39 @@
       display: flex;
       gap: 12px;
       flex-wrap: wrap;
+      align-items: center;
     }
 
     button,
     a.button {
-      border: none;
+      border: 1px solid var(--border);
       padding: 10px 16px;
-      border-radius: 10px;
+      border-radius: 12px;
       font-weight: 600;
       cursor: pointer;
       text-decoration: none;
       display: inline-flex;
       align-items: center;
       justify-content: center;
+      gap: 8px;
+      background: var(--card);
+      color: var(--text);
     }
 
     button.primary {
       background: var(--primary);
-      color: white;
+      border-color: var(--primary);
+      color: #ffffff;
+    }
+
+    button.primary:hover {
+      background: var(--primary-strong);
     }
 
     .secondary {
-      background: #e7ebf6;
-      color: #2a335a;
+      background: var(--primary-soft);
+      color: var(--primary);
+      border-color: #f2c6a8;
     }
 
     .note {
