@@ -9,7 +9,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"html/template"
-	"io"
 	"log"
 	"net/http"
 	"os"
@@ -44,16 +43,17 @@ type productOption struct {
 	Units []unitOption
 }
 
-type productRecord struct {
-	SKU              string
-	Line             string
-	Name             string
-	PrecioBase       float64
-	PrecioVenta      float64
-	PrecioConsultora float64
-	Descuento        float64
-	Anotaciones      string
-	AplicaCaducidad  bool
+type csvFailedRow struct {
+	Row   int    `json:"row"`
+	SKU   string `json:"sku"`
+	Error string `json:"error"`
+}
+
+type csvUploadResponse struct {
+	CreatedProducts int            `json:"created_products"`
+	UpdatedProducts int            `json:"updated_products"`
+	CreatedUnits    int            `json:"created_units"`
+	FailedRows      []csvFailedRow `json:"failed_rows"`
 }
 
 type inventoryUnit struct {
@@ -157,19 +157,6 @@ type pieSlice struct {
 	Color   string
 }
 
-type csvFailedRow struct {
-	Row   int    `json:"row"`
-	SKU   string `json:"sku"`
-	Error string `json:"error"`
-}
-
-type csvUploadResponse struct {
-	CreatedProducts int            `json:"created_products"`
-	UpdatedProducts int            `json:"updated_products"`
-	CreatedUnits    int            `json:"created_units"`
-	FailedRows      []csvFailedRow `json:"failed_rows"`
-}
-
 type dashboardData struct {
 	Title           string
 	Subtitle        string
@@ -199,11 +186,6 @@ type contextKey string
 
 const userContextKey contextKey = "user"
 
-var (
-	productsMu sync.RWMutex
-	products   []productOption
-)
-
 func findProduct(products []productOption, id string) (productOption, bool) {
 	for _, product := range products {
 		if product.ID == id {
@@ -227,52 +209,6 @@ func buildSalientesMap(salientes []string) map[string]bool {
 		mapped[id] = true
 	}
 	return mapped
-}
-
-func defaultProducts() []productOption {
-	return []productOption{
-		{
-			ID:   "P-001",
-			Name: "Proteína Balance 500g",
-			Line: "Nutrición",
-		},
-		{
-			ID:   "P-002",
-			Name: "Crema Regeneradora",
-			Line: "Dermocosmética",
-		},
-		{
-			ID:   "P-003",
-			Name: "Leche Pediátrica Premium",
-			Line: "Pediatría",
-		},
-	}
-}
-
-func getProducts() []productOption {
-	productsMu.RLock()
-	defer productsMu.RUnlock()
-	copied := make([]productOption, len(products))
-	copy(copied, products)
-	return copied
-}
-
-func upsertProductFromCSV(sku, line, name, anotaciones string) (bool, bool) {
-	productsMu.Lock()
-	defer productsMu.Unlock()
-	for i, product := range products {
-		if product.ID == sku {
-			products[i].Line = line
-			products[i].Name = name
-			return false, true
-		}
-	}
-	products = append(products, productOption{
-		ID:   sku,
-		Name: name,
-		Line: line,
-	})
-	return true, false
 }
 
 func estadoClass(estado string) string {
@@ -561,18 +497,6 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	);
 	CREATE INDEX IF NOT EXISTS idx_unidades_estado ON unidades (estado);
 
-	CREATE TABLE IF NOT EXISTS productos (
-		sku TEXT PRIMARY KEY,
-		linea TEXT NOT NULL,
-		nombre TEXT NOT NULL,
-		precio_base REAL NOT NULL DEFAULT 0,
-		precio_venta REAL NOT NULL DEFAULT 0,
-		precio_consultora REAL NOT NULL DEFAULT 0,
-		descuento REAL NOT NULL DEFAULT 0,
-		anotaciones TEXT NOT NULL DEFAULT '',
-		aplica_caducidad INTEGER NOT NULL DEFAULT 0
-	);
-
 	CREATE TABLE IF NOT EXISTS users (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		username TEXT NOT NULL UNIQUE,
@@ -634,59 +558,6 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 
 	if unidadesCount == 0 {
 		if err := seedUnidades(db); err != nil {
-			return nil, err
-		}
-	}
-
-	var productosCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM productos").Scan(&productosCount); err != nil {
-		return nil, err
-	}
-	if productosCount == 0 {
-		tx, err := db.Begin()
-		if err != nil {
-			return nil, err
-		}
-		stmt, err := tx.Prepare(`
-			INSERT INTO productos (sku, linea, nombre, precio_base, precio_venta, precio_consultora, descuento, anotaciones, aplica_caducidad)
-			VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-		`)
-		if err != nil {
-			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				return nil, fmt.Errorf("prepare productos: %w (rollback: %v)", err, rollbackErr)
-			}
-			return nil, err
-		}
-		for _, product := range defaultProducts() {
-			aplica := 0
-			if product.AplicaCaducidad {
-				aplica = 1
-			}
-			if _, err := stmt.Exec(
-				product.SKU,
-				product.Line,
-				product.Name,
-				product.PrecioBase,
-				product.PrecioVenta,
-				product.PrecioConsultora,
-				product.Descuento,
-				product.Anotaciones,
-				aplica,
-			); err != nil {
-				stmt.Close()
-				if rollbackErr := tx.Rollback(); rollbackErr != nil {
-					return nil, fmt.Errorf("insert productos: %w (rollback: %v)", err, rollbackErr)
-				}
-				return nil, err
-			}
-		}
-		if err := stmt.Close(); err != nil {
-			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				return nil, fmt.Errorf("close productos: %w (rollback: %v)", err, rollbackErr)
-			}
-			return nil, err
-		}
-		if err := tx.Commit(); err != nil {
 			return nil, err
 		}
 	}
@@ -854,7 +725,27 @@ func main() {
 		}
 	}
 
-	products = defaultProducts()
+	var productsMu sync.RWMutex
+	products := []productOption{
+		{
+			ID:    "P-001",
+			Name:  "Proteína Balance 500g",
+			Line:  "Nutrición",
+			Units: []unitOption{{ID: "U-001"}, {ID: "U-002"}, {ID: "U-003"}},
+		},
+		{
+			ID:    "P-002",
+			Name:  "Crema Regeneradora",
+			Line:  "Dermocosmética",
+			Units: []unitOption{{ID: "U-101"}, {ID: "U-102"}, {ID: "U-103"}, {ID: "U-104"}},
+		},
+		{
+			ID:    "P-003",
+			Name:  "Leche Pediátrica Premium",
+			Line:  "Pediatría",
+			Units: []unitOption{{ID: "U-201"}},
+		},
+	}
 
 	type ventaFormData struct {
 		Title       string
@@ -1274,9 +1165,13 @@ func main() {
 	mux.HandleFunc("/inventario", func(w http.ResponseWriter, r *http.Request) {
 		currentUser := userFromContext(r)
 		flash := r.URL.Query().Get("mensaje")
-		products := getProducts()
-		inventoryProducts := make([]inventoryProduct, 0, len(products))
-		for _, product := range products {
+		productsMu.RLock()
+		productsSnapshot := make([]productOption, len(products))
+		copy(productsSnapshot, products)
+		productsMu.RUnlock()
+
+		inventoryProducts := make([]inventoryProduct, 0, len(productsSnapshot))
+		for _, product := range productsSnapshot {
 			rows, err := db.Query(`
 				SELECT id, estado, creado_en, caducidad
 				FROM unidades
@@ -1385,14 +1280,14 @@ func main() {
 
 	mux.HandleFunc("/cambio/new", func(w http.ResponseWriter, r *http.Request) {
 		currentUser := userFromContext(r)
-		products := getProducts()
-		if len(products) == 0 {
-			http.Error(w, "No hay productos disponibles para cambios.", http.StatusBadRequest)
-			return
-		}
+		productsMu.RLock()
+		productsSnapshot := make([]productOption, len(products))
+		copy(productsSnapshot, products)
+		productsMu.RUnlock()
+
 		productID := r.URL.Query().Get("producto_id")
 		if productID == "" {
-			productID = products[0].ID
+			productID = productsSnapshot[0].ID
 		}
 		cantidad := 1
 		if qty := r.URL.Query().Get("cantidad"); qty != "" {
@@ -1401,9 +1296,9 @@ func main() {
 			}
 		}
 
-		selectedProduct, ok := findProduct(products, productID)
+		selectedProduct, ok := findProduct(productsSnapshot, productID)
 		if !ok {
-			selectedProduct = products[0]
+			selectedProduct = productsSnapshot[0]
 			productID = selectedProduct.ID
 		}
 
@@ -1421,12 +1316,12 @@ func main() {
 		data := cambioFormData{
 			Title:               "Registrar cambio",
 			ProductoID:          productID,
-			Productos:           products,
+			Productos:           productsSnapshot,
 			Unidades:            availableUnits,
 			Salientes:           salientes,
 			SalientesMap:        buildSalientesMap(salientes),
 			IncomingMode:        "existing",
-			IncomingExistingID:  products[0].ID,
+			IncomingExistingID:  productsSnapshot[0].ID,
 			IncomingExistingQty: cantidad,
 			CurrentUser:         currentUser,
 		}
@@ -1565,11 +1460,11 @@ func main() {
 
 	mux.HandleFunc("/cambio", func(w http.ResponseWriter, r *http.Request) {
 		currentUser := userFromContext(r)
-		products := getProducts()
-		if len(products) == 0 {
-			http.Error(w, "No hay productos disponibles para cambios.", http.StatusBadRequest)
-			return
-		}
+		productsMu.RLock()
+		productsSnapshot := make([]productOption, len(products))
+		copy(productsSnapshot, products)
+		productsMu.RUnlock()
+
 		if r.Method != http.MethodPost {
 			http.Redirect(w, r, "/cambio/new", http.StatusSeeOther)
 			return
@@ -1594,10 +1489,10 @@ func main() {
 
 		errors := make(map[string]string)
 
-		selectedProduct, ok := findProduct(products, productID)
+		selectedProduct, ok := findProduct(productsSnapshot, productID)
 		if !ok {
 			errors["producto_id"] = "Selecciona un producto válido."
-			selectedProduct = products[0]
+			selectedProduct = productsSnapshot[0]
 			productID = selectedProduct.ID
 		}
 
@@ -1668,7 +1563,7 @@ func main() {
 			data := cambioFormData{
 				Title:               "Registrar cambio",
 				ProductoID:          productID,
-				Productos:           products,
+				Productos:           productsSnapshot,
 				Unidades:            availableUnits,
 				PersonaCambio:       personaCambio,
 				Notas:               notas,
@@ -1708,7 +1603,7 @@ func main() {
 				data := cambioFormData{
 					Title:               "Registrar cambio",
 					ProductoID:          productID,
-					Productos:           products,
+					Productos:           productsSnapshot,
 					Unidades:            availableUnits,
 					PersonaCambio:       personaCambio,
 					Notas:               notas,
@@ -1745,7 +1640,6 @@ func main() {
 		if incomingMode == "new" {
 			incomingProductID = incomingNewSKU
 			incomingQty = incomingNewQty
-			upsertProductFromCSV(incomingNewSKU, incomingNewLine, incomingNewName, "")
 		}
 
 		now := time.Now().Format(time.RFC3339)
@@ -1792,246 +1686,14 @@ func main() {
 		}
 	})
 
-	mux.HandleFunc("/productos/csv", adminOnly(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost {
-			http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
-			return
-		}
-
-		if err := r.ParseMultipartForm(10 << 20); err != nil {
-			http.Error(w, "No se pudo leer el archivo CSV", http.StatusBadRequest)
-			return
-		}
-
-		file, _, err := r.FormFile("file")
-		if err != nil {
-			http.Error(w, "No se encontró el archivo CSV", http.StatusBadRequest)
-			return
-		}
-		defer file.Close()
-
-		reader := csv.NewReader(file)
-		reader.TrimLeadingSpace = true
-		reader.FieldsPerRecord = -1
-		records, err := reader.ReadAll()
-		if err != nil && err != io.EOF {
-			http.Error(w, "No se pudo leer el CSV", http.StatusBadRequest)
-			return
-		}
-		if len(records) == 0 {
-			http.Error(w, "El CSV está vacío", http.StatusBadRequest)
-			return
-		}
-
-		normalizeHeader := func(value string) string {
-			return strings.ToLower(strings.TrimSpace(value))
-		}
-
-		headerRow := records[0]
-		headerIndex := make(map[string]int, len(headerRow))
-		for idx, column := range headerRow {
-			headerIndex[normalizeHeader(column)] = idx
-		}
-
-		requiredColumns := []string{
-			"sku",
-			"linea",
-			"nombre",
-			"cantidad",
-			"precio_base",
-			"precio_venta",
-			"precio_consultora",
-		}
-		missingColumns := []string{}
-		for _, column := range requiredColumns {
-			if _, ok := headerIndex[column]; !ok {
-				missingColumns = append(missingColumns, column)
-			}
-		}
-		if len(missingColumns) > 0 {
-			w.Header().Set("Content-Type", "application/json")
-			w.WriteHeader(http.StatusBadRequest)
-			_ = json.NewEncoder(w).Encode(map[string]string{
-				"error": "Faltan columnas requeridas: " + strings.Join(missingColumns, ", "),
-			})
-			return
-		}
-
-		getValue := func(row []string, column string) string {
-			index, ok := headerIndex[column]
-			if !ok || index >= len(row) {
-				return ""
-			}
-			return strings.TrimSpace(row[index])
-		}
-
-		response := csvUploadResponse{
-			FailedRows: []csvFailedRow{},
-		}
-
-		for rowIndex, row := range records[1:] {
-			rowNumber := rowIndex + 2
-			emptyRow := true
-			for _, cell := range row {
-				if strings.TrimSpace(cell) != "" {
-					emptyRow = false
-					break
-				}
-			}
-			if emptyRow {
-				continue
-			}
-
-			sku := getValue(row, "sku")
-			linea := getValue(row, "linea")
-			nombre := getValue(row, "nombre")
-			cantidadValue := getValue(row, "cantidad")
-			precioBaseValue := getValue(row, "precio_base")
-			precioVentaValue := getValue(row, "precio_venta")
-			precioConsultoraValue := getValue(row, "precio_consultora")
-			descuentoValue := getValue(row, "descuento")
-			anotaciones := getValue(row, "anotaciones")
-			fechaCaducidad := getValue(row, "fecha_caducidad")
-			aplicaCaducidadValue := getValue(row, "aplica_caducidad")
-
-			errors := []string{}
-			if sku == "" {
-				errors = append(errors, "SKU requerido")
-			}
-			if linea == "" {
-				errors = append(errors, "Línea requerida")
-			}
-			if nombre == "" {
-				errors = append(errors, "Nombre requerido")
-			}
-
-			cantidad, err := strconv.Atoi(cantidadValue)
-			if err != nil || cantidad <= 0 {
-				errors = append(errors, "Cantidad inválida")
-			}
-
-			parsePrice := func(value string) (float64, error) {
-				normalized := strings.ReplaceAll(value, ",", ".")
-				return strconv.ParseFloat(normalized, 64)
-			}
-
-			precioBase, err := parsePrice(precioBaseValue)
-			if err != nil || precioBase < 0 {
-				errors = append(errors, "Precio base inválido")
-			}
-			precioVenta, err := parsePrice(precioVentaValue)
-			if err != nil || precioVenta < 0 {
-				errors = append(errors, "Precio venta inválido")
-			}
-			precioConsultora, err := parsePrice(precioConsultoraValue)
-			if err != nil || precioConsultora < 0 {
-				errors = append(errors, "Precio consultora inválido")
-			}
-
-			descuento := 0.0
-			if descuentoValue != "" {
-				descuento, err = parsePrice(descuentoValue)
-				if err != nil || descuento < 0 {
-					errors = append(errors, "Descuento inválido")
-				}
-			}
-
-			aplicaCaducidad := false
-			if aplicaCaducidadValue != "" {
-				value := strings.ToLower(aplicaCaducidadValue)
-				if value == "true" {
-					aplicaCaducidad = true
-				} else if value == "false" {
-					aplicaCaducidad = false
-				} else {
-					errors = append(errors, "Aplica caducidad debe ser true/false")
-				}
-			}
-
-			if fechaCaducidad != "" {
-				if _, err := time.Parse("2006-01-02", fechaCaducidad); err != nil {
-					errors = append(errors, "Fecha caducidad inválida (YYYY-MM-DD)")
-				}
-			}
-			if aplicaCaducidad && fechaCaducidad == "" {
-				errors = append(errors, "Fecha caducidad requerida si aplica caducidad")
-			}
-
-			if len(errors) > 0 {
-				response.FailedRows = append(response.FailedRows, csvFailedRow{
-					Row:   rowNumber,
-					SKU:   sku,
-					Error: strings.Join(errors, "; "),
-				})
-				continue
-			}
-
-			rowCreated, rowUpdated := upsertProductFromCSV(sku, linea, nombre, anotaciones)
-
-			tx, err := db.Begin()
-			if err != nil {
-				response.FailedRows = append(response.FailedRows, csvFailedRow{
-					Row:   rowNumber,
-					SKU:   sku,
-					Error: "Error al iniciar transacción",
-				})
-				continue
-			}
-
-			now := time.Now().Format(time.RFC3339)
-			unitBase := time.Now().UnixNano()
-			for i := 0; i < cantidad; i++ {
-				unitID := fmt.Sprintf("U-%s-%d", sku, unitBase+int64(i))
-				var caducidad interface{} = nil
-				if aplicaCaducidad {
-					caducidad = fechaCaducidad
-				}
-				if _, err := tx.Exec(
-					`INSERT INTO unidades (id, producto_id, estado, creado_en, caducidad)
-					VALUES (?, ?, ?, ?, ?)`,
-					unitID, sku, "Disponible", now, caducidad,
-				); err != nil {
-					_ = tx.Rollback()
-					response.FailedRows = append(response.FailedRows, csvFailedRow{
-						Row:   rowNumber,
-						SKU:   sku,
-						Error: "No se pudieron crear unidades",
-					})
-					goto nextRow
-				}
-			}
-
-			if err := tx.Commit(); err != nil {
-				_ = tx.Rollback()
-				response.FailedRows = append(response.FailedRows, csvFailedRow{
-					Row:   rowNumber,
-					SKU:   sku,
-					Error: "No se pudo confirmar la carga",
-				})
-				continue
-			}
-			if rowCreated {
-				response.CreatedProducts++
-			}
-			if rowUpdated {
-				response.UpdatedProducts++
-			}
-			response.CreatedUnits += cantidad
-		nextRow:
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(response)
-	}))
-
 	mux.HandleFunc("/csv/template", adminOnly(func(w http.ResponseWriter, r *http.Request) {
 		if err := tmpl.ExecuteTemplate(w, "csv_template.html", struct {
 			Title       string
 			Subtitle    string
 			CurrentUser *User
 		}{
-			Title:       "Agregar productos",
-			Subtitle:    "Carga un CSV para crear/actualizar productos y crear unidades según cantidad.",
+			Title:       "Plantilla CSV - Carga masiva",
+			Subtitle:    "",
 			CurrentUser: userFromContext(r),
 		}); err != nil {
 			http.Error(w, "Error al renderizar plantilla CSV", http.StatusInternalServerError)
@@ -2050,6 +1712,220 @@ func main() {
 		}); err != nil {
 			http.Error(w, "Error al renderizar exportaciones CSV", http.StatusInternalServerError)
 		}
+	}))
+
+	mux.HandleFunc("/productos/csv", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		writeJSONError := func(status int, message string) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
+		}
+
+		if r.Method != http.MethodPost {
+			writeJSONError(http.StatusMethodNotAllowed, "Método no permitido.")
+			return
+		}
+
+		if err := r.ParseMultipartForm(32 << 20); err != nil {
+			writeJSONError(http.StatusBadRequest, "No se pudo leer el archivo.")
+			return
+		}
+		file, _, err := r.FormFile("file")
+		if err != nil {
+			writeJSONError(http.StatusBadRequest, "Archivo CSV no encontrado.")
+			return
+		}
+		defer file.Close()
+
+		reader := csv.NewReader(file)
+		reader.FieldsPerRecord = -1
+		records, err := reader.ReadAll()
+		if err != nil {
+			writeJSONError(http.StatusBadRequest, "No se pudo leer el CSV.")
+			return
+		}
+		if len(records) < 2 {
+			writeJSONError(http.StatusBadRequest, "El CSV no contiene filas para procesar.")
+			return
+		}
+
+		header := make([]string, len(records[0]))
+		for i, cell := range records[0] {
+			header[i] = strings.ToLower(strings.TrimSpace(cell))
+		}
+		index := make(map[string]int, len(header))
+		for i, name := range header {
+			if name == "" {
+				continue
+			}
+			index[name] = i
+		}
+		required := []string{"sku", "linea", "nombre", "cantidad", "precio_base", "precio_venta", "precio_consultora"}
+		for _, col := range required {
+			if _, ok := index[col]; !ok {
+				writeJSONError(http.StatusBadRequest, "Faltan columnas requeridas en el CSV.")
+				return
+			}
+		}
+
+		get := func(row []string, col string) string {
+			pos, ok := index[col]
+			if !ok || pos < 0 || pos >= len(row) {
+				return ""
+			}
+			return strings.TrimSpace(row[pos])
+		}
+
+		parseCSVFloat := func(value string) (float64, error) {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				return 0, fmt.Errorf("empty")
+			}
+			value = strings.ReplaceAll(value, ",", ".")
+			return strconv.ParseFloat(value, 64)
+		}
+
+		parseCSVInt := func(value string) (int, error) {
+			value = strings.TrimSpace(value)
+			if value == "" {
+				return 0, fmt.Errorf("empty")
+			}
+			return strconv.Atoi(value)
+		}
+
+		parseCSVBool := func(value string) (bool, error) {
+			value = strings.TrimSpace(strings.ToLower(value))
+			if value == "" {
+				return false, fmt.Errorf("empty")
+			}
+			switch value {
+			case "true", "1", "si", "sí", "yes":
+				return true, nil
+			case "false", "0", "no":
+				return false, nil
+			default:
+				return false, fmt.Errorf("invalid")
+			}
+		}
+
+		resp := csvUploadResponse{}
+		tx, err := db.Begin()
+		if err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo iniciar la transacción.")
+			return
+		}
+
+		now := time.Now().Format(time.RFC3339)
+		for i, row := range records[1:] {
+			rowIndex := i + 1 // matches the UI preview index (1-based excluding header)
+			sku := get(row, "sku")
+			linea := get(row, "linea")
+			nombre := get(row, "nombre")
+			cantidadRaw := get(row, "cantidad")
+
+			if sku == "" || linea == "" || nombre == "" {
+				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "SKU, línea y nombre son obligatorios."})
+				continue
+			}
+
+			cantidad, err := parseCSVInt(cantidadRaw)
+			if err != nil || cantidad <= 0 {
+				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Cantidad inválida."})
+				continue
+			}
+
+			// Validate numeric columns even if we don't persist them yet.
+			if _, err := parseCSVFloat(get(row, "precio_base")); err != nil {
+				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Precio base inválido."})
+				continue
+			}
+			if _, err := parseCSVFloat(get(row, "precio_venta")); err != nil {
+				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Precio venta inválido."})
+				continue
+			}
+			if _, err := parseCSVFloat(get(row, "precio_consultora")); err != nil {
+				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Precio consultora inválido."})
+				continue
+			}
+
+			fechaCaducidad := get(row, "fecha_caducidad")
+			aplicaCadRaw := get(row, "aplica_caducidad")
+			aplicaCad := false
+			if aplicaCadRaw != "" {
+				parsed, err := parseCSVBool(aplicaCadRaw)
+				if err != nil {
+					resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Aplica caducidad debe ser true/false."})
+					continue
+				}
+				aplicaCad = parsed
+			}
+			if aplicaCad && fechaCaducidad == "" {
+				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Fecha caducidad requerida si aplica."})
+				continue
+			}
+			if fechaCaducidad != "" {
+				if _, err := time.Parse("2006-01-02", fechaCaducidad); err != nil {
+					resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Fecha caducidad debe ser YYYY-MM-DD."})
+					continue
+				}
+			}
+
+			if _, err := tx.Exec("SAVEPOINT csv_row"); err != nil {
+				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Error al preparar la fila."})
+				continue
+			}
+
+			// Update in-memory catalog (used by inventario/cambio screens).
+			productsMu.Lock()
+			found := false
+			for idx := range products {
+				if products[idx].ID == sku {
+					products[idx].Name = nombre
+					products[idx].Line = linea
+					found = true
+					break
+				}
+			}
+			if !found {
+				products = append(products, productOption{ID: sku, Name: nombre, Line: linea})
+				resp.CreatedProducts++
+			} else {
+				resp.UpdatedProducts++
+			}
+			productsMu.Unlock()
+
+			// Insert units into DB (inventory source of truth).
+			baseID := time.Now().UnixNano()
+			for j := 0; j < cantidad; j++ {
+				unitID := fmt.Sprintf("U-%s-%d", sku, baseID+int64(j))
+				var caducidad any = nil
+				if aplicaCad && fechaCaducidad != "" {
+					caducidad = fechaCaducidad
+				}
+				if _, err := tx.Exec(
+					`INSERT INTO unidades (id, producto_id, estado, creado_en, caducidad) VALUES (?, ?, ?, ?, ?)`,
+					unitID, sku, "Disponible", now, caducidad,
+				); err != nil {
+					_, _ = tx.Exec("ROLLBACK TO csv_row")
+					_, _ = tx.Exec("RELEASE csv_row")
+					resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Error al crear unidades."})
+					goto nextRow
+				}
+				resp.CreatedUnits++
+			}
+
+			_, _ = tx.Exec("RELEASE csv_row")
+		nextRow:
+			continue
+		}
+
+		if err := tx.Commit(); err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo guardar el CSV.")
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(resp)
 	}))
 
 	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
