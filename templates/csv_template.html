@@ -367,6 +367,7 @@
         <label class="secondary" for="csv-upload">
           <input id="csv-upload" type="file" accept=".csv,text/csv" />
         </label>
+        <button class="secondary" id="validate-csv" disabled>Validar archivo</button>
         <button class="primary" id="upload-products" disabled>Subir productos</button>
       </div>
       <p>Regla de importación: por cada fila se crea o encuentra el producto por <strong>SKU</strong> y se crean <strong>N unidades DISPONIBLE</strong> según el campo cantidad.</p>
@@ -455,6 +456,7 @@
     const inventoryLink = document.getElementById("inventory-link");
     const uploadButton = document.getElementById("upload-products");
     const fileInput = document.getElementById("csv-upload");
+    const validateButton = document.getElementById("validate-csv");
     const escapeCSV = (value) => {
       const stringValue = String(value);
       if (/[",\n]/.test(stringValue)) {
@@ -774,7 +776,33 @@
     if (fileInput) {
       fileInput.addEventListener("change", (event) => {
         const file = event.target.files[0];
-        handleCSV(file);
+        currentFile = file || null;
+        validatedRows = [];
+        validationErrorsList = [];
+        uploadButton.disabled = true;
+        if (validateButton) validateButton.disabled = !currentFile;
+        uploadStatus.innerHTML = `
+          <span>Preview: 0 filas</span>
+          <span>Válidas: 0</span>
+          <span>Errores: 0</span>
+        `;
+        uploadPreviewBody.innerHTML = `
+          <tr>
+            <td colspan="13" style="text-align: center; color: var(--muted);">Sin archivo validado.</td>
+          </tr>
+        `;
+        if (validationPill) validationPill.textContent = "Validación pendiente";
+        validationErrors.innerHTML = "";
+        const li = document.createElement("li");
+        li.textContent = "Selecciona un archivo y valida para ver la vista previa.";
+        validationErrors.appendChild(li);
+      });
+    }
+
+    if (validateButton) {
+      validateButton.addEventListener("click", () => {
+        if (!currentFile) return;
+        handleCSV(currentFile);
       });
     }
 

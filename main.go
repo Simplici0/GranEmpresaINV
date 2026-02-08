@@ -16,6 +16,7 @@ import (
 	"path/filepath"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -198,6 +199,11 @@ type contextKey string
 
 const userContextKey contextKey = "user"
 
+var (
+	productsMu sync.RWMutex
+	products   []productOption
+)
+
 func findProduct(products []productOption, id string) (productOption, bool) {
 	for _, product := range products {
 		if product.ID == id {
@@ -223,73 +229,50 @@ func buildSalientesMap(salientes []string) map[string]bool {
 	return mapped
 }
 
-func boolToInt(value bool) int {
-	if value {
-		return 1
-	}
-	return 0
-}
-
-func defaultProducts() []productRecord {
-	return []productRecord{
+func defaultProducts() []productOption {
+	return []productOption{
 		{
-			SKU:              "P-001",
-			Name:             "Proteína Balance 500g",
-			Line:             "Nutrición",
-			PrecioBase:       120000,
-			PrecioVenta:      130000,
-			PrecioConsultora: 98000,
-			Descuento:        0,
-			Anotaciones:      "",
-			AplicaCaducidad:  true,
+			ID:   "P-001",
+			Name: "Proteína Balance 500g",
+			Line: "Nutrición",
 		},
 		{
-			SKU:              "P-002",
-			Name:             "Crema Regeneradora",
-			Line:             "Dermocosmética",
-			PrecioBase:       89000,
-			PrecioVenta:      99000,
-			PrecioConsultora: 70000,
-			Descuento:        0,
-			Anotaciones:      "",
-			AplicaCaducidad:  false,
+			ID:   "P-002",
+			Name: "Crema Regeneradora",
+			Line: "Dermocosmética",
 		},
 		{
-			SKU:              "P-003",
-			Name:             "Leche Pediátrica Premium",
-			Line:             "Pediatría",
-			PrecioBase:       65000,
-			PrecioVenta:      72000,
-			PrecioConsultora: 55000,
-			Descuento:        0,
-			Anotaciones:      "",
-			AplicaCaducidad:  false,
+			ID:   "P-003",
+			Name: "Leche Pediátrica Premium",
+			Line: "Pediatría",
 		},
 	}
 }
 
-func loadProducts(db *sql.DB) ([]productOption, error) {
-	rows, err := db.Query(`
-		SELECT sku, nombre, linea
-		FROM productos
-		ORDER BY nombre`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
+func getProducts() []productOption {
+	productsMu.RLock()
+	defer productsMu.RUnlock()
+	copied := make([]productOption, len(products))
+	copy(copied, products)
+	return copied
+}
 
-	products := []productOption{}
-	for rows.Next() {
-		var product productOption
-		if err := rows.Scan(&product.ID, &product.Name, &product.Line); err != nil {
-			return nil, err
+func upsertProductFromCSV(sku, line, name, anotaciones string) (bool, bool) {
+	productsMu.Lock()
+	defer productsMu.Unlock()
+	for i, product := range products {
+		if product.ID == sku {
+			products[i].Line = line
+			products[i].Name = name
+			return false, true
 		}
-		products = append(products, product)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return products, nil
+	products = append(products, productOption{
+		ID:   sku,
+		Name: name,
+		Line: line,
+	})
+	return true, false
 }
 
 func estadoClass(estado string) string {
@@ -871,6 +854,8 @@ func main() {
 		}
 	}
 
+	products = defaultProducts()
+
 	type ventaFormData struct {
 		Title       string
 		Subtitle    string
@@ -1289,11 +1274,7 @@ func main() {
 	mux.HandleFunc("/inventario", func(w http.ResponseWriter, r *http.Request) {
 		currentUser := userFromContext(r)
 		flash := r.URL.Query().Get("mensaje")
-		products, err := loadProducts(db)
-		if err != nil {
-			http.Error(w, "Error al consultar productos", http.StatusInternalServerError)
-			return
-		}
+		products := getProducts()
 		inventoryProducts := make([]inventoryProduct, 0, len(products))
 		for _, product := range products {
 			rows, err := db.Query(`
@@ -1404,11 +1385,7 @@ func main() {
 
 	mux.HandleFunc("/cambio/new", func(w http.ResponseWriter, r *http.Request) {
 		currentUser := userFromContext(r)
-		products, err := loadProducts(db)
-		if err != nil {
-			http.Error(w, "Error al consultar productos", http.StatusInternalServerError)
-			return
-		}
+		products := getProducts()
 		if len(products) == 0 {
 			http.Error(w, "No hay productos disponibles para cambios.", http.StatusBadRequest)
 			return
@@ -1588,11 +1565,7 @@ func main() {
 
 	mux.HandleFunc("/cambio", func(w http.ResponseWriter, r *http.Request) {
 		currentUser := userFromContext(r)
-		products, err := loadProducts(db)
-		if err != nil {
-			http.Error(w, "Error al consultar productos", http.StatusInternalServerError)
-			return
-		}
+		products := getProducts()
 		if len(products) == 0 {
 			http.Error(w, "No hay productos disponibles para cambios.", http.StatusBadRequest)
 			return
@@ -1772,28 +1745,7 @@ func main() {
 		if incomingMode == "new" {
 			incomingProductID = incomingNewSKU
 			incomingQty = incomingNewQty
-			var existingSKU string
-			err := tx.QueryRow("SELECT sku FROM productos WHERE sku = ?", incomingNewSKU).Scan(&existingSKU)
-			if err != nil && err != sql.ErrNoRows {
-				if rollbackErr := tx.Rollback(); rollbackErr != nil {
-					log.Printf("rollback cambio insert producto: %v", rollbackErr)
-				}
-				http.Error(w, "Error al validar el producto entrante", http.StatusInternalServerError)
-				return
-			}
-			if err == sql.ErrNoRows {
-				if _, err := tx.Exec(
-					`INSERT INTO productos (sku, linea, nombre, precio_base, precio_venta, precio_consultora, descuento, anotaciones, aplica_caducidad)
-					VALUES (?, ?, ?, 0, 0, 0, 0, '', 0)`,
-					incomingNewSKU, incomingNewLine, incomingNewName,
-				); err != nil {
-					if rollbackErr := tx.Rollback(); rollbackErr != nil {
-						log.Printf("rollback cambio insert producto: %v", rollbackErr)
-					}
-					http.Error(w, "Error al registrar el producto entrante", http.StatusInternalServerError)
-					return
-				}
-			}
+			upsertProductFromCSV(incomingNewSKU, incomingNewLine, incomingNewName, "")
 		}
 
 		now := time.Now().Format(time.RFC3339)
@@ -2014,6 +1966,8 @@ func main() {
 				continue
 			}
 
+			rowCreated, rowUpdated := upsertProductFromCSV(sku, linea, nombre, anotaciones)
+
 			tx, err := db.Begin()
 			if err != nil {
 				response.FailedRows = append(response.FailedRows, csvFailedRow{
@@ -2022,56 +1976,6 @@ func main() {
 					Error: "Error al iniciar transacción",
 				})
 				continue
-			}
-
-			var existingCount int
-			err = tx.QueryRow("SELECT COUNT(*) FROM productos WHERE sku = ?", sku).Scan(&existingCount)
-			if err != nil && err != sql.ErrNoRows {
-				_ = tx.Rollback()
-				response.FailedRows = append(response.FailedRows, csvFailedRow{
-					Row:   rowNumber,
-					SKU:   sku,
-					Error: "Error al validar producto",
-				})
-				continue
-			}
-
-			rowCreated := 0
-			rowUpdated := 0
-
-			if err == sql.ErrNoRows || existingCount == 0 {
-				_, err = tx.Exec(
-					`INSERT INTO productos (sku, linea, nombre, precio_base, precio_venta, precio_consultora, descuento, anotaciones, aplica_caducidad)
-					VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
-					sku, linea, nombre, precioBase, precioVenta, precioConsultora, descuento, anotaciones, boolToInt(aplicaCaducidad),
-				)
-				if err != nil {
-					_ = tx.Rollback()
-					response.FailedRows = append(response.FailedRows, csvFailedRow{
-						Row:   rowNumber,
-						SKU:   sku,
-						Error: "No se pudo crear el producto",
-					})
-					continue
-				}
-				rowCreated = 1
-			} else {
-				_, err = tx.Exec(
-					`UPDATE productos
-					SET linea = ?, nombre = ?, anotaciones = ?
-					WHERE sku = ?`,
-					linea, nombre, anotaciones, sku,
-				)
-				if err != nil {
-					_ = tx.Rollback()
-					response.FailedRows = append(response.FailedRows, csvFailedRow{
-						Row:   rowNumber,
-						SKU:   sku,
-						Error: "No se pudo actualizar el producto",
-					})
-					continue
-				}
-				rowUpdated = 1
 			}
 
 			now := time.Now().Format(time.RFC3339)
@@ -2106,8 +2010,12 @@ func main() {
 				})
 				continue
 			}
-			response.CreatedProducts += rowCreated
-			response.UpdatedProducts += rowUpdated
+			if rowCreated {
+				response.CreatedProducts++
+			}
+			if rowUpdated {
+				response.UpdatedProducts++
+			}
 			response.CreatedUnits += cantidad
 		nextRow:
 		}
