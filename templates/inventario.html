@@ -30,6 +30,12 @@
       margin: 0;
       background: var(--bg);
       color: var(--text);
+      animation: fadeIn 0.4s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
     }
 
     .page-content {
@@ -136,6 +142,11 @@
       grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
       border: 1px solid var(--border);
       box-shadow: var(--shadow-soft);
+      transition: box-shadow 0.3s ease;
+    }
+
+    .filters:hover {
+      box-shadow: 0 10px 24px rgba(18, 23, 38, 0.1);
     }
 
     .filter-group {
@@ -159,6 +170,13 @@
       border: 1px solid var(--border);
       font-size: 14px;
       background: #ffffff;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    select:hover,
+    input[type="search"]:hover,
+    input[type="number"]:hover {
+      border-color: rgba(232, 93, 60, 0.3);
     }
 
     select:focus,
@@ -167,6 +185,7 @@
       outline: none;
       border-color: var(--primary);
       box-shadow: 0 0 0 3px rgba(232, 93, 60, 0.16);
+      transform: translateY(-1px);
     }
 
     .toggle {
@@ -216,6 +235,14 @@
       padding: 12px 16px;
       font-size: 14px;
       border-bottom: 1px solid var(--border);
+    }
+
+    tbody tr {
+      transition: background-color 0.2s ease;
+    }
+
+    tbody tr:hover {
+      background-color: #fafaf9;
     }
 
     tbody tr:last-child td {
@@ -270,16 +297,27 @@
       cursor: pointer;
       background: var(--card);
       color: var(--text);
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    button:hover {
+      transform: translateY(-1px);
+    }
+
+    button:active {
+      transform: translateY(0);
     }
 
     button.primary {
-      background: var(--primary);
+      background: linear-gradient(135deg, var(--primary) 0%, #d85038 100%);
       border-color: var(--primary);
       color: #ffffff;
+      box-shadow: 0 2px 6px rgba(232, 93, 60, 0.2);
     }
 
     button.primary:hover {
-      background: var(--primary-strong);
+      box-shadow: 0 4px 12px rgba(232, 93, 60, 0.3);
+      transform: translateY(-2px);
     }
 
     button.secondary {
@@ -288,9 +326,19 @@
       border-color: #f2c6a8;
     }
 
+    button.secondary:hover {
+      background: #ffe4d1;
+      border-color: var(--primary);
+    }
+
     button.ghost {
       background: transparent;
       color: var(--muted);
+    }
+
+    button.ghost:hover {
+      background: #f9f7f4;
+      color: var(--text);
     }
 
     .menu {
@@ -330,6 +378,25 @@
       font-weight: 600;
       color: #25304d;
       cursor: pointer;
+      transition: color 0.2s ease;
+      position: relative;
+      display: inline-block;
+    }
+
+    .product-name:hover {
+      color: var(--primary);
+    }
+
+    .product-name::after {
+      content: '▼';
+      margin-left: 6px;
+      font-size: 10px;
+      opacity: 0.5;
+      transition: transform 0.2s ease;
+    }
+
+    .product-name:hover::after {
+      transform: translateY(2px);
     }
 
     .units-panel {
@@ -383,6 +450,30 @@
       flex-direction: column;
       gap: 6px;
       box-shadow: var(--shadow-soft);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .summary-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      width: 100%;
+      height: 3px;
+      background: linear-gradient(90deg, var(--primary) 0%, #f59e42 100%);
+      transform: scaleX(0);
+      transition: transform 0.3s ease;
+    }
+
+    .summary-card:hover {
+      transform: translateY(-3px);
+      box-shadow: 0 12px 24px rgba(18, 23, 38, 0.12);
+    }
+
+    .summary-card:hover::before {
+      transform: scaleX(1);
     }
 
     .summary-card h3 {
@@ -430,10 +521,10 @@
       <input id="searchFilter" type="search" placeholder="Nombre o SKU" />
     </div>
     <div class="filter-group">
-      <label>Caducidad próxima</label>
+      <label>Caducidad</label>
       <div class="toggle">
         <input id="expiryToggle" type="checkbox" />
-        <span>Mostrar próximos 45 días</span>
+        <span>Próximos 45 días</span>
       </div>
     </div>
     </section>
@@ -448,8 +539,8 @@
           <th>Producto</th>
           <th>Línea</th>
           <th>Estado</th>
-          <th>Stock disponible</th>
-          <th>Acciones rápidas</th>
+          <th>Stock</th>
+          <th>Acciones</th>
           <th></th>
         </tr>
       </thead>
@@ -536,15 +627,15 @@
 
       summary.innerHTML = `
         <div class="summary-card">
-          <h3>Productos visibles</h3>
+          <h3>Productos</h3>
           <span>${totalProducts}</span>
         </div>
         <div class="summary-card">
-          <h3>Unidades disponibles</h3>
+          <h3>Unidades</h3>
           <span>${totalUnits}</span>
         </div>
         <div class="summary-card">
-          <h3>Próximos a caducar</h3>
+          <h3>Por caducar</h3>
           <span>${expiringUnits}</span>
         </div>
       `;
@@ -597,7 +688,7 @@
         row.innerHTML = `
           <td>
             <div class="product-name" data-product="${product.id}">${product.name}</div>
-            <div class="fifo-note">SKU ${product.id} · FIFO: ${product.available} unidades disponibles</div>
+            <div class="fifo-note">SKU ${product.id} · ${product.available} disponibles</div>
           </td>
           <td>${product.line}</td>
           <td><span class="status ${product.statusClass}">${statusLabel(product.statusLabel)}</span></td>
@@ -627,15 +718,15 @@
         unitsRow.innerHTML = `
           <td colspan="6" class="units-panel" id="units-${product.id}" style="display: none;">
             <div class="units-header">
-              <h4>Unidades del producto</h4>
-              <span class="fifo-note">Auditoría por lote · Selección FIFO al vender</span>
+              <h4>Unidades</h4>
+              <span class="fifo-note">Selección FIFO</span>
             </div>
             <table class="units-table" aria-label="Unidades del producto">
               <thead>
                 <tr>
-                  <th>ID unidad</th>
-                  <th>Creado</th>
-                  <th>Caducidad</th>
+                  <th>ID</th>
+                  <th>Ingreso</th>
+                  <th>Caduca</th>
                   <th>Ubicación</th>
                   <th>Estado</th>
                   <th>FIFO</th>

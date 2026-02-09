@@ -27,6 +27,8 @@
       text-transform: uppercase;
       letter-spacing: 0.08em;
       font-weight: 700;
+      backdrop-filter: blur(4px);
+      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
     }
 
     .logout-button {
@@ -38,10 +40,17 @@
       font-size: 12px;
       font-weight: 700;
       cursor: pointer;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     .logout-button:hover {
-      background: rgba(255, 255, 255, 0.2);
+      background: rgba(255, 255, 255, 0.25);
+      transform: translateY(-1px);
+      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+    }
+
+    .logout-button:active {
+      transform: translateY(0);
     }
 
     .logout-form {

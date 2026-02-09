@@ -7,11 +7,12 @@
   <style>
     :root {
       color-scheme: light;
-      ----bg: #faf9f7;
+      --bg: #f7f5f2;
       --card: #ffffff;
       --text: #2a2826;
       --muted: #6b6560;
       --primary: #e85d3c;
+      --primary-strong: #cf4528;
       --success: #2d9d78;
       --border: #e8e4df;
     }
@@ -25,6 +26,12 @@
       margin: 0;
       background: var(--bg);
       color: var(--text);
+      animation: fadeIn 0.4s ease-out;
+    }
+
+    @keyframes fadeIn {
+      from { opacity: 0; }
+      to { opacity: 1; }
     }
 
     .global-banner {
@@ -107,10 +114,22 @@
       max-width: 640px;
       margin: 0 auto;
       background: var(--card);
-      border-radius: 16px;
+      border-radius: 18px;
       border: 1px solid var(--border);
-      padding: 24px;
+      padding: 28px;
       box-shadow: 0 12px 30px rgba(30, 41, 59, 0.08);
+      animation: slideUp 0.5s ease-out;
+    }
+
+    @keyframes slideUp {
+      from {
+        opacity: 0;
+        transform: translateY(20px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
     }
 
     h1 {
@@ -142,25 +161,53 @@
       display: inline-flex;
       align-items: center;
       gap: 8px;
-      background: #e9f7f1;
+      background: linear-gradient(135deg, #e9f7f1 0%, #d4f1e4 100%);
       color: var(--success);
-      font-weight: 600;
-      padding: 6px 10px;
+      font-weight: 700;
+      padding: 8px 14px;
       border-radius: 999px;
       font-size: 12px;
+      border: 1px solid #b8e6d3;
+      box-shadow: 0 2px 6px rgba(45, 157, 120, 0.15);
+      animation: bounceIn 0.6s ease-out 0.2s backwards;
+    }
+
+    @keyframes bounceIn {
+      0% {
+        opacity: 0;
+        transform: scale(0.8);
+      }
+      60% {
+        opacity: 1;
+        transform: scale(1.05);
+      }
+      100% {
+        transform: scale(1);
+      }
     }
 
     a.button {
       display: inline-flex;
       align-items: center;
       justify-content: center;
-      padding: 10px 16px;
-      border-radius: 10px;
-      background: var(--primary);
+      padding: 12px 18px;
+      border-radius: 12px;
+      background: linear-gradient(135deg, var(--primary) 0%, #d85038 100%);
       color: white;
       text-decoration: none;
       font-weight: 600;
-      margin-top: 16px;
+      margin-top: 20px;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 2px 8px rgba(232, 93, 60, 0.25);
+    }
+
+    a.button:hover {
+      transform: translateY(-2px);
+      box-shadow: 0 4px 14px rgba(232, 93, 60, 0.35);
+    }
+
+    a.button:active {
+      transform: translateY(0);
     }
   </style>
 </head>
@@ -168,9 +215,9 @@
   {{template "header" .}}
   <main class="page-content">
     <div class="card">
-    <span class="badge">Venta registrada</span>
+    <span class="badge">¡Listo!</span>
     <h1>{{.Title}}</h1>
-    <p>La venta se registró y el inventario fue actualizado en base de datos.</p>
+    <p>Venta registrada e inventario actualizado.</p>
 
     <div class="summary">
       <div>
@@ -182,11 +229,11 @@
         <span>{{.Cantidad}}</span>
       </div>
       <div>
-        <strong>Precio final unidad</strong>
+        <strong>Precio unitario</strong>
         <span>{{.PrecioFinal}}</span>
       </div>
       <div>
-        <strong>Método de pago</strong>
+        <strong>Pago</strong>
         <span>{{.MetodoPago}}</span>
       </div>
       {{if .Notas}}
@@ -197,7 +244,7 @@
       {{end}}
     </div>
 
-      <a class="button" href="/inventario?mensaje=Venta%20registrada%20correctamente">Volver a inventario</a>
+      <a class="button" href="/inventario?mensaje=Venta%20registrada%20correctamente">Volver</a>
     </div>
   </main>
 </body>
