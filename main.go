@@ -436,7 +436,9 @@ func userFromRequest(db *sql.DB, r *http.Request) (*User, error) {
 
 func authMiddleware(db *sql.DB, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path == "/login" || r.URL.Path == "/health" {
+		// Allow unauthenticated access to healthcheck and static assets.
+		// Static assets are safe to serve publicly and needed for the login page too.
+		if r.URL.Path == "/login" || r.URL.Path == "/health" || strings.HasPrefix(r.URL.Path, "/static/") {
 			next.ServeHTTP(w, r)
 			return
 		}
@@ -800,6 +802,9 @@ func main() {
 	}
 
 	mux := http.NewServeMux()
+
+	// Serve static assets from ./static at /static/.
+	mux.Handle("/static/", http.StripPrefix("/static/", http.FileServer(http.Dir("static"))))
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(http.StatusOK)

@@ -1,5 +1,21 @@
 {{define "header"}}
   <style>
+    /* Banner logo overrides: the per-page templates define .logo-placeholder as a pill.
+       Here we override it so SVG logos render cleanly. */
+    .global-banner .logo-placeholder {
+      height: 26px;
+      min-width: 0;
+      padding: 0;
+      border: 0;
+      background: transparent;
+    }
+
+    .global-banner .logo-placeholder img {
+      height: 26px;
+      width: auto;
+      display: block;
+    }
+
     .header-top {
       display: flex;
       justify-content: space-between;
@@ -60,8 +76,11 @@
 
   <div class="global-banner">
     <div class="banner-logos">
-      <div class="logo-placeholder">Logo 1</div>
-      <div class="logo-placeholder">Logo 2</div>
+      <div class="logo-placeholder">
+        <a href="/inventario" aria-label="Inicio">
+          <img src="/static/img/logo1.svg" alt="Logo 1" />
+        </a>
+      </div>
     </div>
     {{if .CurrentUser}}
     <div class="user-bar">
