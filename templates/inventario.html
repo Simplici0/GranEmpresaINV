@@ -278,6 +278,18 @@
       border-color: #f2d1a5;
     }
 
+    .status.reserved {
+      background: #e8f1ff;
+      color: #1f3c88;
+      border-color: #c6dcff;
+    }
+
+    .status.damaged {
+      background: #fff0f0;
+      color: #9a2f2f;
+      border-color: #f5c6cf;
+    }
+
     .actions {
       display: flex;
       align-items: center;
@@ -503,8 +515,10 @@
       <select id="statusFilter">
         <option value="all">Todos</option>
         <option value="available">Disponible</option>
+        <option value="reserved">Reservado</option>
         <option value="sold">Vendido</option>
         <option value="swapped">Cambio</option>
+        <option value="damaged">Dañado</option>
       </select>
     </div>
     <div class="filter-group">
@@ -704,9 +718,9 @@
             <div class="menu">
               <button class="ghost" data-menu="${product.id}">⋮</button>
               <div class="menu-panel" id="menu-${product.id}">
-                <button>Reservar unidades</button>
-                <button>Registrar daño</button>
-                <button>Ver historial</button>
+                <button type="button" data-menu-action="reserve" data-product="${product.id}">Reservar unidades</button>
+                <button type="button" data-menu-action="damage" data-product="${product.id}">Registrar daño</button>
+                <button type="button" data-menu-action="history" data-product="${product.id}">Ver historial</button>
               </div>
             </div>
           </td>
@@ -787,6 +801,95 @@
 
       if (!event.target.closest(".menu")) {
         document.querySelectorAll(".menu-panel.open").forEach((panel) => panel.classList.remove("open"));
+      }
+
+      const menuAction = event.target.closest("button[data-menu-action]");
+      if (menuAction) {
+        const productId = menuAction.dataset.product;
+        const action = menuAction.dataset.menuAction;
+        const product = products.find((p) => p.id === productId);
+        const qtyInput = document.querySelector(`input[data-qty="${productId}"]`);
+        const maxQty = parseInt(qtyInput?.max || "0", 10);
+        const defaultQty = parseInt(qtyInput?.value || "1", 10) || 1;
+
+        const requestQty = (label) => {
+          if (!product) return null;
+          if (!Number.isFinite(maxQty) || maxQty < 1) {
+            alert("No hay unidades disponibles para esta acción.");
+            return null;
+          }
+          const raw = prompt(`${label} para ${product.name} (1-${maxQty})`, String(Math.min(defaultQty, maxQty)));
+          if (raw === null) return null;
+          const qty = parseInt(raw, 10);
+          if (Number.isNaN(qty) || qty < 1 || qty > maxQty) {
+            alert("Cantidad inválida.");
+            return null;
+          }
+          return qty;
+        };
+
+        const requestNote = () => {
+          const raw = prompt("Nota (opcional)", "");
+          if (raw === null) return null;
+          return raw.trim();
+        };
+
+        const postAction = async (endpoint, qty, note) => {
+          const body = new URLSearchParams({
+            producto_id: productId,
+            cantidad: String(qty),
+            nota: note || ""
+          });
+          const resp = await fetch(endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || !data.ok) {
+            alert(data.error || "No se pudo completar la acción.");
+            return;
+          }
+          window.location.reload();
+        };
+
+        const showHistory = async () => {
+          const resp = await fetch(`/productos/historial?${new URLSearchParams({ producto_id: productId }).toString()}`);
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || !data.ok) {
+            alert(data.error || "No se pudo cargar el historial.");
+            return;
+          }
+          const movimientos = Array.isArray(data.movimientos) ? data.movimientos : [];
+          const lines = movimientos.length
+            ? movimientos.map((m) => `${m.fecha} | ${m.tipo} | ${m.unidad_id}${m.usuario ? " | " + m.usuario : ""}${m.nota ? " | " + m.nota : ""}`)
+            : ["(sin movimientos registrados)"];
+          alert(`Historial SKU ${productId}\n\n${lines.join("\n")}`);
+        };
+
+        // Close any open menu before running the action.
+        document.querySelectorAll(".menu-panel.open").forEach((panel) => panel.classList.remove("open"));
+
+        if (action === "reserve") {
+          const qty = requestQty("Cantidad a reservar");
+          if (qty === null) return;
+          const note = requestNote();
+          if (note === null) return;
+          postAction("/inventario/reservar", qty, note);
+          return;
+        }
+        if (action === "damage") {
+          const qty = requestQty("Cantidad a marcar como dañada");
+          if (qty === null) return;
+          const note = requestNote();
+          if (note === null) return;
+          postAction("/inventario/dano", qty, note);
+          return;
+        }
+        if (action === "history") {
+          showHistory();
+          return;
+        }
       }
 
       const actionButton = event.target.closest("button[data-action]");

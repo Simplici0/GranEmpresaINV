@@ -276,6 +276,10 @@ func estadoClass(estado string) string {
 	switch estado {
 	case "Disponible", "available":
 		return "available"
+	case "Reservada", "Reservado", "reserved":
+		return "reserved"
+	case "Danada", "Dañada", "Dañado", "damaged":
+		return "damaged"
 	case "Vendida", "Vendido", "sold":
 		return "sold"
 	case "Cambio", "swapped":
@@ -283,6 +287,42 @@ func estadoClass(estado string) string {
 	default:
 		return "available"
 	}
+}
+
+func ensureMovimientosTable(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS movimientos (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			producto_id TEXT NOT NULL,
+			unidad_id TEXT NOT NULL,
+			tipo TEXT NOT NULL,
+			nota TEXT NOT NULL DEFAULT '',
+			usuario TEXT NOT NULL DEFAULT '',
+			fecha TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_movimientos_producto_fecha ON movimientos (producto_id, fecha);
+		CREATE INDEX IF NOT EXISTS idx_movimientos_unidad_fecha ON movimientos (unidad_id, fecha);
+	`)
+	return err
+}
+
+func logMovimientos(tx *sql.Tx, productoID string, unidadIDs []string, tipo, nota string, user *User, now string) error {
+	username := ""
+	if user != nil {
+		username = user.Username
+	}
+	stmt, err := tx.Prepare(`INSERT INTO movimientos (producto_id, unidad_id, tipo, nota, usuario, fecha) VALUES (?, ?, ?, ?, ?, ?)`)
+	if err != nil {
+		return err
+	}
+	defer stmt.Close()
+
+	for _, unidadID := range unidadIDs {
+		if _, err := stmt.Exec(productoID, unidadID, tipo, nota, username, now); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func selectAndMarkUnitsSold(tx *sql.Tx, productID string, qty int) ([]string, error) {
@@ -596,6 +636,10 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	`
 
 	if _, err := db.Exec(schema); err != nil {
+		return nil, err
+	}
+
+	if err := ensureMovimientosTable(db); err != nil {
 		return nil, err
 	}
 
@@ -1412,6 +1456,8 @@ func main() {
 			units := []inventoryUnit{}
 			availableCount := 0
 			changeCount := 0
+			reservedCount := 0
+			damagedCount := 0
 			fifoIndex := 1
 			for rows.Next() {
 				var id, estado, creadoEn string
@@ -1426,8 +1472,12 @@ func main() {
 					fifo = strconv.Itoa(fifoIndex)
 					fifoIndex++
 					availableCount++
+				} else if estado == "Reservada" || estado == "reserved" {
+					reservedCount++
 				} else if estado == "Cambio" || estado == "swapped" {
 					changeCount++
+				} else if estado == "Danada" || estado == "Dañada" || estado == "damaged" {
+					damagedCount++
 				}
 				units = append(units, inventoryUnit{
 					ID:          id,
@@ -1448,9 +1498,15 @@ func main() {
 			estadoLabel := "Disponible"
 			estadoClass := "available"
 			if availableCount == 0 {
-				if changeCount > 0 {
+				if reservedCount > 0 {
+					estadoLabel = "Reservado"
+					estadoClass = "reserved"
+				} else if changeCount > 0 {
 					estadoLabel = "Cambio"
 					estadoClass = "swapped"
+				} else if damagedCount > 0 {
+					estadoLabel = "Dañado"
+					estadoClass = "damaged"
 				} else {
 					estadoLabel = "Vendido"
 					estadoClass = "sold"
@@ -1479,6 +1535,161 @@ func main() {
 		if err := tmpl.ExecuteTemplate(w, "inventario.html", data); err != nil {
 			http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
 		}
+	})
+
+	mux.HandleFunc("/inventario/reservar", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONError := func(status int, message string) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
+		}
+
+		if r.Method != http.MethodPost {
+			writeJSONError(http.StatusMethodNotAllowed, "Método no permitido.")
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			writeJSONError(http.StatusBadRequest, "No se pudo leer el formulario.")
+			return
+		}
+		productID := strings.TrimSpace(r.FormValue("producto_id"))
+		qtyValue := strings.TrimSpace(r.FormValue("cantidad"))
+		nota := strings.TrimSpace(r.FormValue("nota"))
+		qty, err := strconv.Atoi(qtyValue)
+		if productID == "" || err != nil || qty <= 0 {
+			writeJSONError(http.StatusBadRequest, "Datos inválidos.")
+			return
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo iniciar la transacción.")
+			return
+		}
+		defer tx.Rollback()
+
+		unitIDs, err := selectAndMarkUnitsByStatus(tx, productID, qty, "Reservada")
+		if err != nil {
+			if err == errInsufficientStock {
+				writeJSONError(http.StatusBadRequest, "No hay stock disponible suficiente para reservar.")
+				return
+			}
+			writeJSONError(http.StatusInternalServerError, "No se pudieron reservar unidades.")
+			return
+		}
+
+		now := time.Now().Format(time.RFC3339)
+		if err := logMovimientos(tx, productID, unitIDs, "reservar", nota, userFromContext(r), now); err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo registrar el movimiento.")
+			return
+		}
+
+		if err := tx.Commit(); err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo confirmar la transacción.")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "producto_id": productID, "cantidad": qty})
+	})
+
+	mux.HandleFunc("/inventario/dano", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONError := func(status int, message string) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
+		}
+
+		if r.Method != http.MethodPost {
+			writeJSONError(http.StatusMethodNotAllowed, "Método no permitido.")
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			writeJSONError(http.StatusBadRequest, "No se pudo leer el formulario.")
+			return
+		}
+		productID := strings.TrimSpace(r.FormValue("producto_id"))
+		qtyValue := strings.TrimSpace(r.FormValue("cantidad"))
+		nota := strings.TrimSpace(r.FormValue("nota"))
+		qty, err := strconv.Atoi(qtyValue)
+		if productID == "" || err != nil || qty <= 0 {
+			writeJSONError(http.StatusBadRequest, "Datos inválidos.")
+			return
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo iniciar la transacción.")
+			return
+		}
+		defer tx.Rollback()
+
+		unitIDs, err := selectAndMarkUnitsByStatus(tx, productID, qty, "Danada")
+		if err != nil {
+			if err == errInsufficientStock {
+				writeJSONError(http.StatusBadRequest, "No hay stock disponible suficiente.")
+				return
+			}
+			writeJSONError(http.StatusInternalServerError, "No se pudo registrar el daño.")
+			return
+		}
+
+		now := time.Now().Format(time.RFC3339)
+		if err := logMovimientos(tx, productID, unitIDs, "dano", nota, userFromContext(r), now); err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo registrar el movimiento.")
+			return
+		}
+
+		if err := tx.Commit(); err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo confirmar la transacción.")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "producto_id": productID, "cantidad": qty})
+	})
+
+	mux.HandleFunc("/productos/historial", func(w http.ResponseWriter, r *http.Request) {
+		productID := strings.TrimSpace(r.URL.Query().Get("producto_id"))
+		if productID == "" {
+			http.Error(w, "Falta producto_id", http.StatusBadRequest)
+			return
+		}
+
+		type movimientoRow struct {
+			UnidadID string `json:"unidad_id"`
+			Tipo     string `json:"tipo"`
+			Nota     string `json:"nota"`
+			Usuario  string `json:"usuario"`
+			Fecha    string `json:"fecha"`
+		}
+		rows, err := db.Query(`
+			SELECT unidad_id, tipo, nota, usuario, fecha
+			FROM movimientos
+			WHERE producto_id = ?
+			ORDER BY fecha DESC
+			LIMIT 60
+		`, productID)
+		if err != nil {
+			http.Error(w, "Error al consultar historial", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		movs := []movimientoRow{}
+		for rows.Next() {
+			var m movimientoRow
+			if err := rows.Scan(&m.UnidadID, &m.Tipo, &m.Nota, &m.Usuario, &m.Fecha); err != nil {
+				http.Error(w, "Error al leer historial", http.StatusInternalServerError)
+				return
+			}
+			movs = append(movs, m)
+		}
+		if err := rows.Err(); err != nil {
+			http.Error(w, "Error al procesar historial", http.StatusInternalServerError)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "producto_id": productID, "movimientos": movs})
 	})
 
 	mux.HandleFunc("/venta/new", func(w http.ResponseWriter, r *http.Request) {
@@ -1627,7 +1838,7 @@ func main() {
 			return
 		}
 
-		_, err = selectAndMarkUnitsSold(tx, productID, cantidad)
+		soldUnitIDs, err := selectAndMarkUnitsSold(tx, productID, cantidad)
 		if err != nil {
 			if rollbackErr := tx.Rollback(); rollbackErr != nil {
 				log.Printf("rollback venta: %v", rollbackErr)
@@ -1653,11 +1864,19 @@ func main() {
 			http.Error(w, "Error al actualizar inventario", http.StatusInternalServerError)
 			return
 		}
+		now := time.Now().Format(time.RFC3339)
+		if err := logMovimientos(tx, productID, soldUnitIDs, "venta", notas, currentUser, now); err != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				log.Printf("rollback venta log: %v", rollbackErr)
+			}
+			http.Error(w, "Error al registrar movimiento de venta", http.StatusInternalServerError)
+			return
+		}
 
 		if _, err := tx.Exec(
 			`INSERT INTO ventas (producto_id, cantidad, precio_final, metodo_pago, notas, fecha)
 			VALUES (?, ?, ?, ?, ?, ?)`,
-			productID, cantidad, precioFinal, metodoPago, notas, time.Now().Format(time.RFC3339),
+			productID, cantidad, precioFinal, metodoPago, notas, now,
 		); err != nil {
 			if rollbackErr := tx.Rollback(); rollbackErr != nil {
 				log.Printf("rollback venta insert: %v", rollbackErr)
@@ -1855,6 +2074,16 @@ func main() {
 			return
 		}
 
+		now := time.Now().Format(time.RFC3339)
+		notaMovimiento := strings.TrimSpace(fmt.Sprintf("%s %s", personaCambio, notas))
+		if err := logMovimientos(tx, productID, salientesMarcadas, "cambio_salida", notaMovimiento, currentUser, now); err != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				log.Printf("rollback cambio log: %v", rollbackErr)
+			}
+			http.Error(w, "Error al registrar movimiento del cambio", http.StatusInternalServerError)
+			return
+		}
+
 		entrantes := []string{}
 		if incomingMode == "existing" {
 			entrantes = buildEntranteIDs("ENT-"+incomingExistingID, incomingExistingQty)
@@ -1869,7 +2098,6 @@ func main() {
 			incomingQty = incomingNewQty
 		}
 
-		now := time.Now().Format(time.RFC3339)
 		for i := 0; i < incomingQty; i++ {
 			unitID := fmt.Sprintf("U-%d-%d", time.Now().UnixNano(), i+1)
 			if _, err := tx.Exec(
