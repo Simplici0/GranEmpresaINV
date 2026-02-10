@@ -278,6 +278,17 @@
       font-size: 12px;
       margin-top: 6px;
     }
+
+    .hint {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    .hint strong {
+      color: var(--text);
+    }
   </style>
 </head>
 <body>
@@ -291,7 +302,12 @@
       <div class="row">
         <div>
           <label for="producto_id">Producto</label>
-          <input id="producto_id" name="producto_id" type="text" value="{{.ProductoID}}" readonly />
+          <select id="producto_id" name="producto_id">
+            {{range .Productos}}
+              <option value="{{.ID}}" {{if eq $.ProductoID .ID}}selected{{end}}>{{.Name}} ({{.ID}})</option>
+            {{end}}
+          </select>
+          <div class="hint" id="stock-hint"></div>
           {{with index .Errors "producto_id"}}
             <div class="error">{{.}}</div>
           {{end}}
@@ -338,5 +354,43 @@
       </form>
     </div>
   </main>
+
+  <script>
+    const stockByProduct = {
+      {{- range $k, $v := .StockByProd }}
+        "{{js $k}}": {{ $v }},
+      {{- end }}
+    };
+
+    const productSelect = document.getElementById("producto_id");
+    const qtyInput = document.getElementById("cantidad");
+    const stockHint = document.getElementById("stock-hint");
+    const submitBtn = document.querySelector("button.primary[type='submit']");
+
+    const syncStock = () => {
+      const productId = productSelect?.value || "";
+      const available = Number(stockByProduct[productId] ?? 0);
+
+      if (qtyInput) {
+        qtyInput.max = String(Math.max(available, 1));
+        const current = parseInt(qtyInput.value || "1", 10);
+        if (!Number.isNaN(current) && available > 0 && current > available) {
+          qtyInput.value = String(available);
+        }
+      }
+
+      if (stockHint) {
+        stockHint.innerHTML = `Disponibles: <strong>${available}</strong>`;
+      }
+
+      if (submitBtn) {
+        submitBtn.disabled = available <= 0;
+        submitBtn.title = available <= 0 ? "No hay stock disponible" : "";
+      }
+    };
+
+    if (productSelect) productSelect.addEventListener("change", syncStock);
+    syncStock();
+  </script>
 </body>
 </html>

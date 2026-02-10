@@ -29,6 +29,7 @@ type inventoryPageData struct {
 	Subtitle    string
 	RoutePrefix string
 	Flash       string
+	MetodoPagos []string
 	Products    []inventoryProduct
 	CurrentUser *User
 }
@@ -411,6 +412,32 @@ func availableUnitsByProduct(db *sql.DB, productID string) ([]unitOption, error)
 		return nil, err
 	}
 	return units, nil
+}
+
+func availableCountsByProduct(db *sql.DB) (map[string]int, error) {
+	rows, err := db.Query(`
+		SELECT producto_id, COUNT(*)
+		FROM unidades
+		WHERE estado IN ('Disponible', 'available')
+		GROUP BY producto_id`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := map[string]int{}
+	for rows.Next() {
+		var id string
+		var count int
+		if err := rows.Scan(&id, &count); err != nil {
+			return nil, err
+		}
+		out[id] = count
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 func formatCurrency(value float64) string {
@@ -968,6 +995,9 @@ func main() {
 		Title       string
 		Subtitle    string
 		ProductoID  string
+		ProductoNom string
+		Productos   []productOption
+		StockByProd map[string]int
 		Cantidad    int
 		PrecioFinal string
 		MetodoPago  string
@@ -982,6 +1012,7 @@ func main() {
 		Title       string
 		Subtitle    string
 		ProductoID  string
+		ProductoNom string
 		Cantidad    int
 		PrecioFinal string
 		MetodoPago  string
@@ -1937,6 +1968,7 @@ func main() {
 			Subtitle:    "Control por producto con ventas, cambios y auditoría de unidades en FIFO.",
 			RoutePrefix: "",
 			Flash:       flash,
+			MetodoPagos: paymentMethods,
 			Products:    inventoryProducts,
 			CurrentUser: currentUser,
 		}
@@ -2102,7 +2134,16 @@ func main() {
 
 	mux.HandleFunc("/venta/new", func(w http.ResponseWriter, r *http.Request) {
 		currentUser := userFromContext(r)
+
+		productsMu.RLock()
+		productsSnapshot := make([]productOption, len(products))
+		copy(productsSnapshot, products)
+		productsMu.RUnlock()
+
 		productID := r.URL.Query().Get("producto_id")
+		if productID == "" && len(productsSnapshot) > 0 {
+			productID = productsSnapshot[0].ID
+		}
 		cantidad := 1
 		if qty := r.URL.Query().Get("cantidad"); qty != "" {
 			if parsed, err := strconv.Atoi(qty); err == nil && parsed > 0 {
@@ -2110,9 +2151,27 @@ func main() {
 			}
 		}
 
+		selectedProduct, ok := findProduct(productsSnapshot, productID)
+		if !ok && len(productsSnapshot) > 0 {
+			selectedProduct = productsSnapshot[0]
+			productID = selectedProduct.ID
+		}
+
+		stockByProd, err := availableCountsByProduct(db)
+		if err != nil {
+			http.Error(w, "Error al consultar stock", http.StatusInternalServerError)
+			return
+		}
+		if available := stockByProd[productID]; available > 0 && cantidad > available {
+			cantidad = available
+		}
+
 		data := ventaFormData{
 			Title:       "Registrar venta",
 			ProductoID:  productID,
+			ProductoNom: selectedProduct.Name,
+			Productos:   productsSnapshot,
+			StockByProd: stockByProd,
 			Cantidad:    cantidad,
 			MetodoPago:  paymentMethods[0],
 			MetodoPagos: paymentMethods,
@@ -2179,12 +2238,43 @@ func main() {
 
 	mux.HandleFunc("/venta", func(w http.ResponseWriter, r *http.Request) {
 		currentUser := userFromContext(r)
+		wantsJSON := strings.Contains(r.Header.Get("Accept"), "application/json") || r.Header.Get("X-Requested-With") == "XMLHttpRequest"
+
+		writeJSONError := func(status int, message string, fields map[string]string) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":     false,
+				"error":  message,
+				"fields": fields,
+			})
+		}
+
 		if r.Method != http.MethodPost {
 			http.Redirect(w, r, "/venta/new", http.StatusSeeOther)
 			return
 		}
 
+		productsMu.RLock()
+		productsSnapshot := make([]productOption, len(products))
+		copy(productsSnapshot, products)
+		productsMu.RUnlock()
+
+		stockByProd, err := availableCountsByProduct(db)
+		if err != nil {
+			if wantsJSON {
+				writeJSONError(http.StatusInternalServerError, "Error al consultar stock.", nil)
+				return
+			}
+			http.Error(w, "Error al consultar stock", http.StatusInternalServerError)
+			return
+		}
+
 		if err := r.ParseForm(); err != nil {
+			if wantsJSON {
+				writeJSONError(http.StatusBadRequest, "No se pudo leer el formulario.", nil)
+				return
+			}
 			http.Error(w, "No se pudo leer el formulario", http.StatusBadRequest)
 			return
 		}
@@ -2194,6 +2284,11 @@ func main() {
 		precioValue := r.FormValue("precio_final_venta")
 		metodoPago := r.FormValue("metodo_pago")
 		notas := r.FormValue("notas")
+
+		selectedProduct, ok := findProduct(productsSnapshot, productID)
+		if !ok && len(productsSnapshot) > 0 {
+			selectedProduct = productsSnapshot[0]
+		}
 
 		errors := make(map[string]string)
 		cantidad, err := strconv.Atoi(qtyValue)
@@ -2220,10 +2315,31 @@ func main() {
 			errors["metodo_pago"] = "Selecciona un método de pago válido."
 		}
 
+		if productID != "" && cantidad > 0 {
+			if available := stockByProd[productID]; available > 0 && cantidad > available {
+				errors["cantidad"] = "No hay stock disponible suficiente para completar la venta."
+			}
+		}
+
 		if len(errors) > 0 {
+			if wantsJSON {
+				message := "Datos inválidos."
+				// Pick the first field error as a message for the modal.
+				for _, key := range []string{"producto_id", "cantidad", "precio_final_venta", "metodo_pago"} {
+					if msg, ok := errors[key]; ok && msg != "" {
+						message = msg
+						break
+					}
+				}
+				writeJSONError(http.StatusBadRequest, message, errors)
+				return
+			}
 			data := ventaFormData{
 				Title:       "Registrar venta",
 				ProductoID:  productID,
+				ProductoNom: selectedProduct.Name,
+				Productos:   productsSnapshot,
+				StockByProd: stockByProd,
 				Cantidad:    cantidad,
 				PrecioFinal: precioValue,
 				MetodoPago:  metodoPago,
@@ -2242,6 +2358,10 @@ func main() {
 		precioFinal, _ := strconv.ParseFloat(precioValue, 64)
 		tx, err := db.Begin()
 		if err != nil {
+			if wantsJSON {
+				writeJSONError(http.StatusInternalServerError, "Error al procesar la venta.", nil)
+				return
+			}
 			http.Error(w, "Error al procesar la venta", http.StatusInternalServerError)
 			return
 		}
@@ -2252,6 +2372,12 @@ func main() {
 				log.Printf("rollback venta: %v", rollbackErr)
 			}
 			if err == errInsufficientStock {
+				if wantsJSON {
+					writeJSONError(http.StatusBadRequest, "No hay stock disponible suficiente para completar la venta.", map[string]string{
+						"cantidad": "No hay stock disponible suficiente para completar la venta.",
+					})
+					return
+				}
 				errors["cantidad"] = "No hay stock disponible suficiente para completar la venta."
 				data := ventaFormData{
 					Title:       "Registrar venta",
@@ -2269,6 +2395,10 @@ func main() {
 				}
 				return
 			}
+			if wantsJSON {
+				writeJSONError(http.StatusInternalServerError, "Error al actualizar inventario.", nil)
+				return
+			}
 			http.Error(w, "Error al actualizar inventario", http.StatusInternalServerError)
 			return
 		}
@@ -2276,6 +2406,10 @@ func main() {
 		if err := logMovimientos(tx, productID, soldUnitIDs, "venta", notas, currentUser, now); err != nil {
 			if rollbackErr := tx.Rollback(); rollbackErr != nil {
 				log.Printf("rollback venta log: %v", rollbackErr)
+			}
+			if wantsJSON {
+				writeJSONError(http.StatusInternalServerError, "Error al registrar movimiento de venta.", nil)
+				return
 			}
 			http.Error(w, "Error al registrar movimiento de venta", http.StatusInternalServerError)
 			return
@@ -2289,18 +2423,39 @@ func main() {
 			if rollbackErr := tx.Rollback(); rollbackErr != nil {
 				log.Printf("rollback venta insert: %v", rollbackErr)
 			}
+			if wantsJSON {
+				writeJSONError(http.StatusInternalServerError, "Error al registrar la venta.", nil)
+				return
+			}
 			http.Error(w, "Error al registrar la venta", http.StatusInternalServerError)
 			return
 		}
 
 		if err := tx.Commit(); err != nil {
+			if wantsJSON {
+				writeJSONError(http.StatusInternalServerError, "Error al confirmar la venta.", nil)
+				return
+			}
 			http.Error(w, "Error al confirmar la venta", http.StatusInternalServerError)
+			return
+		}
+
+		if wantsJSON {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":           true,
+				"producto_id":  productID,
+				"producto_nom": selectedProduct.Name,
+				"cantidad":     cantidad,
+				"mensaje":      "Venta registrada correctamente.",
+			})
 			return
 		}
 
 		confirmData := ventaConfirmData{
 			Title:       "Venta registrada",
 			ProductoID:  productID,
+			ProductoNom: selectedProduct.Name,
 			Cantidad:    cantidad,
 			PrecioFinal: precioValue,
 			MetodoPago:  metodoPago,

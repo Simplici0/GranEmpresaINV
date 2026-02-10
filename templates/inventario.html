@@ -814,6 +814,59 @@
     </div>
   </div>
 
+  <div id="sale-modal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="sale-title">
+      <div class="modal-header">
+        <div>
+          <h3 id="sale-title">Registrar venta</h3>
+          <div id="sale-subtitle" class="modal-subtitle"></div>
+        </div>
+        <button type="button" class="modal-close" data-modal-close aria-label="Cerrar">✕</button>
+      </div>
+      <div class="modal-body">
+        <form id="sale-form" class="modal-grid">
+          <div id="sale-error" class="modal-error" hidden></div>
+
+          <div class="modal-row">
+            <div>
+              <label for="sale-qty">Cantidad</label>
+              <input id="sale-qty" name="cantidad" type="number" min="1" step="1" value="1" />
+            </div>
+            <div>
+              <label for="sale-max">Disponible</label>
+              <input id="sale-max" type="text" value="-" disabled />
+            </div>
+          </div>
+
+          <div class="modal-row">
+            <div>
+              <label for="sale-price">Precio unitario</label>
+              <input id="sale-price" name="precio_final_venta" type="number" min="0" step="0.01" placeholder="0.00" />
+            </div>
+            <div>
+              <label for="sale-method">Método de pago</label>
+              <select id="sale-method" name="metodo_pago">
+                {{range .MetodoPagos}}
+                  <option value="{{.}}">{{.}}</option>
+                {{end}}
+              </select>
+            </div>
+          </div>
+
+          <div>
+            <label for="sale-notes">Notas</label>
+            <textarea id="sale-notes" name="notas" placeholder="Observaciones de la venta"></textarea>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" class="secondary" data-modal-close>Cancelar</button>
+            <button id="sale-submit" type="submit" class="primary">Confirmar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
   <script>
     const products = [
       {{- range .Products }}
@@ -1054,12 +1107,24 @@
     const actionNoteLabel = document.getElementById("action-note-label");
     const actionSubmit = document.getElementById("action-submit");
 
+    const saleModal = document.getElementById("sale-modal");
+    const saleSubtitle = document.getElementById("sale-subtitle");
+    const saleForm = document.getElementById("sale-form");
+    const saleQty = document.getElementById("sale-qty");
+    const saleMax = document.getElementById("sale-max");
+    const salePrice = document.getElementById("sale-price");
+    const saleMethod = document.getElementById("sale-method");
+    const saleNotes = document.getElementById("sale-notes");
+    const saleError = document.getElementById("sale-error");
+    const saleSubmit = document.getElementById("sale-submit");
+
     const openModal = (backdrop, subtitleText) => {
       if (!backdrop) return;
       backdrop.classList.add("open");
       backdrop.setAttribute("aria-hidden", "false");
       if (subtitleText && backdrop === historyModal && historySubtitle) historySubtitle.textContent = subtitleText;
       if (subtitleText && backdrop === actionModal && actionSubtitle) actionSubtitle.textContent = subtitleText;
+      if (subtitleText && backdrop === saleModal && saleSubtitle) saleSubtitle.textContent = subtitleText;
       document.body.style.overflow = "hidden";
     };
 
@@ -1084,6 +1149,7 @@
     };
 
     let actionContext = null;
+    let saleContext = null;
     let openMenuContext = null;
 
     const positionMenuPanel = (button, panel) => {
@@ -1134,6 +1200,38 @@
       setActionError("");
       openModal(actionModal, subtitle);
       if (actionQty) actionQty.focus();
+    };
+
+    const setSaleError = (msg) => {
+      if (!saleError) return;
+      if (!msg) {
+        saleError.hidden = true;
+        saleError.textContent = "";
+        return;
+      }
+      saleError.hidden = false;
+      saleError.textContent = msg;
+    };
+
+    const openSaleModal = ({ product, productId, maxQty, defaultQty }) => {
+      saleContext = { productId, maxQty, productName: product?.name || "" };
+      setSaleError("");
+      if (saleMax) saleMax.value = maxQty >= 0 ? String(maxQty) : "-";
+      if (saleQty) {
+        saleQty.max = String(Math.max(1, maxQty));
+        saleQty.value = String(Math.min(Math.max(1, defaultQty || 1), Math.max(1, maxQty)));
+      }
+      if (salePrice) salePrice.value = "";
+      if (saleNotes) saleNotes.value = "";
+      if (saleMethod && saleMethod.options.length > 0) {
+        saleMethod.selectedIndex = 0;
+      }
+      if (saleSubmit) saleSubmit.disabled = maxQty < 1;
+      if (maxQty < 1) {
+        setSaleError("No hay stock disponible para vender.");
+      }
+      openModal(saleModal, product ? `${product.name} · SKU ${productId}` : `SKU ${productId}`);
+      if (saleQty && maxQty >= 1) saleQty.focus();
     };
 
     const showHistory = async (product) => {
@@ -1251,6 +1349,64 @@
         } catch (err) {
           setActionError(err?.message || "No se pudo completar la acción.");
           if (actionSubmit) actionSubmit.disabled = false;
+        }
+      });
+    }
+
+    if (saleForm) {
+      saleForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!saleContext) return;
+
+        const qty = parseInt(saleQty?.value || "0", 10);
+        const price = String(salePrice?.value || "").trim();
+        const method = String(saleMethod?.value || "").trim();
+        const notes = String(saleNotes?.value || "").trim();
+
+        if (Number.isNaN(qty) || qty < 1 || qty > saleContext.maxQty) {
+          setSaleError("Cantidad inválida.");
+          return;
+        }
+        if (!price || Number(price) <= 0) {
+          setSaleError("Ingresa un precio válido.");
+          return;
+        }
+        if (!method) {
+          setSaleError("Selecciona un método de pago.");
+          return;
+        }
+
+        if (saleSubmit) saleSubmit.disabled = true;
+        setSaleError("");
+
+        try {
+          const body = new URLSearchParams({
+            producto_id: saleContext.productId,
+            cantidad: String(qty),
+            precio_final_venta: price,
+            metodo_pago: method,
+            notas: notes
+          });
+
+          const resp = await fetch("/venta", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+              "Accept": "application/json",
+              "X-Requested-With": "XMLHttpRequest"
+            },
+            body
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || !data.ok) {
+            throw new Error(data.error || "No se pudo registrar la venta.");
+          }
+
+          closeModal(saleModal);
+          window.location.href = `/inventario?mensaje=${encodeURIComponent(data.mensaje || "Venta registrada correctamente.")}`;
+        } catch (err) {
+          setSaleError(err?.message || "No se pudo registrar la venta.");
+          if (saleSubmit) saleSubmit.disabled = false;
         }
       });
     }
@@ -1374,17 +1530,18 @@
           return;
         }
 
-        const params = new URLSearchParams({
-          producto_id: productId,
-          cantidad: String(quantity)
-        });
-
         if (action === "sell") {
-          window.location.href = `/venta/new?${params.toString()}`;
+          const product = products.find((p) => p.id === productId);
+          closeOpenMenuPanels();
+          openSaleModal({ product, productId, maxQty, defaultQty: quantity });
           return;
         }
 
         if (action === "swap") {
+          const params = new URLSearchParams({
+            producto_id: productId,
+            cantidad: String(quantity)
+          });
           window.location.href = `/cambio/new?${params.toString()}`;
           return;
         }

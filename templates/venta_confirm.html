@@ -222,7 +222,13 @@
     <div class="summary">
       <div>
         <strong>Producto</strong>
-        <span>{{.ProductoID}}</span>
+        <span>
+          {{if .ProductoNom}}
+            {{.ProductoNom}} ({{.ProductoID}})
+          {{else}}
+            {{.ProductoID}}
+          {{end}}
+        </span>
       </div>
       <div>
         <strong>Cantidad</strong>
