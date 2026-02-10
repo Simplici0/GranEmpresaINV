@@ -361,9 +361,9 @@
     }
 
     .menu-panel {
-      position: absolute;
-      right: 0;
-      top: calc(100% + 6px);
+      position: fixed;
+      left: 0;
+      top: 0;
       display: none;
       min-width: 190px;
       background: var(--card);
@@ -371,7 +371,7 @@
       border-radius: 10px;
       box-shadow: 0 10px 24px rgba(0, 0, 0, 0.08);
       padding: 6px;
-      z-index: 20;
+      z-index: 60;
     }
 
     .menu-panel.open {
@@ -1084,6 +1084,40 @@
     };
 
     let actionContext = null;
+    let openMenuContext = null;
+
+    const positionMenuPanel = (button, panel) => {
+      if (!button || !panel) return;
+      const padding = 12;
+      const gap = 8;
+
+      // Ensure we can measure the panel size.
+      const btnRect = button.getBoundingClientRect();
+      const panelRect = panel.getBoundingClientRect();
+
+      let top = btnRect.bottom + gap;
+      // Flip upward if it would overflow the viewport.
+      if (top + panelRect.height > window.innerHeight - padding) {
+        top = btnRect.top - panelRect.height - gap;
+      }
+      top = Math.max(padding, Math.min(top, window.innerHeight - padding - panelRect.height));
+
+      // Align panel's right edge to the button's right edge (like "right: 0" used to do).
+      let left = btnRect.right - panelRect.width;
+      left = Math.max(padding, Math.min(left, window.innerWidth - padding - panelRect.width));
+
+      panel.style.left = `${Math.round(left)}px`;
+      panel.style.top = `${Math.round(top)}px`;
+    };
+
+    const closeOpenMenuPanels = () => {
+      document.querySelectorAll(".menu-panel.open").forEach((panel) => {
+        panel.classList.remove("open");
+        panel.style.left = "";
+        panel.style.top = "";
+      });
+      openMenuContext = null;
+    };
 
     const openActionModal = ({ title, subtitle, endpoint, productId, maxQty, defaultQty, noteLabel, notePlaceholder }) => {
       actionContext = { endpoint, productId, maxQty };
@@ -1241,15 +1275,17 @@
         const panel = document.getElementById(`menu-${menuId}`);
         if (!panel) return;
         const willOpen = !panel.classList.contains("open");
-        document.querySelectorAll(".menu-panel.open").forEach((openPanel) => openPanel.classList.remove("open"));
+        closeOpenMenuPanels();
         if (willOpen) {
           panel.classList.add("open");
+          positionMenuPanel(menuButton, panel);
+          openMenuContext = { button: menuButton, panel };
         }
         return;
       }
 
       if (!event.target.closest(".menu")) {
-        document.querySelectorAll(".menu-panel.open").forEach((panel) => panel.classList.remove("open"));
+        closeOpenMenuPanels();
       }
 
       const menuAction = event.target.closest("button[data-menu-action]");
@@ -1262,7 +1298,7 @@
         const defaultQty = parseInt(qtyInput?.value || "1", 10) || 1;
 
         // Close any open menu before running the action.
-        document.querySelectorAll(".menu-panel.open").forEach((panel) => panel.classList.remove("open"));
+        closeOpenMenuPanels();
 
         if (action === "reserve") {
           if (!product || !Number.isFinite(maxQty) || maxQty < 1) {
@@ -1366,6 +1402,18 @@
       if (event.key !== "Escape") return;
       document.querySelectorAll(".modal-backdrop.open").forEach((backdrop) => closeModal(backdrop));
     });
+
+    const onViewportChange = () => {
+      if (!openMenuContext) return;
+      if (!openMenuContext.panel.classList.contains("open")) {
+        openMenuContext = null;
+        return;
+      }
+      positionMenuPanel(openMenuContext.button, openMenuContext.panel);
+    };
+
+    window.addEventListener("scroll", onViewportChange, { passive: true });
+    window.addEventListener("resize", onViewportChange);
   </script>
 </body>
 </html>
