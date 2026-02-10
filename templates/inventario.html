@@ -432,6 +432,20 @@
       color: var(--muted);
     }
 
+    .age-pill {
+      display: inline-flex;
+      align-items: center;
+      margin-left: 8px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11px;
+      font-weight: 800;
+      color: #9a3412;
+      background: #fff1e6;
+      border: 1px solid rgba(232, 93, 60, 0.25);
+      vertical-align: middle;
+    }
+
     .units-table th,
     .units-table td {
       font-size: 12px;
@@ -674,6 +688,13 @@
       font-weight: 700;
     }
 
+    .modal-hint {
+      margin-top: 6px;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
     .modal-grid {
       display: grid;
       gap: 12px;
@@ -854,6 +875,12 @@
           </div>
 
           <div>
+            <label for="sale-final">Valor venta final (opcional)</label>
+            <input id="sale-final" name="valor_venta_final" type="number" min="0" step="0.01" placeholder="0.00" />
+            <div class="modal-hint">Si lo llenas, este valor reemplaza (Precio unitario x Cantidad).</div>
+          </div>
+
+          <div>
             <label for="sale-notes">Notas</label>
             <textarea id="sale-notes" name="notas" placeholder="Observaciones de la venta"></textarea>
           </div>
@@ -874,6 +901,9 @@
         id: "{{js .ID}}",
         name: "{{js .Name}}",
         line: "{{js .Line}}",
+        ingreso: "{{js .FechaIngreso}}",
+        ageMonths: {{.MesesEnStock}},
+        ageAlert: {{if .AlertaPermanencia}}true{{else}}false{{end}},
         statusClass: "{{js .EstadoClass}}",
         statusLabel: "{{js .EstadoLabel}}",
         available: {{.Disponible}},
@@ -938,10 +968,9 @@
       }
       const totalProducts = visibleProducts.length;
       const totalUnits = visibleProducts.reduce((acc, product) => acc + product.available, 0);
-      const expiringUnits = visibleProducts.reduce(
-        (acc, product) => acc + product.units.filter((unit) => isExpiringSoon(unit.expires)).length,
-        0
-      );
+      const expiringProducts = visibleProducts.filter(
+        (product) => product.ageAlert || product.units.some((unit) => isExpiringSoon(unit.expires))
+      ).length;
 
       summary.innerHTML = `
         <div class="summary-card">
@@ -954,7 +983,7 @@
         </div>
         <div class="summary-card">
           <h3>Por caducar</h3>
-          <span>${expiringUnits}</span>
+          <span>${expiringProducts}</span>
         </div>
       `;
     };
@@ -985,7 +1014,10 @@
         const matchesLine = lineValue === "all" || product.line === lineValue;
         const matchesSearch =
           product.name.toLowerCase().includes(query) || product.id.toLowerCase().includes(query);
-        const matchesExpiry = !expiryOnly || product.units.some((unit) => isExpiringSoon(unit.expires));
+        const matchesExpiry =
+          !expiryOnly ||
+          product.ageAlert ||
+          product.units.some((unit) => isExpiringSoon(unit.expires));
 
         return matchesStatus && matchesLine && matchesSearch && matchesExpiry;
       });
@@ -1005,7 +1037,10 @@
         const row = document.createElement("tr");
         row.innerHTML = `
           <td>
-            <div class="product-name" data-product="${product.id}">${product.name}</div>
+            <div class="product-name" data-product="${product.id}">
+              ${product.name}
+              ${product.ageAlert ? `<span class="age-pill" title="En stock ${product.ageMonths} meses (fecha ingreso: ${product.ingreso || '-'})">+6 meses</span>` : ``}
+            </div>
             <div class="fifo-note">SKU ${product.id} · ${product.available} disponibles</div>
           </td>
           <td>${product.line}</td>
@@ -1113,10 +1148,16 @@
     const saleQty = document.getElementById("sale-qty");
     const saleMax = document.getElementById("sale-max");
     const salePrice = document.getElementById("sale-price");
+    const saleFinal = document.getElementById("sale-final");
     const saleMethod = document.getElementById("sale-method");
     const saleNotes = document.getElementById("sale-notes");
     const saleError = document.getElementById("sale-error");
     const saleSubmit = document.getElementById("sale-submit");
+    if (salePrice) {
+      salePrice.addEventListener("input", () => {
+        salePrice.dataset.autofilled = "0";
+      });
+    }
 
     const openModal = (backdrop, subtitleText) => {
       if (!backdrop) return;
@@ -1222,6 +1263,7 @@
         saleQty.value = String(Math.min(Math.max(1, defaultQty || 1), Math.max(1, maxQty)));
       }
       if (salePrice) salePrice.value = "";
+      if (saleFinal) saleFinal.value = "";
       if (saleNotes) saleNotes.value = "";
       if (saleMethod && saleMethod.options.length > 0) {
         saleMethod.selectedIndex = 0;
@@ -1232,6 +1274,27 @@
       }
       openModal(saleModal, product ? `${product.name} · SKU ${productId}` : `SKU ${productId}`);
       if (saleQty && maxQty >= 1) saleQty.focus();
+
+      // Auto-fill unit price from DB (if available) without overriding manual edits.
+      if (salePrice) {
+        salePrice.dataset.autofilled = "1";
+        fetch(`/api/productos/precio?${new URLSearchParams({ sku: productId }).toString()}`, {
+          headers: { "Accept": "application/json" }
+        })
+          .then((resp) => resp.json().then((data) => ({ resp, data })).catch(() => ({ resp, data: {} })))
+          .then(({ resp, data }) => {
+            if (!resp.ok || !data.ok) return;
+            const v = Number(data.precio_venta || 0);
+            if (!(v > 0)) return;
+            const current = String(salePrice.value || "").trim();
+            const canAutofill = !current || salePrice.dataset.autofilled === "1";
+            if (canAutofill) {
+              salePrice.value = String(v.toFixed(2));
+              salePrice.dataset.autofilled = "1";
+            }
+          })
+          .catch(() => {});
+      }
     };
 
     const showHistory = async (product) => {
@@ -1360,14 +1423,16 @@
 
         const qty = parseInt(saleQty?.value || "0", 10);
         const price = String(salePrice?.value || "").trim();
+        const finalValue = String(saleFinal?.value || "").trim();
         const method = String(saleMethod?.value || "").trim();
         const notes = String(saleNotes?.value || "").trim();
+        const hasFinal = !!finalValue && Number(finalValue) > 0;
 
         if (Number.isNaN(qty) || qty < 1 || qty > saleContext.maxQty) {
           setSaleError("Cantidad inválida.");
           return;
         }
-        if (!price || Number(price) <= 0) {
+        if (!hasFinal && (!price || Number(price) <= 0)) {
           setSaleError("Ingresa un precio válido.");
           return;
         }
@@ -1384,6 +1449,7 @@
             producto_id: saleContext.productId,
             cantidad: String(qty),
             precio_final_venta: price,
+            valor_venta_final: finalValue,
             metodo_pago: method,
             notas: notes
           });

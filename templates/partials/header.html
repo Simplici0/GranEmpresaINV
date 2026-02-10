@@ -108,14 +108,13 @@
         {{end}}
       </div>
     </div>
-    <nav class="nav-buttons">
-      <a href="/dashboard" class="nav-button">Dashboard</a>
-      <a href="/inventario" class="nav-button">Inventario</a>
-      <a href="/cambio/new" class="nav-button">Registrar cambio</a>
-      {{if .CurrentUser}}
-        {{if eq .CurrentUser.Role "admin"}}
-          <a href="/productos/new" class="nav-button">Nuevo producto</a>
-          <a href="/admin/users" class="nav-button">Usuarios</a>
+	    <nav class="nav-buttons">
+	      <a href="/dashboard" class="nav-button">Dashboard</a>
+	      <a href="/inventario" class="nav-button">Inventario</a>
+	      {{if .CurrentUser}}
+	        {{if eq .CurrentUser.Role "admin"}}
+	          <a href="/productos/new" class="nav-button">Nuevo producto</a>
+	          <a href="/admin/users" class="nav-button">Usuarios</a>
           <a href="/csv/template" class="nav-button" target="_blank">Agregar productos</a>
           <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
         {{end}}

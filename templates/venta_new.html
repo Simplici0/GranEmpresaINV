@@ -342,6 +342,17 @@
         </div>
       </div>
 
+      <div class="row">
+        <div>
+          <label for="valor_venta_final">Valor venta final (opcional)</label>
+          <input id="valor_venta_final" name="valor_venta_final" type="number" step="0.01" min="0" placeholder="0.00" value="{{.ValorVentaFinal}}" />
+          <div class="hint">Si lo llenas, este valor reemplaza (Precio unitario x Cantidad).</div>
+          {{with index .Errors "valor_venta_final"}}
+            <div class="error">{{.}}</div>
+          {{end}}
+        </div>
+      </div>
+
       <div>
         <label for="notas">Notas</label>
         <textarea id="notas" name="notas" placeholder="Observaciones de la venta">{{.Notas}}</textarea>
@@ -366,6 +377,31 @@
     const qtyInput = document.getElementById("cantidad");
     const stockHint = document.getElementById("stock-hint");
     const submitBtn = document.querySelector("button.primary[type='submit']");
+    const priceInput = document.getElementById("precio_final_venta");
+
+    const fetchUnitPrice = async () => {
+      if (!productSelect || !priceInput) return;
+      const sku = String(productSelect.value || "").trim();
+      if (!sku) return;
+      try {
+        const resp = await fetch(`/api/productos/precio?${new URLSearchParams({ sku }).toString()}`, {
+          headers: { "Accept": "application/json" }
+        });
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) return;
+        const v = Number(data.precio_venta || 0);
+        if (!(v > 0)) return;
+        // Don't override manual edits.
+        const current = String(priceInput.value || "").trim();
+        const canAutofill = !current || priceInput.dataset.autofilled === "1";
+        if (canAutofill) {
+          priceInput.value = String(v.toFixed(2));
+          priceInput.dataset.autofilled = "1";
+        }
+      } catch (_) {
+        // ignore
+      }
+    };
 
     const syncStock = () => {
       const productId = productSelect?.value || "";
@@ -389,8 +425,17 @@
       }
     };
 
-    if (productSelect) productSelect.addEventListener("change", syncStock);
+    if (priceInput) {
+      priceInput.addEventListener("input", () => {
+        priceInput.dataset.autofilled = "0";
+      });
+    }
+    if (productSelect) productSelect.addEventListener("change", () => {
+      syncStock();
+      fetchUnitPrice();
+    });
     syncStock();
+    fetchUnitPrice();
   </script>
 </body>
 </html>

@@ -238,6 +238,12 @@
         <strong>Precio unitario</strong>
         <span>{{.PrecioFinal}}</span>
       </div>
+      {{if .ValorVentaFinal}}
+        <div>
+          <strong>Valor venta final</strong>
+          <span>{{.ValorVentaFinal}}</span>
+        </div>
+      {{end}}
       <div>
         <strong>Pago</strong>
         <span>{{.MetodoPago}}</span>

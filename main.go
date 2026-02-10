@@ -39,10 +39,11 @@ type unitOption struct {
 }
 
 type productOption struct {
-	ID    string
-	Name  string
-	Line  string
-	Units []unitOption
+	ID           string
+	Name         string
+	Line         string
+	FechaIngreso string
+	Units        []unitOption
 }
 
 type csvFailedRow struct {
@@ -68,14 +69,17 @@ type inventoryUnit struct {
 }
 
 type inventoryProduct struct {
-	ID           string
-	Name         string
-	Line         string
-	EstadoLabel  string
-	EstadoClass  string
-	Disponible   int
-	Unidades     []inventoryUnit
-	DisabledSale bool
+	ID                string
+	Name              string
+	Line              string
+	EstadoLabel       string
+	EstadoClass       string
+	Disponible        int
+	Unidades          []inventoryUnit
+	DisabledSale      bool
+	FechaIngreso      string
+	MesesEnStock      int
+	AlertaPermanencia bool
 }
 
 var errInsufficientStock = fmt.Errorf("stock insuficiente")
@@ -89,21 +93,21 @@ func upsertProducto(exec sqlExecer, sku, nombre, linea, now string) error {
 	// Other columns (prices, discount, notes) have defaults so manual creation can omit them.
 	_ = now // kept for backwards-compat in case we later add created_at.
 	_, err := exec.Exec(`
-		INSERT INTO productos (sku, id, linea, nombre)
-		VALUES (?, ?, ?, ?)
+		INSERT INTO productos (sku, id, linea, nombre, fecha_ingreso)
+		VALUES (?, ?, ?, ?, COALESCE((SELECT fecha_ingreso FROM productos WHERE sku = ?), CURRENT_TIMESTAMP))
 		ON CONFLICT(sku) DO UPDATE SET
 			id = excluded.id,
 			linea = excluded.linea,
 			nombre = excluded.nombre
-	`, sku, sku, linea, nombre)
+	`, sku, sku, linea, nombre, sku)
 	return err
 }
 
 func seedProductosIfMissing(db *sql.DB, defaults []productOption) error {
 	// Backfill unknown products that already exist in inventory units.
 	if _, err := db.Exec(`
-		INSERT OR IGNORE INTO productos (sku, id, nombre, linea)
-		SELECT DISTINCT producto_id, producto_id, producto_id, 'Sin línea'
+		INSERT OR IGNORE INTO productos (sku, id, nombre, linea, fecha_ingreso)
+		SELECT DISTINCT producto_id, producto_id, producto_id, 'Sin línea', CURRENT_TIMESTAMP
 		FROM unidades
 	`); err != nil {
 		return err
@@ -111,8 +115,8 @@ func seedProductosIfMissing(db *sql.DB, defaults []productOption) error {
 
 	for _, p := range defaults {
 		if _, err := db.Exec(`
-			INSERT OR IGNORE INTO productos (sku, id, nombre, linea)
-			VALUES (?, ?, ?, ?)
+			INSERT OR IGNORE INTO productos (sku, id, nombre, linea, fecha_ingreso)
+			VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
 		`, p.ID, p.ID, p.Name, p.Line); err != nil {
 			return err
 		}
@@ -121,7 +125,7 @@ func seedProductosIfMissing(db *sql.DB, defaults []productOption) error {
 }
 
 func loadProductos(db *sql.DB) ([]productOption, error) {
-	rows, err := db.Query(`SELECT sku, nombre, linea FROM productos ORDER BY sku`)
+	rows, err := db.Query(`SELECT sku, nombre, linea, COALESCE(fecha_ingreso, '') FROM productos ORDER BY sku`)
 	if err != nil {
 		return nil, err
 	}
@@ -130,7 +134,7 @@ func loadProductos(db *sql.DB) ([]productOption, error) {
 	products := []productOption{}
 	for rows.Next() {
 		var p productOption
-		if err := rows.Scan(&p.ID, &p.Name, &p.Line); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Line, &p.FechaIngreso); err != nil {
 			return nil, err
 		}
 		products = append(products, p)
@@ -455,6 +459,46 @@ func parseDateOrDefault(value string, fallback time.Time) time.Time {
 	return parsed
 }
 
+func parseFlexibleTime(value string) (time.Time, bool) {
+	value = strings.TrimSpace(value)
+	if value == "" {
+		return time.Time{}, false
+	}
+	// Common formats used in this app/SQLite:
+	// - RFC3339 for movimiento/unidad timestamps
+	// - "YYYY-MM-DD HH:MM:SS" for SQLite CURRENT_TIMESTAMP
+	// - "YYYY-MM-DD" for date-only values
+	layouts := []string{
+		time.RFC3339,
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+	for _, layout := range layouts {
+		if t, err := time.Parse(layout, value); err == nil {
+			return t, true
+		}
+	}
+	return time.Time{}, false
+}
+
+// monthsBetween returns the number of full months elapsed from start to end.
+func monthsBetween(start, end time.Time) int {
+	start = time.Date(start.Year(), start.Month(), start.Day(), 0, 0, 0, 0, time.UTC)
+	end = time.Date(end.Year(), end.Month(), end.Day(), 0, 0, 0, 0, time.UTC)
+	if end.Before(start) {
+		start, end = end, start
+	}
+	months := int(end.Year()-start.Year())*12 + int(end.Month()-start.Month())
+	// If we haven't reached the "day of month" yet, subtract a month.
+	if end.Day() < start.Day() {
+		months--
+	}
+	if months < 0 {
+		return 0
+	}
+	return months
+}
+
 func statusLabel(estado string) string {
 	labels := map[string]string{
 		"available":  "Disponible",
@@ -680,7 +724,8 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 		precio_consultora REAL NOT NULL DEFAULT 0,
 		descuento REAL NOT NULL DEFAULT 0,
 		anotaciones TEXT NOT NULL DEFAULT '',
-		aplica_caducidad INTEGER NOT NULL DEFAULT 0
+		aplica_caducidad INTEGER NOT NULL DEFAULT 0,
+		fecha_ingreso TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
 	);
 	CREATE INDEX IF NOT EXISTS idx_productos_linea ON productos (linea);
 
@@ -748,6 +793,21 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 		return nil, err
 	}
 	if _, err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_productos_id_unique ON productos(id)"); err != nil {
+		return nil, err
+	}
+
+	// Ensure fecha_ingreso exists for permanence-based alerts.
+	var productosHasFecha int
+	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('productos') WHERE name = 'fecha_ingreso'").Scan(&productosHasFecha); err != nil {
+		return nil, err
+	}
+	if productosHasFecha == 0 {
+		if _, err := db.Exec("ALTER TABLE productos ADD COLUMN fecha_ingreso TEXT"); err != nil {
+			return nil, err
+		}
+	}
+	// Backfill missing timestamps (use CURRENT_TIMESTAMP so we always have a value).
+	if _, err := db.Exec("UPDATE productos SET fecha_ingreso = CURRENT_TIMESTAMP WHERE fecha_ingreso IS NULL OR fecha_ingreso = ''"); err != nil {
 		return nil, err
 	}
 
@@ -992,32 +1052,34 @@ func main() {
 	}
 
 	type ventaFormData struct {
-		Title       string
-		Subtitle    string
-		ProductoID  string
-		ProductoNom string
-		Productos   []productOption
-		StockByProd map[string]int
-		Cantidad    int
-		PrecioFinal string
-		MetodoPago  string
-		Notas       string
-		Errors      map[string]string
-		MetodoPagos []string
-		RoutePrefix string
-		CurrentUser *User
+		Title           string
+		Subtitle        string
+		ProductoID      string
+		ProductoNom     string
+		Productos       []productOption
+		StockByProd     map[string]int
+		Cantidad        int
+		PrecioFinal     string
+		ValorVentaFinal string
+		MetodoPago      string
+		Notas           string
+		Errors          map[string]string
+		MetodoPagos     []string
+		RoutePrefix     string
+		CurrentUser     *User
 	}
 
 	type ventaConfirmData struct {
-		Title       string
-		Subtitle    string
-		ProductoID  string
-		ProductoNom string
-		Cantidad    int
-		PrecioFinal string
-		MetodoPago  string
-		Notas       string
-		CurrentUser *User
+		Title           string
+		Subtitle        string
+		ProductoID      string
+		ProductoNom     string
+		Cantidad        int
+		PrecioFinal     string
+		ValorVentaFinal string
+		MetodoPago      string
+		Notas           string
+		CurrentUser     *User
 	}
 
 	type loginPageData struct {
@@ -1664,7 +1726,7 @@ func main() {
 			}
 		}
 		if !found {
-			products = append(products, productOption{ID: sku, Name: nombre, Line: linea})
+			products = append(products, productOption{ID: sku, Name: nombre, Line: linea, FechaIngreso: time.Now().Format("2006-01-02")})
 		}
 		productsMu.Unlock()
 
@@ -1883,10 +1945,10 @@ func main() {
 		inventoryProducts := make([]inventoryProduct, 0, len(productsSnapshot))
 		for _, product := range productsSnapshot {
 			rows, err := db.Query(`
-				SELECT id, estado, creado_en, caducidad
-				FROM unidades
-				WHERE producto_id = ?
-				ORDER BY creado_en, id`, product.ID)
+					SELECT id, estado, creado_en, caducidad
+					FROM unidades
+					WHERE producto_id = ?
+					ORDER BY creado_en, id`, product.ID)
 			if err != nil {
 				http.Error(w, "Error al consultar unidades", http.StatusInternalServerError)
 				return
@@ -1952,15 +2014,35 @@ func main() {
 				}
 			}
 
+			// Permanence alert: if the product has been in stock for >= 6 months since fecha_ingreso,
+			// flag it for UI and "Accion Caducidad 45 dias" filter.
+			fechaIngresoRaw := strings.TrimSpace(product.FechaIngreso)
+			if fechaIngresoRaw == "" && len(units) > 0 {
+				// Fallback for legacy rows: derive from the oldest unit creation timestamp.
+				fechaIngresoRaw = strings.TrimSpace(units[0].CreadoEn)
+			}
+			mesesEnStock := 0
+			fechaIngresoISO := ""
+			if t, ok := parseFlexibleTime(fechaIngresoRaw); ok {
+				fechaIngresoISO = t.Format("2006-01-02")
+				mesesEnStock = monthsBetween(t, time.Now())
+			} else if len(fechaIngresoRaw) >= 10 {
+				fechaIngresoISO = fechaIngresoRaw[:10]
+			}
+			alertaPermanencia := mesesEnStock >= 6
+
 			inventoryProducts = append(inventoryProducts, inventoryProduct{
-				ID:           product.ID,
-				Name:         product.Name,
-				Line:         product.Line,
-				EstadoLabel:  estadoLabel,
-				EstadoClass:  estadoClass,
-				Disponible:   availableCount,
-				Unidades:     units,
-				DisabledSale: availableCount == 0,
+				ID:                product.ID,
+				Name:              product.Name,
+				Line:              product.Line,
+				EstadoLabel:       estadoLabel,
+				EstadoClass:       estadoClass,
+				Disponible:        availableCount,
+				Unidades:          units,
+				DisabledSale:      availableCount == 0,
+				FechaIngreso:      fechaIngresoISO,
+				MesesEnStock:      mesesEnStock,
+				AlertaPermanencia: alertaPermanencia,
 			})
 		}
 		data := inventoryPageData{
@@ -2132,6 +2214,31 @@ func main() {
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "producto_id": productID, "movimientos": movs})
 	})
 
+	mux.HandleFunc("/api/productos/precio", func(w http.ResponseWriter, r *http.Request) {
+		sku := strings.TrimSpace(r.URL.Query().Get("sku"))
+		if sku == "" {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusBadRequest)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "Falta sku."})
+			return
+		}
+
+		var precioVenta float64
+		err := db.QueryRow(`SELECT COALESCE(precio_venta, 0) FROM productos WHERE sku = ?`, sku).Scan(&precioVenta)
+		if err != nil {
+			if err == sql.ErrNoRows {
+				precioVenta = 0
+			} else {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusInternalServerError)
+				_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "No se pudo consultar el precio."})
+				return
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "sku": sku, "precio_venta": precioVenta})
+	})
+
 	mux.HandleFunc("/venta/new", func(w http.ResponseWriter, r *http.Request) {
 		currentUser := userFromContext(r)
 
@@ -2282,6 +2389,7 @@ func main() {
 		productID := r.FormValue("producto_id")
 		qtyValue := r.FormValue("cantidad")
 		precioValue := r.FormValue("precio_final_venta")
+		valorVentaFinalValue := r.FormValue("valor_venta_final")
 		metodoPago := r.FormValue("metodo_pago")
 		notas := r.FormValue("notas")
 
@@ -2298,10 +2406,32 @@ func main() {
 		if productID == "" {
 			errors["producto_id"] = "Selecciona un producto válido."
 		}
-		if precioValue == "" {
-			errors["precio_final_venta"] = "Ingresa el precio final de venta."
-		} else if parsed, err := strconv.ParseFloat(precioValue, 64); err != nil || parsed <= 0 {
-			errors["precio_final_venta"] = "El precio debe ser un número mayor a 0."
+		precioParsed := 0.0
+		precioOk := false
+		if strings.TrimSpace(precioValue) != "" {
+			if parsed, err := strconv.ParseFloat(strings.TrimSpace(precioValue), 64); err == nil && parsed > 0 {
+				precioParsed = parsed
+				precioOk = true
+			} else {
+				errors["precio_final_venta"] = "El precio debe ser un número mayor a 0."
+			}
+		}
+
+		valorFinalParsed := 0.0
+		valorFinalOk := false
+		if strings.TrimSpace(valorVentaFinalValue) != "" {
+			if parsed, err := strconv.ParseFloat(strings.TrimSpace(valorVentaFinalValue), 64); err == nil && parsed > 0 {
+				valorFinalParsed = parsed
+				valorFinalOk = true
+			} else {
+				errors["valor_venta_final"] = "El valor final debe ser un número mayor a 0."
+			}
+		}
+
+		if !valorFinalOk && !precioOk {
+			if _, ok := errors["precio_final_venta"]; !ok {
+				errors["precio_final_venta"] = "Ingresa el precio unitario o el valor final de la venta."
+			}
 		}
 
 		validMethod := false
@@ -2325,7 +2455,7 @@ func main() {
 			if wantsJSON {
 				message := "Datos inválidos."
 				// Pick the first field error as a message for the modal.
-				for _, key := range []string{"producto_id", "cantidad", "precio_final_venta", "metodo_pago"} {
+				for _, key := range []string{"producto_id", "cantidad", "valor_venta_final", "precio_final_venta", "metodo_pago"} {
 					if msg, ok := errors[key]; ok && msg != "" {
 						message = msg
 						break
@@ -2335,18 +2465,19 @@ func main() {
 				return
 			}
 			data := ventaFormData{
-				Title:       "Registrar venta",
-				ProductoID:  productID,
-				ProductoNom: selectedProduct.Name,
-				Productos:   productsSnapshot,
-				StockByProd: stockByProd,
-				Cantidad:    cantidad,
-				PrecioFinal: precioValue,
-				MetodoPago:  metodoPago,
-				Notas:       notas,
-				Errors:      errors,
-				MetodoPagos: paymentMethods,
-				CurrentUser: currentUser,
+				Title:           "Registrar venta",
+				ProductoID:      productID,
+				ProductoNom:     selectedProduct.Name,
+				Productos:       productsSnapshot,
+				StockByProd:     stockByProd,
+				Cantidad:        cantidad,
+				PrecioFinal:     precioValue,
+				ValorVentaFinal: valorVentaFinalValue,
+				MetodoPago:      metodoPago,
+				Notas:           notas,
+				Errors:          errors,
+				MetodoPagos:     paymentMethods,
+				CurrentUser:     currentUser,
 			}
 			w.WriteHeader(http.StatusBadRequest)
 			if err := tmpl.ExecuteTemplate(w, "venta_new.html", data); err != nil {
@@ -2355,7 +2486,12 @@ func main() {
 			return
 		}
 
-		precioFinal, _ := strconv.ParseFloat(precioValue, 64)
+		precioFinal := precioParsed
+		precioFinalText := precioValue
+		if valorFinalOk && cantidad > 0 {
+			precioFinal = valorFinalParsed / float64(cantidad)
+			precioFinalText = fmt.Sprintf("%.2f", precioFinal)
+		}
 		tx, err := db.Begin()
 		if err != nil {
 			if wantsJSON {
@@ -2380,14 +2516,15 @@ func main() {
 				}
 				errors["cantidad"] = "No hay stock disponible suficiente para completar la venta."
 				data := ventaFormData{
-					Title:       "Registrar venta",
-					ProductoID:  productID,
-					Cantidad:    cantidad,
-					PrecioFinal: precioValue,
-					MetodoPago:  metodoPago,
-					Notas:       notas,
-					Errors:      errors,
-					MetodoPagos: paymentMethods,
+					Title:           "Registrar venta",
+					ProductoID:      productID,
+					Cantidad:        cantidad,
+					PrecioFinal:     precioValue,
+					ValorVentaFinal: valorVentaFinalValue,
+					MetodoPago:      metodoPago,
+					Notas:           notas,
+					Errors:          errors,
+					MetodoPagos:     paymentMethods,
 				}
 				w.WriteHeader(http.StatusBadRequest)
 				if err := tmpl.ExecuteTemplate(w, "venta_new.html", data); err != nil {
@@ -2453,14 +2590,15 @@ func main() {
 		}
 
 		confirmData := ventaConfirmData{
-			Title:       "Venta registrada",
-			ProductoID:  productID,
-			ProductoNom: selectedProduct.Name,
-			Cantidad:    cantidad,
-			PrecioFinal: precioValue,
-			MetodoPago:  metodoPago,
-			Notas:       notas,
-			CurrentUser: currentUser,
+			Title:           "Venta registrada",
+			ProductoID:      productID,
+			ProductoNom:     selectedProduct.Name,
+			Cantidad:        cantidad,
+			PrecioFinal:     precioFinalText,
+			ValorVentaFinal: valorVentaFinalValue,
+			MetodoPago:      metodoPago,
+			Notas:           notas,
+			CurrentUser:     currentUser,
 		}
 		if err := tmpl.ExecuteTemplate(w, "venta_confirm.html", confirmData); err != nil {
 			http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
@@ -2913,7 +3051,7 @@ func main() {
 				}
 			}
 			if !found {
-				products = append(products, productOption{ID: sku, Name: nombre, Line: linea})
+				products = append(products, productOption{ID: sku, Name: nombre, Line: linea, FechaIngreso: time.Now().Format("2006-01-02")})
 				resp.CreatedProducts++
 			} else {
 				resp.UpdatedProducts++
