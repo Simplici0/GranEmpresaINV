@@ -78,6 +78,67 @@ type inventoryProduct struct {
 
 var errInsufficientStock = fmt.Errorf("stock insuficiente")
 
+type sqlExecer interface {
+	Exec(query string, args ...any) (sql.Result, error)
+}
+
+func upsertProducto(exec sqlExecer, sku, nombre, linea, now string) error {
+	// productos table is part of the existing DB schema and uses sku as the primary key.
+	// Other columns (prices, discount, notes) have defaults so manual creation can omit them.
+	_ = now // kept for backwards-compat in case we later add created_at.
+	_, err := exec.Exec(`
+		INSERT INTO productos (sku, id, linea, nombre)
+		VALUES (?, ?, ?, ?)
+		ON CONFLICT(sku) DO UPDATE SET
+			id = excluded.id,
+			linea = excluded.linea,
+			nombre = excluded.nombre
+	`, sku, sku, linea, nombre)
+	return err
+}
+
+func seedProductosIfMissing(db *sql.DB, defaults []productOption) error {
+	// Backfill unknown products that already exist in inventory units.
+	if _, err := db.Exec(`
+		INSERT OR IGNORE INTO productos (sku, id, nombre, linea)
+		SELECT DISTINCT producto_id, producto_id, producto_id, 'Sin línea'
+		FROM unidades
+	`); err != nil {
+		return err
+	}
+
+	for _, p := range defaults {
+		if _, err := db.Exec(`
+			INSERT OR IGNORE INTO productos (sku, id, nombre, linea)
+			VALUES (?, ?, ?, ?)
+		`, p.ID, p.ID, p.Name, p.Line); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func loadProductos(db *sql.DB) ([]productOption, error) {
+	rows, err := db.Query(`SELECT sku, nombre, linea FROM productos ORDER BY sku`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	products := []productOption{}
+	for rows.Next() {
+		var p productOption
+		if err := rows.Scan(&p.ID, &p.Name, &p.Line); err != nil {
+			return nil, err
+		}
+		products = append(products, p)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return products, nil
+}
+
 type cambioFormData struct {
 	Title               string
 	Subtitle            string
@@ -473,11 +534,27 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
+	// Keep FK enforcement disabled during migrations/seeding to avoid startup failures
+	// on legacy schemas; re-enable once we've aligned the schema.
+	if _, err := db.Exec("PRAGMA foreign_keys=OFF"); err != nil {
 		return nil, err
 	}
 
 	schema := `
+	CREATE TABLE IF NOT EXISTS productos (
+		sku TEXT PRIMARY KEY,
+		id TEXT,
+		linea TEXT NOT NULL,
+		nombre TEXT NOT NULL,
+		precio_base REAL NOT NULL DEFAULT 0,
+		precio_venta REAL NOT NULL DEFAULT 0,
+		precio_consultora REAL NOT NULL DEFAULT 0,
+		descuento REAL NOT NULL DEFAULT 0,
+		anotaciones TEXT NOT NULL DEFAULT '',
+		aplica_caducidad INTEGER NOT NULL DEFAULT 0
+	);
+	CREATE INDEX IF NOT EXISTS idx_productos_linea ON productos (linea);
+
 	CREATE TABLE IF NOT EXISTS ventas (
 		id INTEGER PRIMARY KEY AUTOINCREMENT,
 		producto_id TEXT NOT NULL,
@@ -519,6 +596,29 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	`
 
 	if _, err := db.Exec(schema); err != nil {
+		return nil, err
+	}
+
+	// Legacy DB fix: precio_venta_historial has FK REFERENCES productos(id),
+	// but older productos tables may not have the "id" column.
+	var productosHasID int
+	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('productos') WHERE name = 'id'").Scan(&productosHasID); err != nil {
+		return nil, err
+	}
+	if productosHasID == 0 {
+		if _, err := db.Exec("ALTER TABLE productos ADD COLUMN id TEXT"); err != nil {
+			return nil, err
+		}
+	}
+	// Backfill id for existing rows and ensure uniqueness so FKs can reference it.
+	if _, err := db.Exec("UPDATE productos SET id = sku WHERE id IS NULL OR id = ''"); err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_productos_id_unique ON productos(id)"); err != nil {
+		return nil, err
+	}
+
+	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
 		return nil, err
 	}
 
@@ -728,25 +828,29 @@ func main() {
 	}
 
 	var productsMu sync.RWMutex
-	products := []productOption{
+	defaultProducts := []productOption{
 		{
-			ID:    "P-001",
-			Name:  "Proteína Balance 500g",
-			Line:  "Nutrición",
-			Units: []unitOption{{ID: "U-001"}, {ID: "U-002"}, {ID: "U-003"}},
+			ID:   "P-001",
+			Name: "Proteína Balance 500g",
+			Line: "Nutrición",
 		},
 		{
-			ID:    "P-002",
-			Name:  "Crema Regeneradora",
-			Line:  "Dermocosmética",
-			Units: []unitOption{{ID: "U-101"}, {ID: "U-102"}, {ID: "U-103"}, {ID: "U-104"}},
+			ID:   "P-002",
+			Name: "Crema Regeneradora",
+			Line: "Dermocosmética",
 		},
 		{
-			ID:    "P-003",
-			Name:  "Leche Pediátrica Premium",
-			Line:  "Pediatría",
-			Units: []unitOption{{ID: "U-201"}},
+			ID:   "P-003",
+			Name: "Leche Pediátrica Premium",
+			Line: "Pediatría",
 		},
+	}
+	if err := seedProductosIfMissing(db, defaultProducts); err != nil {
+		log.Fatalf("Error al seed de productos: %v", err)
+	}
+	products, err := loadProductos(db)
+	if err != nil {
+		log.Fatalf("Error al cargar productos: %v", err)
 	}
 
 	type ventaFormData struct {
@@ -798,6 +902,13 @@ func main() {
 	type productNewData struct {
 		Title       string
 		Subtitle    string
+		SKU         string
+		Nombre      string
+		Linea       string
+		Cantidad    int
+		AplicaCad   bool
+		Caducidad   string
+		Errors      map[string]string
 		CurrentUser *User
 	}
 
@@ -951,6 +1062,7 @@ func main() {
 		data := productNewData{
 			Title:       "Crear producto",
 			Subtitle:    "Acción reservada para administradores.",
+			Cantidad:    1,
 			CurrentUser: userFromContext(r),
 		}
 		if err := tmpl.ExecuteTemplate(w, "product_new.html", data); err != nil {
@@ -963,7 +1075,117 @@ func main() {
 			http.Redirect(w, r, "/productos/new", http.StatusSeeOther)
 			return
 		}
-		http.Error(w, "Creación de productos pendiente de implementación.", http.StatusNotImplemented)
+
+		if err := r.ParseForm(); err != nil {
+			http.Error(w, "No se pudo leer el formulario", http.StatusBadRequest)
+			return
+		}
+
+		sku := strings.TrimSpace(r.FormValue("sku"))
+		nombre := strings.TrimSpace(r.FormValue("nombre"))
+		linea := strings.TrimSpace(r.FormValue("linea"))
+		cantidadRaw := strings.TrimSpace(r.FormValue("cantidad"))
+		aplicaCad := r.FormValue("aplica_caducidad") != ""
+		caducidad := strings.TrimSpace(r.FormValue("fecha_caducidad"))
+
+		errors := map[string]string{}
+		if sku == "" {
+			errors["sku"] = "SKU obligatorio."
+		}
+		if nombre == "" {
+			errors["nombre"] = "Nombre obligatorio."
+		}
+		if linea == "" {
+			errors["linea"] = "Línea obligatoria."
+		}
+		cantidad, err := strconv.Atoi(cantidadRaw)
+		if err != nil || cantidad <= 0 {
+			errors["cantidad"] = "Cantidad debe ser entero mayor a 0."
+		}
+		if aplicaCad {
+			if caducidad == "" {
+				errors["fecha_caducidad"] = "Fecha caducidad requerida si aplica."
+			} else if _, err := time.Parse("2006-01-02", caducidad); err != nil {
+				errors["fecha_caducidad"] = "Fecha caducidad debe ser YYYY-MM-DD."
+			}
+		} else if caducidad != "" {
+			// If they provided a date, validate it anyway to avoid persisting garbage.
+			if _, err := time.Parse("2006-01-02", caducidad); err != nil {
+				errors["fecha_caducidad"] = "Fecha caducidad debe ser YYYY-MM-DD."
+			}
+		}
+
+		if len(errors) > 0 {
+			w.WriteHeader(http.StatusBadRequest)
+			data := productNewData{
+				Title:       "Crear producto",
+				Subtitle:    "Acción reservada para administradores.",
+				SKU:         sku,
+				Nombre:      nombre,
+				Linea:       linea,
+				Cantidad:    cantidad,
+				AplicaCad:   aplicaCad,
+				Caducidad:   caducidad,
+				Errors:      errors,
+				CurrentUser: userFromContext(r),
+			}
+			if err := tmpl.ExecuteTemplate(w, "product_new.html", data); err != nil {
+				http.Error(w, "Error al renderizar productos", http.StatusInternalServerError)
+			}
+			return
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			http.Error(w, "No se pudo iniciar la transacción", http.StatusInternalServerError)
+			return
+		}
+		defer tx.Rollback()
+
+		now := time.Now().Format(time.RFC3339)
+		if err := upsertProducto(tx, sku, nombre, linea, now); err != nil {
+			http.Error(w, "No se pudo guardar el producto", http.StatusInternalServerError)
+			return
+		}
+
+		baseID := time.Now().UnixNano()
+		for j := 0; j < cantidad; j++ {
+			unitID := fmt.Sprintf("U-%s-%d", sku, baseID+int64(j))
+			var cad any = nil
+			if aplicaCad && caducidad != "" {
+				cad = caducidad
+			}
+			if _, err := tx.Exec(
+				`INSERT INTO unidades (id, producto_id, estado, creado_en, caducidad) VALUES (?, ?, ?, ?, ?)`,
+				unitID, sku, "Disponible", now, cad,
+			); err != nil {
+				http.Error(w, "No se pudieron crear unidades", http.StatusInternalServerError)
+				return
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			http.Error(w, "No se pudo confirmar la transacción", http.StatusInternalServerError)
+			return
+		}
+
+		// Update in-memory catalog (used by inventario/cambio screens).
+		productsMu.Lock()
+		found := false
+		for idx := range products {
+			if products[idx].ID == sku {
+				products[idx].Name = nombre
+				products[idx].Line = linea
+				found = true
+				break
+			}
+		}
+		if !found {
+			products = append(products, productOption{ID: sku, Name: nombre, Line: linea})
+		}
+		productsMu.Unlock()
+
+		http.Redirect(w, r, "/inventario?mensaje=Producto+agregado", http.StatusSeeOther)
 	}))
 
 	mux.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
@@ -1880,6 +2102,14 @@ func main() {
 				continue
 			}
 
+			// Persist catalog.
+			if err := upsertProducto(tx, sku, nombre, linea, now); err != nil {
+				_, _ = tx.Exec("ROLLBACK TO csv_row")
+				_, _ = tx.Exec("RELEASE csv_row")
+				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Error al guardar producto."})
+				continue
+			}
+
 			// Update in-memory catalog (used by inventario/cambio screens).
 			productsMu.Lock()
 			found := false
@@ -1901,6 +2131,7 @@ func main() {
 
 			// Insert units into DB (inventory source of truth).
 			baseID := time.Now().UnixNano()
+			rowFailed := false
 			for j := 0; j < cantidad; j++ {
 				unitID := fmt.Sprintf("U-%s-%d", sku, baseID+int64(j))
 				var caducidad any = nil
@@ -1914,14 +2145,16 @@ func main() {
 					_, _ = tx.Exec("ROLLBACK TO csv_row")
 					_, _ = tx.Exec("RELEASE csv_row")
 					resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Error al crear unidades."})
-					goto nextRow
+					rowFailed = true
+					break
 				}
 				resp.CreatedUnits++
 			}
 
+			if rowFailed {
+				continue
+			}
 			_, _ = tx.Exec("RELEASE csv_row")
-		nextRow:
-			continue
 		}
 
 		if err := tx.Commit(); err != nil {
