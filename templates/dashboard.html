@@ -129,14 +129,112 @@
 
     .page-content {
       padding: 24px 32px 40px;
-      max-width: 1200px;
+      max-width: 1400px;
       margin: 0 auto;
+    }
+
+    .dashboard-toolbar {
+      display: flex;
+      justify-content: flex-end;
+      gap: 12px;
+      align-items: center;
+      margin-bottom: 14px;
+    }
+
+    .range-pill {
+      border: 1px solid var(--border);
+      background: #fbfaf8;
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    details.range-picker {
+      position: relative;
+    }
+
+    details.range-picker summary {
+      list-style: none;
+      cursor: pointer;
+      border: 1px solid var(--border);
+      background: var(--card);
+      border-radius: 999px;
+      padding: 6px 10px;
+      font-size: 12px;
+      font-weight: 800;
+      color: var(--muted);
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+      transition: all 0.2s ease;
+      user-select: none;
+    }
+
+    details.range-picker summary::-webkit-details-marker {
+      display: none;
+    }
+
+    details.range-picker summary:hover {
+      border-color: rgba(232, 93, 60, 0.35);
+      color: var(--text);
+    }
+
+    .range-popover {
+      position: absolute;
+      right: 0;
+      top: calc(100% + 10px);
+      width: min(420px, 92vw);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      box-shadow: var(--shadow);
+      padding: 12px;
+      z-index: 30;
     }
 
     .grid {
       display: grid;
       gap: 20px;
       grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+    }
+
+    .span-full {
+      grid-column: 1 / -1;
+    }
+
+    .card-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: baseline;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+
+    .kpi {
+      display: grid;
+      gap: 2px;
+    }
+
+    .kpi-label {
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--muted);
+      font-weight: 800;
+    }
+
+    .kpi-value {
+      font-size: 26px;
+      font-weight: 900;
+      letter-spacing: -0.02em;
+    }
+
+    .kpi-sub {
+      font-size: 12px;
+      color: var(--muted);
+      font-weight: 700;
     }
 
     .card {
@@ -319,15 +417,115 @@
 
     .pie-wrap {
       display: grid;
-      grid-template-columns: 180px 1fr;
-      gap: 16px;
-      align-items: center;
+      grid-template-columns: 1fr;
+      gap: 14px;
+      align-items: start;
     }
 
-    .pie-legend {
+	    @media (min-width: 820px) {
+	      .pie-wrap {
+	        /* Keep a safe minimum so it won't overflow inside the Resumen split column. */
+	        grid-template-columns: minmax(220px, 420px) minmax(200px, 1fr);
+	        gap: 18px;
+	        align-items: start;
+	      }
+	    }
+
+	    .pie-chart {
+	      width: 100%;
+	      max-width: 420px;
+	      aspect-ratio: 1 / 1;
+	      padding: 14px;
+	      border-radius: 14px;
+	      background: #fbfaf8;
+	      border: 1px solid var(--border);
+	      display: grid;
+	      place-items: center;
+	    }
+
+    .pie-chart svg {
+      width: 100%;
+      height: 100%;
+      display: block;
+    }
+
+	    .pie-legend {
+	      display: grid;
+	      gap: 8px;
+	      font-size: 13px;
+	      padding: 6px 4px;
+	      width: 100%;
+	      min-width: 0;
+	    }
+
+	    .legend-left {
+	      display: inline-flex;
+	      align-items: center;
+	      gap: 8px;
+      min-width: 0;
+    }
+
+    .legend-left div {
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+    }
+
+	    .legend-right {
+	      display: flex;
+	      align-items: baseline;
+	      justify-content: flex-end;
+	      flex-wrap: wrap;
+	      gap: 8px;
+	      line-height: 1.1;
+	      font-weight: 800;
+	      color: var(--text);
+	      text-align: right;
+	      max-width: 100%;
+	    }
+
+    .legend-right small {
+      font-weight: 800;
+      color: var(--muted);
+    }
+
+	    .legend-item {
+	      display: grid;
+	      grid-template-columns: 1fr auto;
+	      gap: 12px;
+	      align-items: center;
+	    }
+
+	    .legend-right {
+	      justify-content: flex-end;
+	    }
+
+    .summary-split {
       display: grid;
-      gap: 8px;
-      font-size: 13px;
+      gap: 18px;
+      grid-template-columns: 1fr;
+    }
+
+    @media (min-width: 980px) {
+      .summary-split {
+        grid-template-columns: 360px 1fr;
+        align-items: start;
+      }
+    }
+
+    .summary-block {
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 16px;
+      background: #fbfaf8;
+    }
+
+    .summary-block h3 {
+      margin: 0 0 12px;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
+      color: var(--muted);
     }
 
     .legend-item {
@@ -355,6 +553,12 @@
       gap: 8px;
       font-size: 12px;
       color: var(--muted);
+    }
+
+    .chart-note {
+      font-size: 12px;
+      color: var(--muted);
+      margin-top: 2px;
     }
 
     .button,
@@ -399,113 +603,362 @@
   {{template "header" .}}
 
   <main class="page-content">
+    <div class="dashboard-toolbar">
+      <span id="dash-range-badge" class="range-pill">{{.RangeStart}} → {{.RangeEnd}} · {{.RangeCount}} ventas</span>
+      <a id="dash-download" class="button" href="/csv/ventas?start_date={{.RangeStart}}&end_date={{.RangeEnd}}" title="Descargar ventas del periodo">Descargar ventas</a>
+      <details class="range-picker" id="dash-range">
+        <summary>Fechas</summary>
+        <div class="range-popover">
+          <form id="dash-range-form" class="range-form" action="/dashboard" method="GET">
+            <div>
+              <label for="start_date">Desde</label>
+              <input id="start_date" name="start_date" type="date" value="{{.RangeStart}}" />
+            </div>
+            <div>
+              <label for="end_date">Hasta</label>
+              <input id="end_date" name="end_date" type="date" value="{{.RangeEnd}}" />
+            </div>
+            <div>
+              <button class="button primary" type="submit">Aplicar</button>
+            </div>
+          </form>
+          <div class="chart-note">El dashboard se actualiza automaticamente al cambiar el rango.</div>
+        </div>
+      </details>
+    </div>
+
     <section class="grid">
-      <article class="card">
-        <h2>Conteo por estado</h2>
-        <div class="state-list">
-          {{range .EstadoConteos}}
-          <a href="{{.Link}}">
-            <div>{{.Estado}}</div>
-            <span class="badge">{{.Cantidad}}</span>
-          </a>
-          {{end}}
+    <article class="card span-full">
+      <div class="card-head">
+        <div>
+          <h2>Línea de tiempo (ventas por día)</h2>
+          <div class="chart-note">Fecha (X) y total ($) (Y). Valores actualizados por rango.</div>
         </div>
-      </article>
-
-      <article class="card">
-        <h2>Ventas totales (rango)</h2>
-        <form class="range-form" action="/dashboard" method="GET">
-          <div>
-            <label for="start_date">Desde</label>
-            <input id="start_date" name="start_date" type="date" value="{{.RangeStart}}" />
-          </div>
-          <div>
-            <label for="end_date">Hasta</label>
-            <input id="end_date" name="end_date" type="date" value="{{.RangeEnd}}" />
-          </div>
-          <div>
-            <button class="button primary" type="submit">Actualizar</button>
-          </div>
-        </form>
-        <div class="range-summary">
-          <div>Rango seleccionado</div>
-          <strong>{{.RangeTotal}}</strong>
-          <div class="badge">{{.RangeStart}} → {{.RangeEnd}} · {{.RangeCount}} ventas</div>
-        </div>
-      </article>
-
-    <article class="card">
-      <h2>Ventas por método de pago</h2>
-      <div class="pie-wrap">
-        <svg viewBox="0 0 120 120" width="180" height="180" role="img" aria-label="Ventas por método de pago">
-          <circle cx="60" cy="60" r="45" fill="none" stroke="#eef2ff" stroke-width="16"></circle>
-          {{range .PieSlices}}
-          <circle cx="60" cy="60" r="45" fill="none" stroke="{{.Color}}" stroke-width="16"
-            stroke-dasharray="{{printf "%.2f" .Percent}} {{printf "%.2f" .Gap}}"
-            stroke-dashoffset="{{printf "%.2f" .Offset}}"
-            transform="rotate(-90 60 60)"></circle>
-          {{end}}
-          <text x="60" y="58" text-anchor="middle" font-size="12" fill="#5c647c">Total</text>
-          <text x="60" y="74" text-anchor="middle" font-size="14" font-weight="600" fill="#1c1f2a">{{.PieTotal}}</text>
-        </svg>
-        <div class="pie-legend">
-          {{range .PieSlices}}
-          <div class="legend-item">
-            <span class="legend-dot" style="background: {{.Color}};"></span>
-            <div>{{.Metodo}} · {{printf "%.0f" .Percent}}%</div>
-          </div>
-          {{end}}
+        <div class="kpi">
+          <div class="kpi-label">Venta total</div>
+          <div id="kpi-total" class="kpi-value">{{.RangeTotal}}</div>
+          <div id="kpi-sub" class="kpi-sub">{{.RangeStart}} → {{.RangeEnd}} · {{.RangeCount}} ventas</div>
         </div>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Método</th>
-            <th>Ventas</th>
-            <th>Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {{range .MetodosPago}}
-          <tr>
-            <td>{{.Metodo}}</td>
-            <td>{{.Cantidad}}</td>
-            <td>{{.Total}}</td>
-          </tr>
-          {{end}}
-        </tbody>
-      </table>
+
+      <svg id="timeline-svg" class="line-chart" viewBox="0 0 1000 260" role="img" aria-label="Histórico de ventas"></svg>
+      <div class="timeline-grid">
+        <div id="timeline-max">Máximo: {{.MaxTimelineText}}</div>
+        <div id="timeline-days">Días visibles: {{len .Timeline}}</div>
+      </div>
+
+      <details id="timeline-details">
+        <summary style="list-style:none; cursor:pointer; font-weight:800; color:var(--primary);">
+          Ver detalle de ventas
+        </summary>
+        <div class="chart-note" style="margin-top:6px;">Detalle por día dentro del rango seleccionado.</div>
+        <table>
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Ventas</th>
+              <th>Total</th>
+            </tr>
+          </thead>
+          <tbody id="timeline-table-body">
+            {{range .Timeline}}
+            <tr>
+              <td>{{.Fecha}}</td>
+              <td>{{.Cantidad}}</td>
+              <td>{{.Total}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </details>
     </article>
 
-    <article class="card">
-      <h2>Línea de tiempo (ventas por día)</h2>
-      <svg class="line-chart" viewBox="0 0 560 180" role="img" aria-label="Histórico de ventas">
-        <polyline fill="none" stroke="#2c6bed" stroke-width="3" points="{{.TimelinePoints}}"></polyline>
-      </svg>
-      <div class="timeline-grid">
-        <div>Máximo: {{.MaxTimelineText}}</div>
-        <div>Días visibles: {{len .Timeline}}</div>
+    <article class="card span-full">
+      <h2>Resumen</h2>
+      <div class="summary-split">
+        <section class="summary-block">
+          <h3>Conteo por estado</h3>
+          <div class="state-list">
+            {{range .EstadoConteos}}
+            <a href="{{.Link}}">
+              <div>{{.Estado}}</div>
+              <span class="badge">{{.Cantidad}}</span>
+            </a>
+            {{end}}
+          </div>
+        </section>
+
+        <section class="summary-block">
+          <h3>Ventas por método de pago</h3>
+          <div class="pie-wrap">
+            <div class="pie-chart">
+              <svg id="pie-svg" viewBox="-10 -10 140 140" role="img" aria-label="Ventas por método de pago"></svg>
+            </div>
+            <div id="pie-legend" class="pie-legend">
+              {{range .PieSlices}}
+              <div class="legend-item">
+                <span class="legend-left">
+                  <span class="legend-dot" style="background: {{.Color}};"></span>
+                  <div>{{.Metodo}}</div>
+                </span>
+                <span class="legend-right">{{.Total}} <small>{{printf "%.0f" .Percent}}%</small></span>
+              </div>
+              {{end}}
+            </div>
+          </div>
+        </section>
       </div>
-      <table>
-        <thead>
-          <tr>
-            <th>Fecha</th>
-            <th>Ventas</th>
-            <th>Total</th>
-          </tr>
-        </thead>
-        <tbody>
-          {{range .Timeline}}
-          <tr>
-            <td>{{.Fecha}}</td>
-            <td>{{.Cantidad}}</td>
-            <td>{{.Total}}</td>
-          </tr>
-          {{end}}
-        </tbody>
-      </table>
     </article>
     </section>
   </main>
+
+  <script>
+    const dash = (() => {
+      const startInput = document.getElementById("start_date");
+      const endInput = document.getElementById("end_date");
+      const rangeBadge = document.getElementById("dash-range-badge");
+      const downloadBtn = document.getElementById("dash-download");
+      const pieSvg = document.getElementById("pie-svg");
+      const pieLegend = document.getElementById("pie-legend");
+      const timelineSvg = document.getElementById("timeline-svg");
+      const timelineMax = document.getElementById("timeline-max");
+      const timelineDays = document.getElementById("timeline-days");
+	      const timelineTableBody = document.getElementById("timeline-table-body");
+	      const kpiTotal = document.getElementById("kpi-total");
+	      const kpiSub = document.getElementById("kpi-sub");
+
+	      const moneyFmt = (() => {
+	        try {
+	          return new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 });
+	        } catch (_) {
+	          return { format: (n) => String(n) };
+	        }
+	      })();
+	      const fmtMoney = (value) => `$${moneyFmt.format(Math.round(Number(value || 0)))}`;
+
+      const setRangeBadge = (start, end, count, totalText) => {
+        if (!rangeBadge) return;
+        const suffix = Number.isFinite(count) ? ` · ${count} ventas` : "";
+        rangeBadge.textContent = `${start} → ${end}${suffix}`;
+        if (kpiSub) kpiSub.textContent = `${start} → ${end}${suffix}`;
+        if (kpiTotal && totalText) kpiTotal.textContent = totalText;
+        if (downloadBtn) downloadBtn.href = `/csv/ventas?${new URLSearchParams({ start_date: start, end_date: end }).toString()}`;
+      };
+
+      const clearEl = (el) => {
+        if (!el) return;
+        while (el.firstChild) el.removeChild(el.firstChild);
+      };
+
+      const el = (name, attrs = {}, text = "") => {
+        const node = document.createElementNS("http://www.w3.org/2000/svg", name);
+        Object.entries(attrs).forEach(([k, v]) => node.setAttribute(k, String(v)));
+        if (text) node.textContent = text;
+        return node;
+      };
+
+	      const renderDonut = (data) => {
+	        if (!pieSvg) return;
+	        clearEl(pieSvg);
+
+	        const slices = Array.isArray(data.pie_slices) ? data.pie_slices : [];
+	        const total = String(data.pie_total || fmtMoney(0));
+	        const longTotal = total.length >= 14;
+
+	        pieSvg.appendChild(el("circle", { cx: 60, cy: 60, r: 45, fill: "none", stroke: "#eef2ff", "stroke-width": 16 }));
+	        slices.forEach((s) => {
+	          pieSvg.appendChild(el("circle", {
+	            cx: 60,
+            cy: 60,
+            r: 45,
+            fill: "none",
+            stroke: s.color || "#2c6bed",
+            "stroke-width": 16,
+            "stroke-dasharray": `${Number(s.percent || 0).toFixed(2)} ${(Number(s.gap || 0)).toFixed(2)}`,
+            "stroke-dashoffset": `${Number(s.offset || 0).toFixed(2)}`,
+            transform: "rotate(-90 60 60)"
+	          }));
+	        });
+	        pieSvg.appendChild(el("text", { x: 60, y: 58, "text-anchor": "middle", "font-size": 12, fill: "#5c647c" }, "Total"));
+	        const totalAttrs = { x: 60, y: 74, "text-anchor": "middle", "font-size": longTotal ? 12 : 14, "font-weight": 700, fill: "#1c1f2a" };
+	        if (longTotal) {
+	          // Avoid clipping when totals are very large.
+	          totalAttrs.textLength = 92;
+	          totalAttrs.lengthAdjust = "spacingAndGlyphs";
+	        }
+	        pieSvg.appendChild(el("text", totalAttrs, total));
+
+	        if (pieLegend) {
+	          pieLegend.innerHTML = "";
+	          slices.forEach((s) => {
+	            const div = document.createElement("div");
+            div.className = "legend-item";
+            const dot = document.createElement("span");
+            dot.className = "legend-dot";
+            dot.style.background = s.color || "#2c6bed";
+            const left = document.createElement("span");
+            left.className = "legend-left";
+            const label = document.createElement("div");
+            const pct = Math.round(Number(s.percent || 0));
+            label.textContent = `${s.metodo || "-"}`;
+            left.appendChild(dot);
+            left.appendChild(label);
+
+            const right = document.createElement("span");
+            right.className = "legend-right";
+            right.innerHTML = `${s.total || "-" } <small>${pct}%</small>`;
+
+            div.appendChild(left);
+            div.appendChild(right);
+            pieLegend.appendChild(div);
+          });
+        }
+      };
+
+      const renderTimeline = (data) => {
+        if (!timelineSvg) return;
+        clearEl(timelineSvg);
+
+        const timeline = Array.isArray(data.timeline) ? data.timeline : [];
+        const maxV = Number(data.max_timeline || 0);
+        const maxText = String(data.max_timeline_text || fmtMoney(maxV));
+
+        if (timelineMax) timelineMax.textContent = `Máximo: ${maxText}`;
+        if (timelineDays) timelineDays.textContent = `Días visibles: ${timeline.length}`;
+
+        const W = 1000;
+        const H = 260;
+        const padL = 72, padR = 22, padT = 18, padB = 44;
+        const plotW = W - padL - padR;
+        const plotH = H - padT - padB;
+        const n = timeline.length;
+        const safeMax = Math.max(maxV, 1);
+
+        const xAt = (i) => padL + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
+        const yAt = (v) => padT + (1 - (v / safeMax)) * plotH;
+
+        // Grid lines (10% opacity).
+        const grid = el("g", { opacity: 0.1 });
+        const ticks = 4;
+        for (let t = 0; t <= ticks; t++) {
+          const v = (safeMax / ticks) * t;
+          const y = yAt(v);
+          grid.appendChild(el("line", { x1: padL, x2: W - padR, y1: y, y2: y, stroke: "#26221f", "stroke-width": 1 }));
+        }
+        timelineSvg.appendChild(grid);
+
+        // Axes.
+        timelineSvg.appendChild(el("line", { x1: padL, x2: padL, y1: padT, y2: H - padB, stroke: "#d9d2cb", "stroke-width": 1 }));
+        timelineSvg.appendChild(el("line", { x1: padL, x2: W - padR, y1: H - padB, y2: H - padB, stroke: "#d9d2cb", "stroke-width": 1 }));
+
+        // Y axis labels (Currency).
+        for (let t = 0; t <= ticks; t++) {
+          const v = (safeMax / ticks) * t;
+          const y = yAt(v);
+          const label = el("text", { x: padL - 10, y: y + 4, "text-anchor": "end", "font-size": 11, fill: "#6f6a65" }, fmtMoney(v));
+          timelineSvg.appendChild(label);
+        }
+
+        // X axis labels (Date).
+        const labelsIdx = n <= 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
+        labelsIdx.forEach((i) => {
+          const x = xAt(i);
+          const d = timeline[i]?.fecha || "";
+          timelineSvg.appendChild(el("text", { x, y: H - padB + 22, "text-anchor": "middle", "font-size": 11, fill: "#6f6a65" }, d));
+        });
+        timelineSvg.appendChild(el("text", { x: W - padR, y: H - 10, "text-anchor": "end", "font-size": 11, fill: "#6f6a65" }, "Fecha"));
+        timelineSvg.appendChild(el("text", { x: padL, y: 12, "text-anchor": "start", "font-size": 11, fill: "#6f6a65" }, "Total ($)"));
+
+        // Line points.
+        const points = timeline.map((p, i) => `${xAt(i).toFixed(1)},${yAt(Number(p.value || 0)).toFixed(1)}`).join(" ");
+        timelineSvg.appendChild(el("polyline", {
+          fill: "none",
+          stroke: "#2c6bed",
+          "stroke-width": 3,
+          "stroke-linecap": "round",
+          "stroke-linejoin": "round",
+          points
+        }));
+
+        // Dots (subtle).
+        const dots = el("g", { opacity: 0.35 });
+        timeline.forEach((p, i) => {
+          dots.appendChild(el("circle", { cx: xAt(i), cy: yAt(Number(p.value || 0)), r: 3.2, fill: "#2c6bed" }));
+        });
+        timelineSvg.appendChild(dots);
+
+        // Labels on key points: last + max.
+        const lastIdx = Math.max(0, n - 1);
+        let maxIdx = 0;
+        let maxVal = -1;
+        timeline.forEach((p, i) => {
+          const v = Number(p.value || 0);
+          if (v > maxVal) {
+            maxVal = v;
+            maxIdx = i;
+          }
+        });
+        const key = new Map();
+        if (n > 0) key.set(lastIdx, { title: "Venta Total", value: timeline[lastIdx].total });
+        if (n > 0) key.set(maxIdx, { title: "Pico", value: timeline[maxIdx].total });
+
+        key.forEach((meta, i) => {
+          const cx = xAt(i);
+          const cy = yAt(Number(timeline[i].value || 0));
+          timelineSvg.appendChild(el("circle", { cx, cy, r: 5.5, fill: "#e85d3c" }));
+          const label = `${meta.title}: ${meta.value || fmtMoney(0)}`;
+          const tx = Math.min(W - padR - 6, Math.max(padL + 6, cx + 10));
+          const ty = Math.max(padT + 12, cy - 10);
+          timelineSvg.appendChild(el("text", { x: tx, y: ty, "font-size": 12, fill: "#26221f", "font-weight": 700 }, label));
+        });
+
+        if (timelineTableBody) {
+          timelineTableBody.innerHTML = "";
+          timeline.forEach((p) => {
+            const tr = document.createElement("tr");
+            tr.innerHTML = `<td>${p.fecha || "-"}</td><td>${p.cantidad ?? "-"}</td><td>${p.total || "-"}</td>`;
+            timelineTableBody.appendChild(tr);
+          });
+        }
+      };
+
+      const applyData = (data) => {
+        if (!data || !data.ok) return;
+        setRangeBadge(data.range_start, data.range_end, data.range_count, data.range_total);
+        renderDonut(data);
+        renderTimeline(data);
+      };
+
+      let pending = null;
+      const schedule = () => {
+        if (pending) clearTimeout(pending);
+        pending = setTimeout(async () => {
+          const start = startInput?.value;
+          const end = endInput?.value;
+          if (!start || !end) return;
+          const qs = new URLSearchParams({ start_date: start, end_date: end });
+          const url = `/dashboard/data?${qs.toString()}`;
+          try {
+            const resp = await fetch(url, { headers: { "Accept": "application/json" } });
+            const data = await resp.json().catch(() => ({}));
+            if (!resp.ok || !data.ok) return;
+            // Keep URL in sync without hard reload.
+            const nextUrl = `/dashboard?${qs.toString()}`;
+            window.history.replaceState({}, "", nextUrl);
+            applyData(data);
+          } catch (_) {
+            // ignore
+          }
+        }, 250);
+      };
+
+      if (startInput) startInput.addEventListener("change", schedule);
+      if (endInput) endInput.addEventListener("change", schedule);
+
+      // First render: reuse server-provided range values by fetching JSON once.
+      schedule();
+      return { schedule };
+    })();
+  </script>
 </body>
 </html>

@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"html/template"
 	"log"
+	"math"
 	"net/http"
 	"net/url"
 	"os"
@@ -200,28 +201,28 @@ type periodTotal struct {
 }
 
 type metodoPagoTotal struct {
-	Metodo   string
-	Cantidad int
-	Total    string
-	Value    float64
+	Metodo   string  `json:"metodo"`
+	Cantidad int     `json:"cantidad"`
+	Total    string  `json:"total"`
+	Value    float64 `json:"value"`
 }
 
 type timelinePoint struct {
-	Fecha    string
-	Cantidad int
-	Total    string
-	Value    float64
-	Index    int
-	Percent  float64
+	Fecha    string  `json:"fecha"`
+	Cantidad int     `json:"cantidad"`
+	Total    string  `json:"total"`
+	Value    float64 `json:"value"`
+	Index    int     `json:"index"`
+	Percent  float64 `json:"percent"`
 }
 
 type pieSlice struct {
-	Metodo  string
-	Total   string
-	Percent float64
-	Offset  float64
-	Gap     float64
-	Color   string
+	Metodo  string  `json:"metodo"`
+	Total   string  `json:"total"`
+	Percent float64 `json:"percent"`
+	Offset  float64 `json:"offset"`
+	Gap     float64 `json:"gap"`
+	Color   string  `json:"color"`
 }
 
 type dashboardData struct {
@@ -240,6 +241,163 @@ type dashboardData struct {
 	RangeEnd        string
 	RangeTotal      string
 	RangeCount      int
+}
+
+type dashboardDataResponse struct {
+	Ok bool `json:"ok"`
+
+	RangeStart string `json:"range_start"`
+	RangeEnd   string `json:"range_end"`
+	RangeTotal string `json:"range_total"`
+	RangeCount int    `json:"range_count"`
+
+	MetodosPago     []metodoPagoTotal `json:"metodos_pago"`
+	PieSlices       []pieSlice        `json:"pie_slices"`
+	PieTotal        string            `json:"pie_total"`
+	MaxTimeline     float64           `json:"max_timeline"`
+	MaxTimelineText string            `json:"max_timeline_text"`
+	Timeline        []timelinePoint   `json:"timeline"`
+}
+
+func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, endDate time.Time) (dashboardDataResponse, error) {
+	resp := dashboardDataResponse{
+		Ok:         true,
+		RangeStart: startStr,
+		RangeEnd:   endStr,
+	}
+
+	var rangeTotal float64
+	var rangeCount int
+	if err := db.QueryRow(`
+		SELECT
+			COALESCE(SUM(precio_final * cantidad), 0),
+			COALESCE(COUNT(*), 0)
+		FROM ventas
+		WHERE date(fecha) BETWEEN ? AND ?`, startStr, endStr).Scan(&rangeTotal, &rangeCount); err != nil {
+		return dashboardDataResponse{}, err
+	}
+	resp.RangeTotal = formatCurrency(rangeTotal)
+	resp.RangeCount = rangeCount
+
+	metodoRows, err := db.Query(`
+		SELECT metodo_pago, COUNT(*), SUM(precio_final * cantidad)
+		FROM ventas
+		WHERE date(fecha) BETWEEN ? AND ?
+		GROUP BY metodo_pago
+		ORDER BY SUM(precio_final * cantidad) DESC`, startStr, endStr)
+	if err != nil {
+		return dashboardDataResponse{}, err
+	}
+	defer metodoRows.Close()
+
+	metodosPago := []metodoPagoTotal{}
+	totalPago := 0.0
+	for metodoRows.Next() {
+		var metodo string
+		var cantidad int
+		var total float64
+		if err := metodoRows.Scan(&metodo, &cantidad, &total); err != nil {
+			return dashboardDataResponse{}, err
+		}
+		metodosPago = append(metodosPago, metodoPagoTotal{
+			Metodo:   metodo,
+			Cantidad: cantidad,
+			Total:    formatCurrency(total),
+			Value:    total,
+		})
+		totalPago += total
+	}
+	if err := metodoRows.Err(); err != nil {
+		return dashboardDataResponse{}, err
+	}
+	resp.MetodosPago = metodosPago
+	resp.PieTotal = formatCurrency(totalPago)
+
+	pieColors := []string{"#2c6bed", "#7d4cf6", "#22a88b", "#f5a524", "#e5484d", "#14b8a6"}
+	pieSlices := []pieSlice{}
+	offset := 25.0
+	for i, metodo := range metodosPago {
+		percent := 0.0
+		if totalPago > 0 {
+			percent = (metodo.Value / totalPago) * 100
+		}
+		gap := 100 - percent
+		color := pieColors[i%len(pieColors)]
+		pieSlices = append(pieSlices, pieSlice{
+			Metodo:  metodo.Metodo,
+			Total:   metodo.Total,
+			Percent: percent,
+			Offset:  offset,
+			Gap:     gap,
+			Color:   color,
+		})
+		offset -= percent
+	}
+	resp.PieSlices = pieSlices
+
+	timeRows, err := db.Query(`
+		SELECT date(fecha) as fecha, COUNT(*), SUM(precio_final * cantidad)
+		FROM ventas
+		WHERE date(fecha) BETWEEN ? AND ?
+		GROUP BY date(fecha)
+		ORDER BY date(fecha)`, startStr, endStr)
+	if err != nil {
+		return dashboardDataResponse{}, err
+	}
+	defer timeRows.Close()
+
+	timelineByDate := make(map[string]timelinePoint)
+	for timeRows.Next() {
+		var fecha string
+		var cantidad int
+		var total float64
+		if err := timeRows.Scan(&fecha, &cantidad, &total); err != nil {
+			return dashboardDataResponse{}, err
+		}
+		timelineByDate[fecha] = timelinePoint{
+			Fecha:    fecha,
+			Cantidad: cantidad,
+			Total:    formatCurrency(total),
+			Value:    total,
+		}
+	}
+	if err := timeRows.Err(); err != nil {
+		return dashboardDataResponse{}, err
+	}
+
+	timeline := []timelinePoint{}
+	maxTimeline := 0.0
+	index := 0
+	for cursor := startDate; !cursor.After(endDate); cursor = cursor.AddDate(0, 0, 1) {
+		fecha := cursor.Format("2006-01-02")
+		point, ok := timelineByDate[fecha]
+		if !ok {
+			point = timelinePoint{
+				Fecha:    fecha,
+				Cantidad: 0,
+				Total:    formatCurrency(0),
+				Value:    0,
+			}
+		}
+		point.Index = index
+		timeline = append(timeline, point)
+		if point.Value > maxTimeline {
+			maxTimeline = point.Value
+		}
+		index++
+	}
+
+	if maxTimeline > 0 {
+		for i := range timeline {
+			timeline[i].Percent = (timeline[i].Value / maxTimeline) * 100
+		}
+	}
+
+	resp.MaxTimeline = maxTimeline
+	resp.MaxTimelineText = formatCurrency(maxTimeline)
+	resp.Timeline = timeline
+
+	return resp, nil
 }
 
 type User struct {
@@ -445,7 +603,35 @@ func availableCountsByProduct(db *sql.DB) (map[string]int, error) {
 }
 
 func formatCurrency(value float64) string {
-	return fmt.Sprintf("$%.0f", value)
+	rounded := int64(math.Round(value))
+	return "$" + formatIntDots(rounded)
+}
+
+// formatIntDots formats an integer with '.' as thousands separator (e.g. 1234567 -> "1.234.567").
+// This matches common Spanish formatting and improves readability in UI.
+func formatIntDots(n int64) string {
+	if n == 0 {
+		return "0"
+	}
+	sign := ""
+	if n < 0 {
+		sign = "-"
+		n = -n
+	}
+
+	s := strconv.FormatInt(n, 10)
+	// Insert '.' every 3 digits from the right.
+	out := make([]byte, 0, len(s)+len(s)/3)
+	rem := len(s) % 3
+	if rem == 0 {
+		rem = 3
+	}
+	out = append(out, s[:rem]...)
+	for i := rem; i < len(s); i += 3 {
+		out = append(out, '.')
+		out = append(out, s[i:i+3]...)
+	}
+	return sign + string(out)
 }
 
 func parseDateOrDefault(value string, fallback time.Time) time.Time {
@@ -1782,155 +1968,134 @@ func main() {
 		startStr := startDate.Format("2006-01-02")
 		endStr := endDate.Format("2006-01-02")
 
-		var rangeTotal float64
-		var rangeCount int
-		err = db.QueryRow(`
-			SELECT
-				COALESCE(SUM(precio_final * cantidad), 0),
-				COALESCE(COUNT(*), 0)
-			FROM ventas
-			WHERE fecha BETWEEN ? AND ?`, startStr, endStr).Scan(&rangeTotal, &rangeCount)
+		salesData, err := buildDashboardSalesData(db, startStr, endStr, startDate, endDate)
 		if err != nil {
-			http.Error(w, "Error al consultar ventas por rango", http.StatusInternalServerError)
+			http.Error(w, "Error al consultar ventas", http.StatusInternalServerError)
 			return
-		}
-
-		metodoRows, err := db.Query(`
-			SELECT metodo_pago, COUNT(*), SUM(precio_final * cantidad)
-			FROM ventas
-			GROUP BY metodo_pago
-			ORDER BY SUM(precio_final * cantidad) DESC`)
-		if err != nil {
-			http.Error(w, "Error al consultar métodos de pago", http.StatusInternalServerError)
-			return
-		}
-		defer metodoRows.Close()
-
-		metodosPago := []metodoPagoTotal{}
-		totalPago := 0.0
-		for metodoRows.Next() {
-			var metodo string
-			var cantidad int
-			var total float64
-			if err := metodoRows.Scan(&metodo, &cantidad, &total); err != nil {
-				http.Error(w, "Error al leer métodos de pago", http.StatusInternalServerError)
-				return
-			}
-			metodosPago = append(metodosPago, metodoPagoTotal{
-				Metodo:   metodo,
-				Cantidad: cantidad,
-				Total:    formatCurrency(total),
-				Value:    total,
-			})
-			totalPago += total
-		}
-		if err := metodoRows.Err(); err != nil {
-			http.Error(w, "Error al procesar métodos de pago", http.StatusInternalServerError)
-			return
-		}
-
-		pieColors := []string{"#2c6bed", "#7d4cf6", "#22a88b", "#f5a524", "#e5484d", "#14b8a6"}
-		pieSlices := []pieSlice{}
-		offset := 25.0
-		for i, metodo := range metodosPago {
-			percent := 0.0
-			if totalPago > 0 {
-				percent = (metodo.Value / totalPago) * 100
-			}
-			gap := 100 - percent
-			color := pieColors[i%len(pieColors)]
-			pieSlices = append(pieSlices, pieSlice{
-				Metodo:  metodo.Metodo,
-				Total:   metodo.Total,
-				Percent: percent,
-				Offset:  offset,
-				Gap:     gap,
-				Color:   color,
-			})
-			offset -= percent
-		}
-
-		timeRows, err := db.Query(`
-			SELECT fecha, COUNT(*), SUM(precio_final * cantidad)
-			FROM ventas
-			WHERE fecha BETWEEN ? AND ?
-			GROUP BY fecha
-			ORDER BY fecha`, startStr, endStr)
-		if err != nil {
-			http.Error(w, "Error al consultar timeline", http.StatusInternalServerError)
-			return
-		}
-		defer timeRows.Close()
-
-		timelineByDate := make(map[string]timelinePoint)
-		for timeRows.Next() {
-			var fecha string
-			var cantidad int
-			var total float64
-			if err := timeRows.Scan(&fecha, &cantidad, &total); err != nil {
-				http.Error(w, "Error al leer timeline", http.StatusInternalServerError)
-				return
-			}
-			timelineByDate[fecha] = timelinePoint{
-				Fecha:    fecha,
-				Cantidad: cantidad,
-				Total:    formatCurrency(total),
-				Value:    total,
-			}
-		}
-		if err := timeRows.Err(); err != nil {
-			http.Error(w, "Error al procesar timeline", http.StatusInternalServerError)
-			return
-		}
-
-		timeline := []timelinePoint{}
-		maxTimeline := 0.0
-		index := 0
-		for cursor := startDate; !cursor.After(endDate); cursor = cursor.AddDate(0, 0, 1) {
-			fecha := cursor.Format("2006-01-02")
-			point, ok := timelineByDate[fecha]
-			if !ok {
-				point = timelinePoint{
-					Fecha:    fecha,
-					Cantidad: 0,
-					Total:    formatCurrency(0),
-					Value:    0,
-				}
-			}
-			point.Index = index
-			timeline = append(timeline, point)
-			if point.Value > maxTimeline {
-				maxTimeline = point.Value
-			}
-			index++
-		}
-
-		if maxTimeline > 0 {
-			for i := range timeline {
-				timeline[i].Percent = (timeline[i].Value / maxTimeline) * 100
-			}
 		}
 
 		data := dashboardData{
 			Title:           "Dashboard SSR",
 			Subtitle:        "Resumen agregado de inventario y ventas.",
 			EstadoConteos:   estadoConteos,
-			MetodosPago:     metodosPago,
-			PieSlices:       pieSlices,
-			PieTotal:        formatCurrency(totalPago),
-			MaxTimeline:     maxTimeline,
-			MaxTimelineText: formatCurrency(maxTimeline),
-			TimelinePoints:  buildTimelinePoints(timeline, 560, 180, 24),
-			Timeline:        timeline,
+			MetodosPago:     salesData.MetodosPago,
+			PieSlices:       salesData.PieSlices,
+			PieTotal:        salesData.PieTotal,
+			MaxTimeline:     salesData.MaxTimeline,
+			MaxTimelineText: salesData.MaxTimelineText,
+			TimelinePoints:  buildTimelinePoints(salesData.Timeline, 560, 180, 24),
+			Timeline:        salesData.Timeline,
 			CurrentUser:     currentUser,
 			RangeStart:      startStr,
 			RangeEnd:        endStr,
-			RangeTotal:      formatCurrency(rangeTotal),
-			RangeCount:      rangeCount,
+			RangeTotal:      salesData.RangeTotal,
+			RangeCount:      salesData.RangeCount,
 		}
 
 		if err := tmpl.ExecuteTemplate(w, "dashboard.html", data); err != nil {
 			http.Error(w, "Error al renderizar el dashboard", http.StatusInternalServerError)
+		}
+	})
+
+	mux.HandleFunc("/dashboard/data", func(w http.ResponseWriter, r *http.Request) {
+		now := time.Now()
+		endDate := parseDateOrDefault(r.URL.Query().Get("end_date"), now)
+		startDate := parseDateOrDefault(r.URL.Query().Get("start_date"), endDate.AddDate(0, 0, -6))
+		if startDate.After(endDate) {
+			startDate, endDate = endDate, startDate
+		}
+		startDate = time.Date(startDate.Year(), startDate.Month(), startDate.Day(), 0, 0, 0, 0, startDate.Location())
+		endDate = time.Date(endDate.Year(), endDate.Month(), endDate.Day(), 0, 0, 0, 0, endDate.Location())
+		startStr := startDate.Format("2006-01-02")
+		endStr := endDate.Format("2006-01-02")
+
+		data, err := buildDashboardSalesData(db, startStr, endStr, startDate, endDate)
+		if err != nil {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusInternalServerError)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": "No se pudo cargar datos del dashboard."})
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(data)
+	})
+
+	mux.HandleFunc("/csv/ventas", func(w http.ResponseWriter, r *http.Request) {
+		now := time.Now()
+		endDate := parseDateOrDefault(r.URL.Query().Get("end_date"), now)
+		startDate := parseDateOrDefault(r.URL.Query().Get("start_date"), endDate.AddDate(0, 0, -6))
+		if startDate.After(endDate) {
+			startDate, endDate = endDate, startDate
+		}
+		startDate = time.Date(startDate.Year(), startDate.Month(), startDate.Day(), 0, 0, 0, 0, startDate.Location())
+		endDate = time.Date(endDate.Year(), endDate.Month(), endDate.Day(), 0, 0, 0, 0, endDate.Location())
+		startStr := startDate.Format("2006-01-02")
+		endStr := endDate.Format("2006-01-02")
+
+		rows, err := db.Query(`
+			SELECT
+				v.id,
+				v.fecha,
+				v.producto_id,
+				COALESCE(p.nombre, ''),
+				v.cantidad,
+				v.precio_final,
+				v.metodo_pago,
+				v.notas
+			FROM ventas v
+			LEFT JOIN productos p ON p.sku = v.producto_id
+			WHERE date(v.fecha) BETWEEN ? AND ?
+			ORDER BY v.fecha DESC, v.id DESC
+		`, startStr, endStr)
+		if err != nil {
+			http.Error(w, "Error al consultar ventas.", http.StatusInternalServerError)
+			return
+		}
+		defer rows.Close()
+
+		filename := fmt.Sprintf("ventas_%s_a_%s.csv", startStr, endStr)
+		w.Header().Set("Content-Type", "text/csv; charset=utf-8")
+		w.Header().Set("Content-Disposition", fmt.Sprintf("attachment; filename=%q", filename))
+		cw := csv.NewWriter(w)
+		defer cw.Flush()
+
+		_ = cw.Write([]string{"venta_id", "fecha", "sku", "producto", "cantidad", "precio_unitario", "total", "metodo_pago", "notas"})
+
+		for rows.Next() {
+			var (
+				id         int
+				fechaRaw   string
+				sku        string
+				nombre     string
+				cantidad   int
+				precioUnit float64
+				metodo     string
+				notas      string
+			)
+			if err := rows.Scan(&id, &fechaRaw, &sku, &nombre, &cantidad, &precioUnit, &metodo, &notas); err != nil {
+				http.Error(w, "Error al leer ventas.", http.StatusInternalServerError)
+				return
+			}
+			fecha := fechaRaw
+			if len(fechaRaw) >= 10 {
+				fecha = fechaRaw[:10]
+			}
+			total := precioUnit * float64(cantidad)
+			_ = cw.Write([]string{
+				strconv.Itoa(id),
+				fecha,
+				sku,
+				nombre,
+				strconv.Itoa(cantidad),
+				fmt.Sprintf("%.2f", precioUnit),
+				fmt.Sprintf("%.2f", total),
+				metodo,
+				notas,
+			})
+		}
+		if err := rows.Err(); err != nil {
+			http.Error(w, "Error al procesar ventas.", http.StatusInternalServerError)
+			return
 		}
 	})
 
