@@ -500,6 +500,192 @@
       font-size: 20px;
       font-weight: 700;
     }
+
+    /* Modal (historial) */
+    .modal-backdrop {
+      position: fixed;
+      inset: 0;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      padding: 18px;
+      background: rgba(18, 23, 38, 0.46);
+      backdrop-filter: blur(4px);
+      z-index: 100;
+    }
+
+    .modal-backdrop.open {
+      display: flex;
+    }
+
+    .modal {
+      width: min(860px, 100%);
+      background: var(--card);
+      border: 1px solid var(--border);
+      border-radius: 18px;
+      box-shadow: 0 18px 42px rgba(18, 23, 38, 0.22);
+      overflow: hidden;
+      transform: translateY(6px);
+      opacity: 0;
+      animation: modalIn 0.18s ease-out forwards;
+    }
+
+    @keyframes modalIn {
+      to {
+        transform: translateY(0);
+        opacity: 1;
+      }
+    }
+
+    .modal-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      padding: 16px 18px;
+      border-bottom: 1px solid var(--border);
+      background: linear-gradient(180deg, #ffffff 0%, #fbfaf8 100%);
+    }
+
+    .modal-header h3 {
+      margin: 0;
+      font-size: 16px;
+      letter-spacing: 0.01em;
+    }
+
+    .modal-subtitle {
+      margin-top: 4px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
+    .modal-close {
+      width: 38px;
+      height: 38px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      background: #ffffff;
+      color: var(--muted);
+      font-weight: 800;
+      line-height: 1;
+      padding: 0;
+    }
+
+    .modal-close:hover {
+      background: #f9f7f4;
+      color: var(--text);
+    }
+
+    .modal-body {
+      padding: 14px 18px 18px;
+      display: grid;
+      gap: 12px;
+    }
+
+    .modal-loading,
+    .modal-empty {
+      padding: 12px 14px;
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      background: #fbfaf8;
+      color: var(--muted);
+      font-size: 14px;
+      font-weight: 600;
+    }
+
+    .modal table {
+      min-width: 0;
+    }
+
+    .move-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 700;
+      border: 1px solid transparent;
+    }
+
+    .move-tag.venta {
+      background: #ffecef;
+      color: #b73a3a;
+      border-color: #f5c6cf;
+    }
+
+    .move-tag.reservar {
+      background: #e8f1ff;
+      color: #1f3c88;
+      border-color: #c6dcff;
+    }
+
+    .move-tag.dano {
+      background: #fff0f0;
+      color: #9a2f2f;
+      border-color: #f5c6cf;
+    }
+
+    .move-tag.cambio_salida {
+      background: #fff4e1;
+      color: #b36a1c;
+      border-color: #f2d1a5;
+    }
+
+    .modal textarea {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      font-size: 14px;
+      background: #ffffff;
+      min-height: 92px;
+      resize: vertical;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+
+    .modal textarea:hover {
+      border-color: rgba(232, 93, 60, 0.3);
+    }
+
+    .modal textarea:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(232, 93, 60, 0.16);
+      transform: translateY(-1px);
+    }
+
+    .modal-actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+      padding-top: 6px;
+    }
+
+    .modal-error {
+      padding: 10px 12px;
+      border-radius: 14px;
+      border: 1px solid #f5c6cf;
+      background: #ffecef;
+      color: #b73a3a;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .modal-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: 1fr;
+    }
+
+    .modal-row {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      align-items: end;
+    }
   </style>
 </head>
 <body>
@@ -562,6 +748,71 @@
     </table>
     </div>
   </main>
+
+  <div id="history-modal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="history-title">
+      <div class="modal-header">
+        <div>
+          <h3 id="history-title">Historial de producto</h3>
+          <div id="history-subtitle" class="modal-subtitle"></div>
+        </div>
+        <button type="button" class="modal-close" data-modal-close aria-label="Cerrar">✕</button>
+      </div>
+      <div class="modal-body">
+        <div id="history-loading" class="modal-loading">Cargando historial…</div>
+        <div id="history-empty" class="modal-empty" hidden>Sin movimientos registrados.</div>
+        <div id="history-table-wrap" class="table-wrap" hidden>
+          <table aria-label="Historial de movimientos">
+            <thead>
+              <tr>
+                <th>Fecha</th>
+                <th>Tipo</th>
+                <th>Unidad</th>
+                <th>Usuario</th>
+                <th>Nota</th>
+              </tr>
+            </thead>
+            <tbody id="history-tbody"></tbody>
+          </table>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <div id="action-modal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="action-title">
+      <div class="modal-header">
+        <div>
+          <h3 id="action-title">Acción</h3>
+          <div id="action-subtitle" class="modal-subtitle"></div>
+        </div>
+        <button type="button" class="modal-close" data-modal-close aria-label="Cerrar">✕</button>
+      </div>
+      <div class="modal-body">
+        <form id="action-form" class="modal-grid">
+          <div id="action-error" class="modal-error" hidden></div>
+          <div class="modal-row">
+            <div>
+              <label for="action-qty">Cantidad</label>
+              <input id="action-qty" name="cantidad" type="number" min="1" step="1" value="1" />
+            </div>
+            <div>
+              <label id="action-max-label" for="action-qty">Disponible</label>
+              <input id="action-max" type="text" value="-" disabled />
+            </div>
+          </div>
+          <div>
+            <label id="action-note-label" for="action-note">Nota</label>
+            <textarea id="action-note" name="nota" placeholder=""></textarea>
+          </div>
+          <div class="modal-actions">
+            <button type="button" class="secondary" data-modal-close>Cancelar</button>
+            <button id="action-submit" type="submit" class="primary">Confirmar</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
 
   <script>
     const products = [
@@ -785,7 +1036,205 @@
   </script>
 
   <script>
+    const historyModal = document.getElementById("history-modal");
+    const historySubtitle = document.getElementById("history-subtitle");
+    const historyLoading = document.getElementById("history-loading");
+    const historyEmpty = document.getElementById("history-empty");
+    const historyTableWrap = document.getElementById("history-table-wrap");
+    const historyTbody = document.getElementById("history-tbody");
+
+    const actionModal = document.getElementById("action-modal");
+    const actionTitle = document.getElementById("action-title");
+    const actionSubtitle = document.getElementById("action-subtitle");
+    const actionForm = document.getElementById("action-form");
+    const actionQty = document.getElementById("action-qty");
+    const actionMax = document.getElementById("action-max");
+    const actionError = document.getElementById("action-error");
+    const actionNote = document.getElementById("action-note");
+    const actionNoteLabel = document.getElementById("action-note-label");
+    const actionSubmit = document.getElementById("action-submit");
+
+    const openModal = (backdrop, subtitleText) => {
+      if (!backdrop) return;
+      backdrop.classList.add("open");
+      backdrop.setAttribute("aria-hidden", "false");
+      if (subtitleText && backdrop === historyModal && historySubtitle) historySubtitle.textContent = subtitleText;
+      if (subtitleText && backdrop === actionModal && actionSubtitle) actionSubtitle.textContent = subtitleText;
+      document.body.style.overflow = "hidden";
+    };
+
+    const closeModal = (backdrop) => {
+      if (!backdrop) return;
+      backdrop.classList.remove("open");
+      backdrop.setAttribute("aria-hidden", "true");
+      if (!document.querySelector(".modal-backdrop.open")) {
+        document.body.style.overflow = "";
+      }
+    };
+
+    const setActionError = (msg) => {
+      if (!actionError) return;
+      if (!msg) {
+        actionError.hidden = true;
+        actionError.textContent = "";
+        return;
+      }
+      actionError.hidden = false;
+      actionError.textContent = msg;
+    };
+
+    let actionContext = null;
+
+    const openActionModal = ({ title, subtitle, endpoint, productId, maxQty, defaultQty, noteLabel, notePlaceholder }) => {
+      actionContext = { endpoint, productId, maxQty };
+      if (actionTitle) actionTitle.textContent = title;
+      if (actionNoteLabel) actionNoteLabel.textContent = noteLabel || "Nota";
+      if (actionNote) actionNote.placeholder = notePlaceholder || "";
+      if (actionNote) actionNote.value = "";
+      if (actionMax) actionMax.value = maxQty >= 0 ? String(maxQty) : "-";
+      if (actionQty) {
+        actionQty.max = String(Math.max(1, maxQty));
+        actionQty.value = String(Math.min(Math.max(1, defaultQty || 1), Math.max(1, maxQty)));
+      }
+      if (actionSubmit) actionSubmit.disabled = false;
+      setActionError("");
+      openModal(actionModal, subtitle);
+      if (actionQty) actionQty.focus();
+    };
+
+    const showHistory = async (product) => {
+      if (!product) return;
+      openModal(historyModal, `${product.name} · SKU ${product.id}`);
+
+      if (historyLoading) historyLoading.hidden = false;
+      if (historyEmpty) {
+        historyEmpty.hidden = true;
+        historyEmpty.textContent = "Sin movimientos registrados.";
+      }
+      if (historyTableWrap) historyTableWrap.hidden = true;
+      if (historyTbody) historyTbody.innerHTML = "";
+
+      try {
+        const resp = await fetch(`/productos/historial?${new URLSearchParams({ producto_id: product.id }).toString()}`);
+        const data = await resp.json().catch(() => ({}));
+        if (!resp.ok || !data.ok) {
+          throw new Error(data.error || "No se pudo cargar el historial.");
+        }
+
+        const movimientos = Array.isArray(data.movimientos) ? data.movimientos : [];
+        if (movimientos.length === 0) {
+          if (historyEmpty) historyEmpty.hidden = false;
+          return;
+        }
+
+        movimientos.forEach((m) => {
+          if (!historyTbody) return;
+          const tr = document.createElement("tr");
+
+          const dateCell = document.createElement("td");
+          const parsed = new Date(m.fecha);
+          dateCell.textContent = Number.isNaN(parsed.getTime())
+            ? String(m.fecha || "-")
+            : parsed.toLocaleString("es-ES");
+
+          const typeCell = document.createElement("td");
+          const tag = document.createElement("span");
+          const tipo = String(m.tipo || "movimiento");
+          const labels = {
+            venta: "Venta",
+            reservar: "Reserva",
+            dano: "Daño",
+            cambio_salida: "Cambio"
+          };
+          tag.className = `move-tag ${tipo}`;
+          tag.textContent = labels[tipo] || tipo;
+          typeCell.appendChild(tag);
+
+          const unitCell = document.createElement("td");
+          unitCell.textContent = String(m.unidad_id || "-");
+
+          const userCell = document.createElement("td");
+          userCell.textContent = String(m.usuario || "-");
+
+          const noteCell = document.createElement("td");
+          noteCell.textContent = String(m.nota || "-");
+
+          tr.appendChild(dateCell);
+          tr.appendChild(typeCell);
+          tr.appendChild(unitCell);
+          tr.appendChild(userCell);
+          tr.appendChild(noteCell);
+          historyTbody.appendChild(tr);
+        });
+
+        if (historyTableWrap) historyTableWrap.hidden = false;
+      } catch (err) {
+        if (historyEmpty) {
+          historyEmpty.hidden = false;
+          historyEmpty.textContent = err?.message || "No se pudo cargar el historial.";
+        }
+      } finally {
+        if (historyLoading) historyLoading.hidden = true;
+      }
+    };
+
+    const postAction = async (endpoint, productId, qty, note) => {
+      const body = new URLSearchParams({
+        producto_id: productId,
+        cantidad: String(qty),
+        nota: note || ""
+      });
+      const resp = await fetch(endpoint, {
+        method: "POST",
+        headers: { "Content-Type": "application/x-www-form-urlencoded" },
+        body
+      });
+      const data = await resp.json().catch(() => ({}));
+      if (!resp.ok || !data.ok) {
+        throw new Error(data.error || "No se pudo completar la acción.");
+      }
+    };
+
+    if (actionForm) {
+      actionForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!actionContext) return;
+
+        const qty = parseInt(actionQty?.value || "0", 10);
+        if (Number.isNaN(qty) || qty < 1 || qty > actionContext.maxQty) {
+          setActionError("Cantidad inválida.");
+          return;
+        }
+
+        const note = (actionNote?.value || "").trim();
+        if (actionSubmit) actionSubmit.disabled = true;
+        setActionError("");
+
+        try {
+          await postAction(actionContext.endpoint, actionContext.productId, qty, note);
+          closeModal(actionModal);
+          window.location.reload();
+        } catch (err) {
+          setActionError(err?.message || "No se pudo completar la acción.");
+          if (actionSubmit) actionSubmit.disabled = false;
+        }
+      });
+    }
+
     document.addEventListener("click", (event) => {
+      const closeButton = event.target.closest("[data-modal-close]");
+      if (closeButton) {
+        const backdrop = closeButton.closest(".modal-backdrop");
+        closeModal(backdrop);
+        return;
+      }
+
+      const backdropClick = event.target.classList?.contains("modal-backdrop");
+      if (backdropClick) {
+        closeModal(event.target);
+        return;
+      }
+
       const menuButton = event.target.closest("button[data-menu]");
       if (menuButton) {
         const menuId = menuButton.dataset.menu;
@@ -812,82 +1261,67 @@
         const maxQty = parseInt(qtyInput?.max || "0", 10);
         const defaultQty = parseInt(qtyInput?.value || "1", 10) || 1;
 
-        const requestQty = (label) => {
-          if (!product) return null;
-          if (!Number.isFinite(maxQty) || maxQty < 1) {
-            alert("No hay unidades disponibles para esta acción.");
-            return null;
-          }
-          const raw = prompt(`${label} para ${product.name} (1-${maxQty})`, String(Math.min(defaultQty, maxQty)));
-          if (raw === null) return null;
-          const qty = parseInt(raw, 10);
-          if (Number.isNaN(qty) || qty < 1 || qty > maxQty) {
-            alert("Cantidad inválida.");
-            return null;
-          }
-          return qty;
-        };
-
-        const requestNote = () => {
-          const raw = prompt("Nota (opcional)", "");
-          if (raw === null) return null;
-          return raw.trim();
-        };
-
-        const postAction = async (endpoint, qty, note) => {
-          const body = new URLSearchParams({
-            producto_id: productId,
-            cantidad: String(qty),
-            nota: note || ""
-          });
-          const resp = await fetch(endpoint, {
-            method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
-            body
-          });
-          const data = await resp.json().catch(() => ({}));
-          if (!resp.ok || !data.ok) {
-            alert(data.error || "No se pudo completar la acción.");
-            return;
-          }
-          window.location.reload();
-        };
-
-        const showHistory = async () => {
-          const resp = await fetch(`/productos/historial?${new URLSearchParams({ producto_id: productId }).toString()}`);
-          const data = await resp.json().catch(() => ({}));
-          if (!resp.ok || !data.ok) {
-            alert(data.error || "No se pudo cargar el historial.");
-            return;
-          }
-          const movimientos = Array.isArray(data.movimientos) ? data.movimientos : [];
-          const lines = movimientos.length
-            ? movimientos.map((m) => `${m.fecha} | ${m.tipo} | ${m.unidad_id}${m.usuario ? " | " + m.usuario : ""}${m.nota ? " | " + m.nota : ""}`)
-            : ["(sin movimientos registrados)"];
-          alert(`Historial SKU ${productId}\n\n${lines.join("\n")}`);
-        };
-
         // Close any open menu before running the action.
         document.querySelectorAll(".menu-panel.open").forEach((panel) => panel.classList.remove("open"));
 
         if (action === "reserve") {
-          const qty = requestQty("Cantidad a reservar");
-          if (qty === null) return;
-          const note = requestNote();
-          if (note === null) return;
-          postAction("/inventario/reservar", qty, note);
+          if (!product || !Number.isFinite(maxQty) || maxQty < 1) {
+            openActionModal({
+              title: "Reservar unidades",
+              subtitle: product ? `${product.name} · SKU ${productId}` : `SKU ${productId}`,
+              endpoint: "/inventario/reservar",
+              productId,
+              maxQty: 0,
+              defaultQty: 1,
+              noteLabel: "Nota (opcional)",
+              notePlaceholder: "Ej: apartadas para cliente Juan."
+            });
+            setActionError("No hay unidades disponibles para reservar.");
+            if (actionSubmit) actionSubmit.disabled = true;
+            return;
+          }
+          openActionModal({
+            title: "Reservar unidades",
+            subtitle: `${product.name} · SKU ${productId}`,
+            endpoint: "/inventario/reservar",
+            productId,
+            maxQty,
+            defaultQty,
+            noteLabel: "Nota (opcional)",
+            notePlaceholder: "Ej: apartadas para cliente Juan."
+          });
           return;
         }
         if (action === "damage") {
-          const qty = requestQty("Cantidad a marcar como dañada");
-          if (qty === null) return;
-          const note = requestNote();
-          if (note === null) return;
-          postAction("/inventario/dano", qty, note);
+          if (!product || !Number.isFinite(maxQty) || maxQty < 1) {
+            openActionModal({
+              title: "Registrar daño",
+              subtitle: product ? `${product.name} · SKU ${productId}` : `SKU ${productId}`,
+              endpoint: "/inventario/dano",
+              productId,
+              maxQty: 0,
+              defaultQty: 1,
+              noteLabel: "Descripción del daño (opcional)",
+              notePlaceholder: "Ej: empaque roto, derrame, vencido, etc."
+            });
+            setActionError("No hay unidades disponibles para marcar como dañadas.");
+            if (actionSubmit) actionSubmit.disabled = true;
+            return;
+          }
+          openActionModal({
+            title: "Registrar daño",
+            subtitle: `${product.name} · SKU ${productId}`,
+            endpoint: "/inventario/dano",
+            productId,
+            maxQty,
+            defaultQty,
+            noteLabel: "Descripción del daño (opcional)",
+            notePlaceholder: "Ej: empaque roto, derrame, vencido, etc."
+          });
           return;
         }
         if (action === "history") {
-          showHistory();
+          showHistory(product);
           return;
         }
       }
@@ -926,6 +1360,11 @@
       const panel = document.getElementById(`units-${productId}`);
       if (!panel) return;
       panel.style.display = panel.style.display === "none" ? "table-cell" : "none";
+    });
+
+    document.addEventListener("keydown", (event) => {
+      if (event.key !== "Escape") return;
+      document.querySelectorAll(".modal-backdrop.open").forEach((backdrop) => closeModal(backdrop));
     });
   </script>
 </body>
