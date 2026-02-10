@@ -154,12 +154,208 @@
       color: #b73a3a;
       border: 1px solid #f5c6cf;
     }
+
+    .flash {
+      margin-bottom: 16px;
+      background: #eaf7f1;
+      color: #1f6b4f;
+      border: 1px solid #c7e6d7;
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 700;
+    }
+
+    .flash.error {
+      background: #ffecef;
+      color: #b73a3a;
+      border-color: #f5c6cf;
+    }
+
+    .card {
+      background: var(--card);
+      border-radius: 18px;
+      border: 1px solid var(--border);
+      padding: 18px;
+      box-shadow: var(--shadow-soft);
+      margin-bottom: 16px;
+    }
+
+    h2 {
+      margin: 0 0 12px;
+      font-size: 16px;
+      letter-spacing: 0.01em;
+    }
+
+    form {
+      margin: 0;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      margin-bottom: 6px;
+      color: var(--muted);
+      font-weight: 700;
+    }
+
+    input,
+    select {
+      width: 100%;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--border);
+      font-size: 14px;
+      background: #ffffff;
+      margin-bottom: 12px;
+    }
+
+    input:focus,
+    select:focus {
+      outline: none;
+      border-color: var(--primary);
+      box-shadow: 0 0 0 3px rgba(232, 93, 60, 0.16);
+    }
+
+    .row {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      align-items: end;
+    }
+
+    .actions {
+      display: flex;
+      gap: 10px;
+      flex-wrap: wrap;
+      align-items: center;
+    }
+
+    button {
+      border: 1px solid var(--border);
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-weight: 700;
+      cursor: pointer;
+      background: var(--card);
+      color: var(--text);
+      transition: all 0.2s ease;
+      white-space: nowrap;
+    }
+
+    button.primary {
+      background: var(--primary);
+      border-color: var(--primary);
+      color: #ffffff;
+    }
+
+    button.primary:hover {
+      background: var(--primary-strong);
+      border-color: var(--primary-strong);
+    }
+
+    button.danger {
+      background: #d64545;
+      border-color: #d64545;
+      color: #ffffff;
+    }
+
+    button.danger:hover {
+      filter: brightness(0.95);
+    }
+
+    details {
+      cursor: pointer;
+    }
+
+    details summary {
+      list-style: none;
+      color: var(--primary);
+      font-weight: 700;
+    }
+
+    details summary::-webkit-details-marker {
+      display: none;
+    }
+
+    .inline-form {
+      margin-top: 10px;
+      padding-top: 10px;
+      border-top: 1px dashed var(--border);
+    }
+
+    .checkline {
+      display: flex;
+      gap: 10px;
+      align-items: center;
+      margin: 0;
+      text-transform: none;
+      letter-spacing: 0;
+      font-size: 14px;
+      font-weight: 700;
+      color: var(--text);
+    }
+
+    .checkline input {
+      width: auto;
+      margin: 0;
+    }
   </style>
 </head>
 <body>
   {{template "header" .}}
 
   <main class="page-content">
+    {{if .Flash}}
+      <div class="flash">{{.Flash}}</div>
+    {{end}}
+    {{if .Error}}
+      <div class="flash error">{{.Error}}</div>
+    {{end}}
+
+    <section class="card">
+      <h2>Crear usuario</h2>
+      <form method="POST" action="/admin/users/create">
+        <div class="row">
+          <div>
+            <label for="new-username">Usuario</label>
+            <input id="new-username" name="username" type="text" placeholder="usuario" autocomplete="username" required />
+          </div>
+          <div>
+            <label for="new-name">Nombre</label>
+            <input id="new-name" name="name" type="text" placeholder="Nombre" autocomplete="name" />
+          </div>
+          <div>
+            <label for="new-email">Email</label>
+            <input id="new-email" name="email" type="email" placeholder="correo@dominio.com" autocomplete="email" />
+          </div>
+          <div>
+            <label for="new-password">Contraseña</label>
+            <input id="new-password" name="password" type="password" placeholder="contraseña" autocomplete="new-password" required />
+          </div>
+          <div>
+            <label for="new-role">Rol</label>
+            <select id="new-role" name="role" required>
+              <option value="empleado">Empleado</option>
+              <option value="admin">Admin</option>
+            </select>
+          </div>
+          <div>
+            <label for="new-active">Estado</label>
+            <label class="checkline">
+              <input type="checkbox" name="is_active" checked />
+              Activo
+            </label>
+          </div>
+        </div>
+        <div class="actions">
+          <button class="primary" type="submit">Crear</button>
+        </div>
+      </form>
+    </section>
+
     <div class="table-wrap">
     <table>
       <thead>
@@ -169,6 +365,7 @@
           <th>Rol</th>
           <th>Estado</th>
           <th>Creado</th>
+          <th>Acciones</th>
         </tr>
       </thead>
       <tbody>
@@ -185,11 +382,90 @@
             {{end}}
           </td>
           <td>{{.CreatedAt}}</td>
+          <td>
+            <details>
+              <summary>Administrar</summary>
+              <div class="inline-form">
+                <form method="POST" action="/admin/users/update">
+                  <input type="hidden" name="id" value="{{.ID}}" />
+                  <div class="row">
+                    <div>
+                      <label>Usuario</label>
+                      <input name="username" type="text" value="{{.Username}}" required />
+                    </div>
+                    <div>
+                      <label>Nombre</label>
+                      <input name="name" type="text" value="{{.Name}}" />
+                    </div>
+                    <div>
+                      <label>Email</label>
+                      <input name="email" type="email" value="{{.Email}}" />
+                    </div>
+                    <div>
+                      <label>Rol</label>
+                      <select name="role" required>
+                        <option value="empleado" {{if eq .Role "empleado"}}selected{{end}}>Empleado</option>
+                        <option value="admin" {{if eq .Role "admin"}}selected{{end}}>Admin</option>
+                      </select>
+                    </div>
+                    <div>
+                      <label>Activo</label>
+                      <select name="is_active">
+                        <option value="1" {{if .IsActive}}selected{{end}}>Sí</option>
+                        <option value="" {{if not .IsActive}}selected{{end}}>No</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="actions">
+                    <button class="primary" type="submit">Guardar cambios</button>
+                  </div>
+                </form>
+              </div>
+
+              <div class="inline-form">
+                <form method="POST" action="/admin/users/password">
+                  <input type="hidden" name="id" value="{{.ID}}" />
+                  <div class="row">
+                    <div>
+                      <label>Nueva contraseña</label>
+                      <input name="password" type="password" autocomplete="new-password" required />
+                    </div>
+                  </div>
+                  <div class="actions">
+                    <button class="primary" type="submit">Cambiar contraseña</button>
+                  </div>
+                </form>
+              </div>
+
+              <div class="inline-form">
+                <form method="POST" action="/admin/users/delete" onsubmit="return confirm('¿Eliminar este usuario?');">
+                  <input type="hidden" name="id" value="{{.ID}}" />
+                  <div class="actions">
+                    <button class="danger" type="submit">Eliminar</button>
+                  </div>
+                </form>
+              </div>
+            </details>
+          </td>
         </tr>
         {{end}}
       </tbody>
     </table>
     </div>
   </main>
+
+  <script>
+    // Lightweight UX: if name/email are left empty, prefill them from username.
+    const username = document.getElementById("new-username");
+    const name = document.getElementById("new-name");
+    const email = document.getElementById("new-email");
+    const sync = () => {
+      const u = (username?.value || "").trim();
+      if (!u) return;
+      if (name && !name.value.trim()) name.value = u;
+      if (email && !email.value.trim()) email.value = `${u}@local`;
+    };
+    if (username) username.addEventListener("blur", sync);
+  </script>
 </body>
 </html>

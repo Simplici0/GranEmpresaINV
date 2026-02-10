@@ -11,6 +11,7 @@ import (
 	"html/template"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"path/filepath"
 	"strconv"
@@ -565,6 +566,67 @@ func adminOnly(next http.HandlerFunc) http.HandlerFunc {
 	}
 }
 
+func redirectWithMessage(w http.ResponseWriter, r *http.Request, path, message, errMsg string) {
+	params := url.Values{}
+	if message != "" {
+		params.Set("mensaje", message)
+	}
+	if errMsg != "" {
+		params.Set("error", errMsg)
+	}
+	target := path
+	if encoded := params.Encode(); encoded != "" {
+		target = target + "?" + encoded
+	}
+	http.Redirect(w, r, target, http.StatusSeeOther)
+}
+
+func userCreateErrorText(err error) string {
+	if err == nil {
+		return ""
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "UNIQUE constraint failed: users.username"):
+		return "El usuario ya existe."
+	case strings.Contains(msg, "CHECK constraint failed"):
+		return "Datos inválidos (revisa el rol)."
+	case strings.Contains(msg, "database is locked"):
+		return "La base de datos está ocupada. Intenta de nuevo."
+	default:
+		return "No se pudo crear el usuario."
+	}
+}
+
+func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
+	// SQLite PRAGMA table_info does not reliably accept a bound parameter for table name,
+	// so we build the statement after validating the identifier.
+	for i, r := range table {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_' || (i > 0 && r >= '0' && r <= '9') {
+			continue
+		}
+		return nil, fmt.Errorf("invalid table name: %q", table)
+	}
+	rows, err := db.Query(fmt.Sprintf("SELECT name FROM pragma_table_info('%s')", table))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		cols[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return cols, nil
+}
+
 func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	db, err := sql.Open("sqlite", path)
 	if err != nil {
@@ -897,6 +959,11 @@ func main() {
 		log.Fatalf("Error al cargar productos: %v", err)
 	}
 
+	usersCols, err := tableColumns(db, "users")
+	if err != nil {
+		log.Fatalf("Error al leer esquema de users: %v", err)
+	}
+
 	type ventaFormData struct {
 		Title       string
 		Subtitle    string
@@ -931,6 +998,8 @@ func main() {
 	type adminUserRow struct {
 		ID        int
 		Username  string
+		Name      string
+		Email     string
 		Role      string
 		IsActive  bool
 		CreatedAt string
@@ -939,6 +1008,8 @@ func main() {
 	type adminUsersData struct {
 		Title       string
 		Subtitle    string
+		Flash       string
+		Error       string
 		Users       []adminUserRow
 		CurrentUser *User
 	}
@@ -1068,7 +1139,36 @@ func main() {
 	})
 
 	mux.HandleFunc("/admin/users", adminOnly(func(w http.ResponseWriter, r *http.Request) {
-		rows, err := db.Query(`SELECT id, username, role, is_active, created_at FROM users ORDER BY id`)
+		flash := r.URL.Query().Get("mensaje")
+		errText := r.URL.Query().Get("error")
+
+		// Support legacy schemas by selecting optional columns if they exist.
+		selectCols := []string{"id", "username"}
+		if usersCols["name"] {
+			selectCols = append(selectCols, "name")
+		} else {
+			selectCols = append(selectCols, "'' as name")
+		}
+		if usersCols["email"] {
+			selectCols = append(selectCols, "email")
+		} else {
+			selectCols = append(selectCols, "'' as email")
+		}
+		selectCols = append(selectCols, "role")
+		if usersCols["is_active"] {
+			selectCols = append(selectCols, "is_active")
+		} else if usersCols["active"] {
+			selectCols = append(selectCols, "active as is_active")
+		} else {
+			selectCols = append(selectCols, "1 as is_active")
+		}
+		if usersCols["created_at"] {
+			selectCols = append(selectCols, "created_at")
+		} else {
+			selectCols = append(selectCols, "'' as created_at")
+		}
+
+		rows, err := db.Query(fmt.Sprintf("SELECT %s FROM users ORDER BY id", strings.Join(selectCols, ", ")))
 		if err != nil {
 			http.Error(w, "Error al consultar usuarios", http.StatusInternalServerError)
 			return
@@ -1079,10 +1179,16 @@ func main() {
 		for rows.Next() {
 			var user adminUserRow
 			var isActive int
-			if err := rows.Scan(&user.ID, &user.Username, &user.Role, &isActive, &user.CreatedAt); err != nil {
+			var username sql.NullString
+			var name sql.NullString
+			var email sql.NullString
+			if err := rows.Scan(&user.ID, &username, &name, &email, &user.Role, &isActive, &user.CreatedAt); err != nil {
 				http.Error(w, "Error al leer usuarios", http.StatusInternalServerError)
 				return
 			}
+			user.Username = username.String
+			user.Name = name.String
+			user.Email = email.String
 			user.IsActive = isActive == 1
 			users = append(users, user)
 		}
@@ -1094,12 +1200,314 @@ func main() {
 		data := adminUsersData{
 			Title:       "Gestión de usuarios",
 			Subtitle:    "Control de accesos y roles del inventario.",
+			Flash:       flash,
+			Error:       errText,
 			Users:       users,
 			CurrentUser: userFromContext(r),
 		}
 		if err := tmpl.ExecuteTemplate(w, "admin_users.html", data); err != nil {
 			http.Error(w, "Error al renderizar usuarios", http.StatusInternalServerError)
 		}
+	}))
+
+	mux.HandleFunc("/admin/users/create", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			redirectWithMessage(w, r, "/admin/users", "", "Método no permitido.")
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			redirectWithMessage(w, r, "/admin/users", "", "No se pudo leer el formulario.")
+			return
+		}
+
+		username := strings.TrimSpace(r.FormValue("username"))
+		name := strings.TrimSpace(r.FormValue("name"))
+		email := strings.TrimSpace(r.FormValue("email"))
+		password := r.FormValue("password")
+		role := strings.TrimSpace(r.FormValue("role"))
+		isActive := r.FormValue("is_active") != ""
+
+		if username == "" {
+			redirectWithMessage(w, r, "/admin/users", "", "Usuario obligatorio.")
+			return
+		}
+		if password == "" {
+			redirectWithMessage(w, r, "/admin/users", "", "Contraseña obligatoria.")
+			return
+		}
+		if role != "admin" && role != "empleado" {
+			redirectWithMessage(w, r, "/admin/users", "", "Rol inválido.")
+			return
+		}
+
+		if usersCols["name"] && name == "" {
+			name = username
+		}
+		if usersCols["email"] && email == "" {
+			// If username already looks like an email, reuse it.
+			if strings.Contains(username, "@") {
+				email = username
+			} else {
+				email = username + "@local"
+			}
+		}
+		if usersCols["email"] {
+			var emailExists int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE email = ?`, email).Scan(&emailExists); err == nil && emailExists > 0 {
+				redirectWithMessage(w, r, "/admin/users", "", "El email ya existe.")
+				return
+			}
+		}
+
+		var exists int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE username = ?`, username).Scan(&exists); err == nil && exists > 0 {
+			redirectWithMessage(w, r, "/admin/users", "", "El usuario ya existe.")
+			return
+		}
+
+		hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			redirectWithMessage(w, r, "/admin/users", "", "No se pudo procesar la contraseña.")
+			return
+		}
+
+		activeInt := 0
+		if isActive {
+			activeInt = 1
+		}
+
+		cols := []string{"username", "password_hash", "role"}
+		args := []any{username, string(hashed), role}
+		if usersCols["name"] {
+			cols = append(cols, "name")
+			args = append(args, name)
+		}
+		if usersCols["email"] {
+			cols = append(cols, "email")
+			args = append(args, email)
+		}
+		if usersCols["password_salt"] {
+			cols = append(cols, "password_salt")
+			args = append(args, "bcrypt")
+		}
+		if usersCols["created_at"] {
+			cols = append(cols, "created_at")
+			args = append(args, time.Now().Format(time.RFC3339))
+		}
+		if usersCols["is_active"] {
+			cols = append(cols, "is_active")
+			args = append(args, activeInt)
+		}
+		if usersCols["active"] {
+			cols = append(cols, "active")
+			args = append(args, activeInt)
+		}
+
+		placeholders := make([]string, len(cols))
+		for i := range placeholders {
+			placeholders[i] = "?"
+		}
+
+		_, err = db.Exec(
+			fmt.Sprintf("INSERT INTO users (%s) VALUES (%s)", strings.Join(cols, ", "), strings.Join(placeholders, ", ")),
+			args...,
+		)
+		if err != nil {
+			log.Printf("admin/users/create: insert failed username=%q err=%v", username, err)
+			redirectWithMessage(w, r, "/admin/users", "", userCreateErrorText(err))
+			return
+		}
+
+		redirectWithMessage(w, r, "/admin/users", "Usuario creado.", "")
+	}))
+
+	mux.HandleFunc("/admin/users/update", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			redirectWithMessage(w, r, "/admin/users", "", "Método no permitido.")
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			redirectWithMessage(w, r, "/admin/users", "", "No se pudo leer el formulario.")
+			return
+		}
+
+		idValue := strings.TrimSpace(r.FormValue("id"))
+		userID, err := strconv.Atoi(idValue)
+		if err != nil || userID <= 0 {
+			redirectWithMessage(w, r, "/admin/users", "", "ID inválido.")
+			return
+		}
+
+		username := strings.TrimSpace(r.FormValue("username"))
+		name := strings.TrimSpace(r.FormValue("name"))
+		email := strings.TrimSpace(r.FormValue("email"))
+		role := strings.TrimSpace(r.FormValue("role"))
+		isActive := r.FormValue("is_active") != ""
+
+		if username == "" {
+			redirectWithMessage(w, r, "/admin/users", "", "Usuario obligatorio.")
+			return
+		}
+		if role != "admin" && role != "empleado" {
+			redirectWithMessage(w, r, "/admin/users", "", "Rol inválido.")
+			return
+		}
+		if usersCols["name"] && name == "" {
+			name = username
+		}
+		if usersCols["email"] && email == "" {
+			if strings.Contains(username, "@") {
+				email = username
+			} else {
+				email = username + "@local"
+			}
+		}
+
+		// Prevent leaving the system without any active admin.
+		var currentRole string
+		var currentActive int
+		if err := db.QueryRow(`SELECT role, is_active FROM users WHERE id = ?`, userID).Scan(&currentRole, &currentActive); err != nil {
+			redirectWithMessage(w, r, "/admin/users", "", "Usuario no encontrado.")
+			return
+		}
+		willBeActive := 0
+		if isActive {
+			willBeActive = 1
+		}
+		isDemotingAdmin := currentRole == "admin" && role != "admin" && currentActive == 1
+		isDeactivatingAdmin := currentRole == "admin" && currentActive == 1 && willBeActive == 0
+		if isDemotingAdmin || isDeactivatingAdmin {
+			var otherActiveAdmins int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1 AND id != ?`, userID).Scan(&otherActiveAdmins); err == nil {
+				if otherActiveAdmins == 0 {
+					redirectWithMessage(w, r, "/admin/users", "", "Debe existir al menos un admin activo.")
+					return
+				}
+			}
+		}
+
+		setCols := []string{"username = ?", "role = ?"}
+		args := []any{username, role}
+		if usersCols["name"] {
+			setCols = append(setCols, "name = ?")
+			args = append(args, name)
+		}
+		if usersCols["email"] {
+			setCols = append(setCols, "email = ?")
+			args = append(args, email)
+		}
+		if usersCols["is_active"] {
+			setCols = append(setCols, "is_active = ?")
+			args = append(args, willBeActive)
+		}
+		if usersCols["active"] {
+			setCols = append(setCols, "active = ?")
+			args = append(args, willBeActive)
+		}
+		args = append(args, userID)
+
+		_, err = db.Exec(fmt.Sprintf("UPDATE users SET %s WHERE id = ?", strings.Join(setCols, ", ")), args...)
+		if err != nil {
+			redirectWithMessage(w, r, "/admin/users", "", "No se pudo actualizar el usuario.")
+			return
+		}
+
+		// If deactivated, invalidate sessions.
+		if willBeActive == 0 {
+			_, _ = db.Exec(`DELETE FROM sessions WHERE user_id = ?`, userID)
+		}
+
+		redirectWithMessage(w, r, "/admin/users", "Usuario actualizado.", "")
+	}))
+
+	mux.HandleFunc("/admin/users/password", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			redirectWithMessage(w, r, "/admin/users", "", "Método no permitido.")
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			redirectWithMessage(w, r, "/admin/users", "", "No se pudo leer el formulario.")
+			return
+		}
+
+		idValue := strings.TrimSpace(r.FormValue("id"))
+		userID, err := strconv.Atoi(idValue)
+		if err != nil || userID <= 0 {
+			redirectWithMessage(w, r, "/admin/users", "", "ID inválido.")
+			return
+		}
+		password := r.FormValue("password")
+		if password == "" {
+			redirectWithMessage(w, r, "/admin/users", "", "Contraseña obligatoria.")
+			return
+		}
+
+		hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
+		if err != nil {
+			redirectWithMessage(w, r, "/admin/users", "", "No se pudo procesar la contraseña.")
+			return
+		}
+
+		setCols := []string{"password_hash = ?"}
+		args := []any{string(hashed)}
+		if usersCols["password_salt"] {
+			setCols = append(setCols, "password_salt = ?")
+			args = append(args, "bcrypt")
+		}
+		args = append(args, userID)
+		if _, err := db.Exec(fmt.Sprintf("UPDATE users SET %s WHERE id = ?", strings.Join(setCols, ", ")), args...); err != nil {
+			redirectWithMessage(w, r, "/admin/users", "", "No se pudo actualizar la contraseña.")
+			return
+		}
+		_, _ = db.Exec(`DELETE FROM sessions WHERE user_id = ?`, userID)
+		redirectWithMessage(w, r, "/admin/users", "Contraseña actualizada (sesiones cerradas).", "")
+	}))
+
+	mux.HandleFunc("/admin/users/delete", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			redirectWithMessage(w, r, "/admin/users", "", "Método no permitido.")
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			redirectWithMessage(w, r, "/admin/users", "", "No se pudo leer el formulario.")
+			return
+		}
+
+		idValue := strings.TrimSpace(r.FormValue("id"))
+		userID, err := strconv.Atoi(idValue)
+		if err != nil || userID <= 0 {
+			redirectWithMessage(w, r, "/admin/users", "", "ID inválido.")
+			return
+		}
+		current := userFromContext(r)
+		if current != nil && current.ID == userID {
+			redirectWithMessage(w, r, "/admin/users", "", "No puedes eliminar tu propio usuario.")
+			return
+		}
+
+		var role string
+		var isActive int
+		if err := db.QueryRow(`SELECT role, is_active FROM users WHERE id = ?`, userID).Scan(&role, &isActive); err != nil {
+			redirectWithMessage(w, r, "/admin/users", "", "Usuario no encontrado.")
+			return
+		}
+		if role == "admin" && isActive == 1 {
+			var otherActiveAdmins int
+			if err := db.QueryRow(`SELECT COUNT(*) FROM users WHERE role = 'admin' AND is_active = 1 AND id != ?`, userID).Scan(&otherActiveAdmins); err == nil {
+				if otherActiveAdmins == 0 {
+					redirectWithMessage(w, r, "/admin/users", "", "No puedes eliminar el último admin activo.")
+					return
+				}
+			}
+		}
+
+		_, _ = db.Exec(`DELETE FROM sessions WHERE user_id = ?`, userID)
+		if _, err := db.Exec(`DELETE FROM users WHERE id = ?`, userID); err != nil {
+			redirectWithMessage(w, r, "/admin/users", "", "No se pudo eliminar el usuario.")
+			return
+		}
+
+		redirectWithMessage(w, r, "/admin/users", "Usuario eliminado.", "")
 	}))
 
 	mux.HandleFunc("/productos/new", adminOnly(func(w http.ResponseWriter, r *http.Request) {
