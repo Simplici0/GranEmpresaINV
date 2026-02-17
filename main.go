@@ -44,6 +44,7 @@ type productOption struct {
 	Name         string
 	Line         string
 	FechaIngreso string
+	SalePrice    float64
 	Units        []unitOption
 }
 
@@ -81,6 +82,7 @@ type inventoryProduct struct {
 	FechaIngreso      string
 	MesesEnStock      int
 	AlertaPermanencia bool
+	SalePrice         float64
 }
 
 var errInsufficientStock = fmt.Errorf("stock insuficiente")
@@ -126,7 +128,7 @@ func seedProductosIfMissing(db *sql.DB, defaults []productOption) error {
 }
 
 func loadProductos(db *sql.DB) ([]productOption, error) {
-	rows, err := db.Query(`SELECT sku, nombre, linea, COALESCE(fecha_ingreso, '') FROM productos ORDER BY sku`)
+	rows, err := db.Query(`SELECT sku, nombre, linea, COALESCE(fecha_ingreso, ''), COALESCE(precio_venta, 0) FROM productos ORDER BY sku`)
 	if err != nil {
 		return nil, err
 	}
@@ -135,7 +137,7 @@ func loadProductos(db *sql.DB) ([]productOption, error) {
 	products := []productOption{}
 	for rows.Next() {
 		var p productOption
-		if err := rows.Scan(&p.ID, &p.Name, &p.Line, &p.FechaIngreso); err != nil {
+		if err := rows.Scan(&p.ID, &p.Name, &p.Line, &p.FechaIngreso, &p.SalePrice); err != nil {
 			return nil, err
 		}
 		products = append(products, p)
@@ -643,6 +645,29 @@ func parseDateOrDefault(value string, fallback time.Time) time.Time {
 		return fallback
 	}
 	return parsed
+}
+
+// parseCOPInteger parses a currency-like string into an integer COP value.
+// It accepts plain numbers and formatted inputs (e.g. "1.234.567", "$1,234,567").
+func parseCOPInteger(raw string) (int, error) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return 0, fmt.Errorf("empty")
+	}
+	digits := strings.Map(func(r rune) rune {
+		if r >= '0' && r <= '9' {
+			return r
+		}
+		return -1
+	}, raw)
+	if digits == "" {
+		return 0, fmt.Errorf("invalid")
+	}
+	v, err := strconv.Atoi(digits)
+	if err != nil {
+		return 0, err
+	}
+	return v, nil
 }
 
 func parseFlexibleTime(value string) (time.Time, bool) {
@@ -2208,6 +2233,7 @@ func main() {
 				FechaIngreso:      fechaIngresoISO,
 				MesesEnStock:      mesesEnStock,
 				AlertaPermanencia: alertaPermanencia,
+				SalePrice:         product.SalePrice,
 			})
 		}
 		data := inventoryPageData{
@@ -2332,6 +2358,189 @@ func main() {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "producto_id": productID, "cantidad": qty})
+	})
+
+	mux.HandleFunc("/inventario/stock", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONError := func(status int, message string) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
+		}
+
+		currentUser := userFromContext(r)
+		if currentUser == nil || currentUser.Role != "admin" {
+			writeJSONError(http.StatusForbidden, "Solo administrador puede ajustar stock y precio.")
+			return
+		}
+
+		if r.Method != http.MethodPost {
+			writeJSONError(http.StatusMethodNotAllowed, "Método no permitido.")
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			writeJSONError(http.StatusBadRequest, "No se pudo leer el formulario.")
+			return
+		}
+		productID := strings.TrimSpace(r.FormValue("producto_id"))
+		targetValue := strings.TrimSpace(r.FormValue("cantidad"))
+		nota := strings.TrimSpace(r.FormValue("nota"))
+		priceValue := strings.TrimSpace(r.FormValue("precio_venta"))
+		target, err := strconv.Atoi(targetValue)
+		if productID == "" || err != nil || target < 0 {
+			writeJSONError(http.StatusBadRequest, "Cantidad objetivo inválida.")
+			return
+		}
+		updatePrice := priceValue != ""
+		newPrice := 0.0
+		if updatePrice {
+			parsed, err := parseCOPInteger(priceValue)
+			if err != nil || parsed < 0 {
+				writeJSONError(http.StatusBadRequest, "Precio de venta inválido.")
+				return
+			}
+			newPrice = float64(parsed)
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo iniciar la transacción.")
+			return
+		}
+		defer tx.Rollback()
+
+		rows, err := tx.Query(`
+			SELECT id
+			FROM unidades
+			WHERE producto_id = ? AND estado IN ('Disponible', 'available')
+			ORDER BY creado_en DESC, id DESC
+		`, productID)
+		if err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo consultar el stock actual.")
+			return
+		}
+		availableIDs := make([]string, 0, 64)
+		for rows.Next() {
+			var id string
+			if err := rows.Scan(&id); err != nil {
+				rows.Close()
+				writeJSONError(http.StatusInternalServerError, "No se pudo leer el stock actual.")
+				return
+			}
+			availableIDs = append(availableIDs, id)
+		}
+		if err := rows.Err(); err != nil {
+			rows.Close()
+			writeJSONError(http.StatusInternalServerError, "No se pudo procesar el stock actual.")
+			return
+		}
+		rows.Close()
+
+		current := len(availableIDs)
+		delta := target - current
+		now := time.Now().Format(time.RFC3339)
+		if delta > 0 {
+			createdIDs := make([]string, 0, delta)
+			baseID := time.Now().UnixNano()
+			for i := 0; i < delta; i++ {
+				unitID := fmt.Sprintf("U-%s-AJ-%d-%d", productID, baseID, i)
+				if _, err := tx.Exec(
+					`INSERT INTO unidades (id, producto_id, estado, creado_en, caducidad) VALUES (?, ?, ?, ?, ?)`,
+					unitID, productID, "Disponible", now, nil,
+				); err != nil {
+					writeJSONError(http.StatusInternalServerError, "No se pudo incrementar el stock.")
+					return
+				}
+				createdIDs = append(createdIDs, unitID)
+			}
+			logNote := nota
+			if logNote == "" {
+				logNote = fmt.Sprintf("Ajuste manual de stock: %d -> %d", current, target)
+			}
+			if err := logMovimientos(tx, productID, createdIDs, "ajuste_stock_entrada", logNote, currentUser, now); err != nil {
+				writeJSONError(http.StatusInternalServerError, "No se pudo registrar el ajuste.")
+				return
+			}
+		} else if delta < 0 {
+			removeCount := -delta
+			if removeCount > len(availableIDs) {
+				writeJSONError(http.StatusBadRequest, "No hay stock suficiente para reducir a ese valor.")
+				return
+			}
+			removeIDs := availableIDs[:removeCount]
+			placeholders := make([]string, len(removeIDs))
+			args := make([]any, 0, len(removeIDs)+1)
+			for i, id := range removeIDs {
+				placeholders[i] = "?"
+				args = append(args, id)
+			}
+			args = append(args, productID)
+			query := fmt.Sprintf(
+				"DELETE FROM unidades WHERE id IN (%s) AND producto_id = ? AND estado IN ('Disponible', 'available')",
+				strings.Join(placeholders, ","),
+			)
+			res, err := tx.Exec(query, args...)
+			if err != nil {
+				writeJSONError(http.StatusInternalServerError, "No se pudo reducir el stock.")
+				return
+			}
+			affected, err := res.RowsAffected()
+			if err != nil || int(affected) != removeCount {
+				writeJSONError(http.StatusInternalServerError, "No se pudo confirmar el ajuste de stock.")
+				return
+			}
+			logNote := nota
+			if logNote == "" {
+				logNote = fmt.Sprintf("Ajuste manual de stock: %d -> %d", current, target)
+			}
+			if err := logMovimientos(tx, productID, removeIDs, "ajuste_stock_salida", logNote, currentUser, now); err != nil {
+				writeJSONError(http.StatusInternalServerError, "No se pudo registrar el ajuste.")
+				return
+			}
+		}
+		if updatePrice {
+			res, err := tx.Exec(`UPDATE productos SET precio_venta = ? WHERE sku = ?`, newPrice, productID)
+			if err != nil {
+				writeJSONError(http.StatusInternalServerError, "No se pudo actualizar el precio de venta.")
+				return
+			}
+			affected, err := res.RowsAffected()
+			if err != nil || affected == 0 {
+				writeJSONError(http.StatusBadRequest, "Producto inválido para actualizar precio.")
+				return
+			}
+		}
+
+		if err := tx.Commit(); err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo confirmar la transacción.")
+			return
+		}
+		if updatePrice {
+			productsMu.Lock()
+			for idx := range products {
+				if products[idx].ID == productID {
+					products[idx].SalePrice = newPrice
+					break
+				}
+			}
+			productsMu.Unlock()
+		}
+		message := "Stock ajustado correctamente."
+		if delta == 0 && !updatePrice {
+			message = "Stock sin cambios."
+		} else if delta == 0 && updatePrice {
+			message = "Precio de venta actualizado correctamente."
+		} else if delta != 0 && updatePrice {
+			message = "Stock y precio de venta actualizados correctamente."
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":          true,
+			"producto_id": productID,
+			"actual":      target,
+			"objetivo":    target,
+			"delta":       delta,
+			"mensaje":     message,
+		})
 	})
 
 	mux.HandleFunc("/productos/historial", func(w http.ResponseWriter, r *http.Request) {

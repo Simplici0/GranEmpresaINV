@@ -826,6 +826,11 @@
             <label id="action-note-label" for="action-note">Nota</label>
             <textarea id="action-note" name="nota" placeholder=""></textarea>
           </div>
+          <div id="action-price-wrap" hidden>
+            <label for="action-price">Precio de venta (opcional)</label>
+            <input id="action-price" name="precio_venta" type="text" inputmode="numeric" placeholder="0" />
+            <div class="modal-hint">Solo aplica para ajuste manual de stock (admin).</div>
+          </div>
           <div class="modal-actions">
             <button type="button" class="secondary" data-modal-close>Cancelar</button>
             <button id="action-submit" type="submit" class="primary">Confirmar</button>
@@ -862,7 +867,7 @@
           <div class="modal-row">
             <div>
               <label for="sale-price">Precio unitario</label>
-              <input id="sale-price" name="precio_final_venta" type="number" min="0" step="0.01" placeholder="0.00" />
+              <input id="sale-price" name="precio_final_venta" type="text" inputmode="numeric" placeholder="0" />
             </div>
             <div>
               <label for="sale-method">Método de pago</label>
@@ -876,7 +881,7 @@
 
           <div>
             <label for="sale-final">Valor venta final (opcional)</label>
-            <input id="sale-final" name="valor_venta_final" type="number" min="0" step="0.01" placeholder="0.00" />
+            <input id="sale-final" name="valor_venta_final" type="text" inputmode="numeric" placeholder="0" />
             <div class="modal-hint">Si lo llenas, este valor reemplaza (Precio unitario x Cantidad).</div>
           </div>
 
@@ -904,6 +909,7 @@
         ingreso: "{{js .FechaIngreso}}",
         ageMonths: {{.MesesEnStock}},
         ageAlert: {{if .AlertaPermanencia}}true{{else}}false{{end}},
+        salePrice: {{printf "%.0f" .SalePrice}},
         statusClass: "{{js .EstadoClass}}",
         statusLabel: "{{js .EstadoLabel}}",
         available: {{.Disponible}},
@@ -1059,6 +1065,9 @@
               <div class="menu-panel" id="menu-${product.id}">
                 <button type="button" data-menu-action="reserve" data-product="${product.id}">Reservar unidades</button>
                 <button type="button" data-menu-action="damage" data-product="${product.id}">Registrar daño</button>
+                {{if and .CurrentUser (eq .CurrentUser.Role "admin")}}
+                <button type="button" data-menu-action="stock" data-product="${product.id}">Ajustar stock</button>
+                {{end}}
                 <button type="button" data-menu-action="history" data-product="${product.id}">Ver historial</button>
               </div>
             </div>
@@ -1137,10 +1146,23 @@
     const actionForm = document.getElementById("action-form");
     const actionQty = document.getElementById("action-qty");
     const actionMax = document.getElementById("action-max");
+    const actionMaxLabel = document.getElementById("action-max-label");
     const actionError = document.getElementById("action-error");
     const actionNote = document.getElementById("action-note");
     const actionNoteLabel = document.getElementById("action-note-label");
+    const actionPriceWrap = document.getElementById("action-price-wrap");
+    const actionPrice = document.getElementById("action-price");
     const actionSubmit = document.getElementById("action-submit");
+
+    const formatCOP = (value) => {
+      const n = Math.max(0, Math.round(Number(value || 0)));
+      return n.toLocaleString("es-CO");
+    };
+    const parseCOP = (raw) => {
+      const digits = String(raw || "").replace(/[^\d]/g, "");
+      if (!digits) return NaN;
+      return Number(digits);
+    };
 
     const saleModal = document.getElementById("sale-modal");
     const saleSubtitle = document.getElementById("sale-subtitle");
@@ -1156,6 +1178,32 @@
     if (salePrice) {
       salePrice.addEventListener("input", () => {
         salePrice.dataset.autofilled = "0";
+        const n = parseCOP(salePrice.value);
+        if (Number.isNaN(n)) {
+          salePrice.value = "";
+          return;
+        }
+        salePrice.value = formatCOP(n);
+      });
+    }
+    if (saleFinal) {
+      saleFinal.addEventListener("input", () => {
+        const n = parseCOP(saleFinal.value);
+        if (Number.isNaN(n)) {
+          saleFinal.value = "";
+          return;
+        }
+        saleFinal.value = formatCOP(n);
+      });
+    }
+    if (actionPrice) {
+      actionPrice.addEventListener("input", () => {
+        const n = parseCOP(actionPrice.value);
+        if (Number.isNaN(n)) {
+          actionPrice.value = "";
+          return;
+        }
+        actionPrice.value = formatCOP(n);
       });
     }
 
@@ -1226,16 +1274,51 @@
       openMenuContext = null;
     };
 
-    const openActionModal = ({ title, subtitle, endpoint, productId, maxQty, defaultQty, noteLabel, notePlaceholder }) => {
-      actionContext = { endpoint, productId, maxQty };
+    const openActionModal = ({
+      title,
+      subtitle,
+      endpoint,
+      productId,
+      maxQty,
+      defaultQty,
+      noteLabel,
+      notePlaceholder,
+      valueLabel,
+      mode,
+      minQty,
+      allowGreaterThanMax,
+      allowPriceEdit,
+      defaultPrice
+    }) => {
+      actionContext = {
+        endpoint,
+        productId,
+        maxQty,
+        mode: mode || "units",
+        minQty: Number.isFinite(minQty) ? minQty : 1,
+        allowGreaterThanMax: !!allowGreaterThanMax,
+        allowPriceEdit: !!allowPriceEdit
+      };
       if (actionTitle) actionTitle.textContent = title;
       if (actionNoteLabel) actionNoteLabel.textContent = noteLabel || "Nota";
+      if (actionMaxLabel) actionMaxLabel.textContent = valueLabel || "Disponible";
       if (actionNote) actionNote.placeholder = notePlaceholder || "";
       if (actionNote) actionNote.value = "";
+      if (actionPriceWrap) actionPriceWrap.hidden = !actionContext.allowPriceEdit;
+      if (actionPrice) {
+        actionPrice.value = actionContext.allowPriceEdit && Number.isFinite(defaultPrice) ? formatCOP(defaultPrice) : "";
+      }
       if (actionMax) actionMax.value = maxQty >= 0 ? String(maxQty) : "-";
       if (actionQty) {
-        actionQty.max = String(Math.max(1, maxQty));
-        actionQty.value = String(Math.min(Math.max(1, defaultQty || 1), Math.max(1, maxQty)));
+        const min = actionContext.minQty;
+        actionQty.min = String(min);
+        if (actionContext.allowGreaterThanMax) {
+          actionQty.removeAttribute("max");
+          actionQty.value = String(Math.max(min, defaultQty ?? min));
+        } else {
+          actionQty.max = String(Math.max(min, maxQty));
+          actionQty.value = String(Math.min(Math.max(min, defaultQty || min), Math.max(min, maxQty)));
+        }
       }
       if (actionSubmit) actionSubmit.disabled = false;
       setActionError("");
@@ -1289,7 +1372,7 @@
             const current = String(salePrice.value || "").trim();
             const canAutofill = !current || salePrice.dataset.autofilled === "1";
             if (canAutofill) {
-              salePrice.value = String(v.toFixed(2));
+              salePrice.value = formatCOP(v);
               salePrice.dataset.autofilled = "1";
             }
           })
@@ -1339,7 +1422,9 @@
             venta: "Venta",
             reservar: "Reserva",
             dano: "Daño",
-            cambio_salida: "Cambio"
+            cambio_salida: "Cambio",
+            ajuste_stock_entrada: "Ajuste +",
+            ajuste_stock_salida: "Ajuste -"
           };
           tag.className = `move-tag ${tipo}`;
           tag.textContent = labels[tipo] || tipo;
@@ -1373,30 +1458,25 @@
       }
     };
 
-    const postAction = async (endpoint, productId, qty, note) => {
-      const body = new URLSearchParams({
-        producto_id: productId,
-        cantidad: String(qty),
-        nota: note || ""
-      });
-      const resp = await fetch(endpoint, {
-        method: "POST",
-        headers: { "Content-Type": "application/x-www-form-urlencoded" },
-        body
-      });
-      const data = await resp.json().catch(() => ({}));
-      if (!resp.ok || !data.ok) {
-        throw new Error(data.error || "No se pudo completar la acción.");
-      }
-    };
-
     if (actionForm) {
       actionForm.addEventListener("submit", async (event) => {
         event.preventDefault();
         if (!actionContext) return;
 
         const qty = parseInt(actionQty?.value || "0", 10);
-        if (Number.isNaN(qty) || qty < 1 || qty > actionContext.maxQty) {
+        const isAdjustMode = actionContext.mode === "adjust_stock";
+        const priceText = String(actionPrice?.value || "").trim();
+        const shouldSendPrice = actionContext.allowPriceEdit && priceText !== "";
+        const parsedPrice = shouldSendPrice ? parseCOP(priceText) : NaN;
+        if (shouldSendPrice && (Number.isNaN(parsedPrice) || parsedPrice < 0)) {
+          setActionError("Precio de venta inválido.");
+          return;
+        }
+        if (Number.isNaN(qty) || qty < actionContext.minQty) {
+          setActionError("Cantidad inválida.");
+          return;
+        }
+        if (!isAdjustMode && (!Number.isFinite(actionContext.maxQty) || qty > actionContext.maxQty)) {
           setActionError("Cantidad inválida.");
           return;
         }
@@ -1406,9 +1486,25 @@
         setActionError("");
 
         try {
-          await postAction(actionContext.endpoint, actionContext.productId, qty, note);
+          const body = new URLSearchParams({
+            producto_id: actionContext.productId,
+            cantidad: String(qty),
+            nota: note || ""
+          });
+          if (shouldSendPrice) {
+            body.set("precio_venta", String(parsedPrice));
+          }
+          const resp = await fetch(actionContext.endpoint, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || !data.ok) {
+            throw new Error(data.error || "No se pudo completar la acción.");
+          }
           closeModal(actionModal);
-          window.location.reload();
+          window.location.href = `/inventario?mensaje=${encodeURIComponent(data.mensaje || "Ajuste aplicado correctamente.")}`;
         } catch (err) {
           setActionError(err?.message || "No se pudo completar la acción.");
           if (actionSubmit) actionSubmit.disabled = false;
@@ -1426,13 +1522,15 @@
         const finalValue = String(saleFinal?.value || "").trim();
         const method = String(saleMethod?.value || "").trim();
         const notes = String(saleNotes?.value || "").trim();
-        const hasFinal = !!finalValue && Number(finalValue) > 0;
+        const parsedPrice = parseCOP(price);
+        const parsedFinalValue = parseCOP(finalValue);
+        const hasFinal = !!finalValue && Number.isFinite(parsedFinalValue) && parsedFinalValue > 0;
 
         if (Number.isNaN(qty) || qty < 1 || qty > saleContext.maxQty) {
           setSaleError("Cantidad inválida.");
           return;
         }
-        if (!hasFinal && (!price || Number(price) <= 0)) {
+        if (!hasFinal && (!price || !Number.isFinite(parsedPrice) || parsedPrice <= 0)) {
           setSaleError("Ingresa un precio válido.");
           return;
         }
@@ -1448,8 +1546,8 @@
           const body = new URLSearchParams({
             producto_id: saleContext.productId,
             cantidad: String(qty),
-            precio_final_venta: price,
-            valor_venta_final: finalValue,
+            precio_final_venta: Number.isFinite(parsedPrice) && parsedPrice > 0 ? String(parsedPrice) : "",
+            valor_venta_final: hasFinal ? String(parsedFinalValue) : "",
             metodo_pago: method,
             notas: notes
           });
@@ -1516,7 +1614,7 @@
         const action = menuAction.dataset.menuAction;
         const product = products.find((p) => p.id === productId);
         const qtyInput = document.querySelector(`input[data-qty="${productId}"]`);
-        const maxQty = parseInt(qtyInput?.max || "0", 10);
+        const maxQty = Number.isFinite(Number(product?.available)) ? Number(product.available) : parseInt(qtyInput?.max || "0", 10);
         const defaultQty = parseInt(qtyInput?.value || "1", 10) || 1;
 
         // Close any open menu before running the action.
@@ -1575,6 +1673,26 @@
             defaultQty,
             noteLabel: "Descripción del daño (opcional)",
             notePlaceholder: "Ej: empaque roto, derrame, vencido, etc."
+          });
+          return;
+        }
+        if (action === "stock") {
+          const currentStock = Number.isFinite(maxQty) ? Math.max(0, maxQty) : 0;
+          openActionModal({
+            title: "Ajustar stock",
+            subtitle: product ? `${product.name} · SKU ${productId}` : `SKU ${productId}`,
+            endpoint: "/inventario/stock",
+            productId,
+            maxQty: currentStock,
+            defaultQty: currentStock,
+            valueLabel: "Stock actual",
+            mode: "adjust_stock",
+            minQty: 0,
+            allowGreaterThanMax: true,
+            allowPriceEdit: true,
+            defaultPrice: Number(product?.salePrice || 0),
+            noteLabel: "Nota del ajuste (opcional)",
+            notePlaceholder: "Ej: conteo físico de inventario."
           });
           return;
         }
