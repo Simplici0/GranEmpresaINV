@@ -2643,6 +2643,136 @@ func main() {
 		})
 	})
 
+	mux.HandleFunc("/inventario/producto/eliminar", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONError := func(status int, message string) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]string{"error": message})
+		}
+
+		currentUser := userFromContext(r)
+		if currentUser == nil || currentUser.Role != "admin" {
+			writeJSONError(http.StatusForbidden, "Solo administrador puede eliminar productos.")
+			return
+		}
+		if r.Method != http.MethodPost {
+			writeJSONError(http.StatusMethodNotAllowed, "Método no permitido.")
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			writeJSONError(http.StatusBadRequest, "No se pudo leer el formulario.")
+			return
+		}
+
+		productID := strings.TrimSpace(r.FormValue("producto_id"))
+		if productID == "" {
+			writeJSONError(http.StatusBadRequest, "Producto inválido.")
+			return
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo iniciar la transacción.")
+			return
+		}
+		defer tx.Rollback()
+
+		var exists int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM productos WHERE sku = ? OR id = ?`, productID, productID).Scan(&exists); err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo validar el producto.")
+			return
+		}
+		if exists == 0 {
+			writeJSONError(http.StatusBadRequest, "Producto inválido.")
+			return
+		}
+
+		if _, err := tx.Exec(`DELETE FROM unidades WHERE producto_id = ?`, productID); err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudieron eliminar las unidades del producto.")
+			return
+		}
+
+		// Legacy compatibility: if the table exists, clear price history rows before deleting the product.
+		var hasPriceHistoryTable int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = 'precio_venta_historial'`).Scan(&hasPriceHistoryTable); err == nil && hasPriceHistoryTable > 0 {
+			histCols := map[string]bool{}
+			colRows, err := tx.Query(`PRAGMA table_info('precio_venta_historial')`)
+			if err == nil {
+				for colRows.Next() {
+					var cid int
+					var name, colType string
+					var notNull, pk int
+					var dflt sql.NullString
+					if scanErr := colRows.Scan(&cid, &name, &colType, &notNull, &dflt, &pk); scanErr == nil {
+						histCols[strings.ToLower(strings.TrimSpace(name))] = true
+					}
+				}
+				colRows.Close()
+			}
+
+			switch {
+			case histCols["producto_id"]:
+				if _, err := tx.Exec(`DELETE FROM precio_venta_historial WHERE producto_id = ?`, productID); err != nil {
+					writeJSONError(http.StatusInternalServerError, "No se pudo limpiar el historial de precio del producto.")
+					return
+				}
+			case histCols["product_id"]:
+				if _, err := tx.Exec(`DELETE FROM precio_venta_historial WHERE product_id = ?`, productID); err != nil {
+					writeJSONError(http.StatusInternalServerError, "No se pudo limpiar el historial de precio del producto.")
+					return
+				}
+			case histCols["producto_sku"]:
+				if _, err := tx.Exec(`DELETE FROM precio_venta_historial WHERE producto_sku = ?`, productID); err != nil {
+					writeJSONError(http.StatusInternalServerError, "No se pudo limpiar el historial de precio del producto.")
+					return
+				}
+			case histCols["sku"]:
+				if _, err := tx.Exec(`DELETE FROM precio_venta_historial WHERE sku = ?`, productID); err != nil {
+					writeJSONError(http.StatusInternalServerError, "No se pudo limpiar el historial de precio del producto.")
+					return
+				}
+			}
+		}
+
+		res, err := tx.Exec(`DELETE FROM productos WHERE sku = ? OR id = ?`, productID, productID)
+		if err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "foreign key") {
+				writeJSONError(http.StatusBadRequest, "No se pudo eliminar el producto porque tiene referencias activas.")
+				return
+			}
+			writeJSONError(http.StatusInternalServerError, "No se pudo eliminar el producto.")
+			return
+		}
+		affected, err := res.RowsAffected()
+		if err != nil || affected == 0 {
+			writeJSONError(http.StatusBadRequest, "No se pudo confirmar la eliminación del producto.")
+			return
+		}
+
+		if err := tx.Commit(); err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo confirmar la transacción.")
+			return
+		}
+
+		productsMu.Lock()
+		filtered := make([]productOption, 0, len(products))
+		for _, p := range products {
+			if p.ID == productID {
+				continue
+			}
+			filtered = append(filtered, p)
+		}
+		products = filtered
+		productsMu.Unlock()
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":          true,
+			"producto_id": productID,
+			"mensaje":     "Producto eliminado correctamente.",
+		})
+	})
+
 	mux.HandleFunc("/productos/historial", func(w http.ResponseWriter, r *http.Request) {
 		productID := strings.TrimSpace(r.URL.Query().Get("producto_id"))
 		if productID == "" {

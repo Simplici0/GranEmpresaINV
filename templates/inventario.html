@@ -343,6 +343,17 @@
       border-color: var(--primary);
     }
 
+    button.danger {
+      background: #fff1f1;
+      color: #b42318;
+      border-color: #f4b9b3;
+    }
+
+    button.danger:hover {
+      background: #ffe3e1;
+      border-color: #e89d96;
+    }
+
     button.ghost {
       background: transparent;
       color: var(--muted);
@@ -832,6 +843,9 @@
             <div class="modal-hint">Solo aplica para ajuste manual de stock (admin).</div>
           </div>
           <div class="modal-actions">
+            {{if and .CurrentUser (eq .CurrentUser.Role "admin")}}
+            <button id="action-delete-product" type="button" class="danger" hidden>Eliminar producto</button>
+            {{end}}
             <button type="button" class="secondary" data-modal-close>Cancelar</button>
             <button id="action-submit" type="submit" class="primary">Confirmar</button>
           </div>
@@ -1153,6 +1167,7 @@
     const actionPriceWrap = document.getElementById("action-price-wrap");
     const actionPrice = document.getElementById("action-price");
     const actionSubmit = document.getElementById("action-submit");
+    const actionDeleteProduct = document.getElementById("action-delete-product");
 
     const formatCOP = (value) => {
       const n = Math.max(0, Math.round(Number(value || 0)));
@@ -1319,6 +1334,10 @@
           actionQty.max = String(Math.max(min, maxQty));
           actionQty.value = String(Math.min(Math.max(min, defaultQty || min), Math.max(min, maxQty)));
         }
+      }
+      if (actionDeleteProduct) {
+        actionDeleteProduct.hidden = actionContext.mode !== "adjust_stock";
+        actionDeleteProduct.disabled = false;
       }
       if (actionSubmit) actionSubmit.disabled = false;
       setActionError("");
@@ -1508,6 +1527,39 @@
         } catch (err) {
           setActionError(err?.message || "No se pudo completar la acción.");
           if (actionSubmit) actionSubmit.disabled = false;
+        }
+      });
+    }
+
+    if (actionDeleteProduct) {
+      actionDeleteProduct.addEventListener("click", async () => {
+        if (!actionContext || actionContext.mode !== "adjust_stock") return;
+        const confirmed = window.confirm("Esta acción eliminará el producto y sus unidades del inventario. ¿Deseas continuar?");
+        if (!confirmed) return;
+        if (actionSubmit) actionSubmit.disabled = true;
+        actionDeleteProduct.disabled = true;
+        setActionError("");
+        try {
+          const body = new URLSearchParams({
+            producto_id: actionContext.productId
+          });
+          const note = String(actionNote?.value || "").trim();
+          if (note) body.set("nota", note);
+          const resp = await fetch("/inventario/producto/eliminar", {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || !data.ok) {
+            throw new Error(data.error || "No se pudo eliminar el producto.");
+          }
+          closeModal(actionModal);
+          window.location.href = `/inventario?mensaje=${encodeURIComponent(data.mensaje || "Producto eliminado correctamente.")}`;
+        } catch (err) {
+          setActionError(err?.message || "No se pudo eliminar el producto.");
+          if (actionSubmit) actionSubmit.disabled = false;
+          actionDeleteProduct.disabled = false;
         }
       });
     }
