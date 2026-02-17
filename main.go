@@ -1477,7 +1477,7 @@ func main() {
 		}
 
 		data := adminUsersData{
-			Title:       "Gestión de usuarios",
+			Title:       "Roles de usuario",
 			Subtitle:    "Control de accesos y roles del inventario.",
 			Flash:       flash,
 			Error:       errText,
@@ -1975,8 +1975,8 @@ func main() {
 		}
 
 		data := dashboardData{
-			Title:           "Dashboard SSR",
-			Subtitle:        "Resumen agregado de inventario y ventas.",
+			Title:           "Resumen de negocio",
+			Subtitle:        "",
 			EstadoConteos:   estadoConteos,
 			MetodosPago:     salesData.MetodosPago,
 			PieSlices:       salesData.PieSlices,
@@ -2211,8 +2211,8 @@ func main() {
 			})
 		}
 		data := inventoryPageData{
-			Title:       "Pantalla Inventario (por producto)",
-			Subtitle:    "Control por producto con ventas, cambios y auditoría de unidades en FIFO.",
+			Title:       "Seguimiento de existencias",
+			Subtitle:    "",
 			RoutePrefix: "",
 			Flash:       flash,
 			MetodoPagos: paymentMethods,
