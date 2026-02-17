@@ -218,6 +218,15 @@ type timelinePoint struct {
 	Percent  float64 `json:"percent"`
 }
 
+type dashboardSaleDetail struct {
+	ID         int    `json:"id"`
+	Fecha      string `json:"fecha"`
+	Producto   string `json:"producto"`
+	Cantidad   int    `json:"cantidad"`
+	Total      string `json:"total"`
+	MetodoPago string `json:"metodo_pago"`
+}
+
 type pieSlice struct {
 	Metodo  string  `json:"metodo"`
 	Total   string  `json:"total"`
@@ -238,6 +247,7 @@ type dashboardData struct {
 	MaxTimelineText string
 	TimelinePoints  string
 	Timeline        []timelinePoint
+	Sales           []dashboardSaleDetail
 	CurrentUser     *User
 	RangeStart      string
 	RangeEnd        string
@@ -253,12 +263,13 @@ type dashboardDataResponse struct {
 	RangeTotal string `json:"range_total"`
 	RangeCount int    `json:"range_count"`
 
-	MetodosPago     []metodoPagoTotal `json:"metodos_pago"`
-	PieSlices       []pieSlice        `json:"pie_slices"`
-	PieTotal        string            `json:"pie_total"`
-	MaxTimeline     float64           `json:"max_timeline"`
-	MaxTimelineText string            `json:"max_timeline_text"`
-	Timeline        []timelinePoint   `json:"timeline"`
+	MetodosPago     []metodoPagoTotal     `json:"metodos_pago"`
+	PieSlices       []pieSlice            `json:"pie_slices"`
+	PieTotal        string                `json:"pie_total"`
+	MaxTimeline     float64               `json:"max_timeline"`
+	MaxTimelineText string                `json:"max_timeline_text"`
+	Timeline        []timelinePoint       `json:"timeline"`
+	Sales           []dashboardSaleDetail `json:"sales"`
 }
 
 func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, endDate time.Time) (dashboardDataResponse, error) {
@@ -398,6 +409,55 @@ func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, end
 	resp.MaxTimeline = maxTimeline
 	resp.MaxTimelineText = formatCurrency(maxTimeline)
 	resp.Timeline = timeline
+
+	saleRows, err := db.Query(`
+		SELECT
+			v.id,
+			v.fecha,
+			COALESCE(p.nombre, v.producto_id),
+			v.cantidad,
+			v.precio_final,
+			v.metodo_pago
+		FROM ventas v
+		LEFT JOIN productos p ON p.sku = v.producto_id
+		WHERE date(v.fecha) BETWEEN ? AND ?
+		ORDER BY v.fecha DESC, v.id DESC
+	`, startStr, endStr)
+	if err != nil {
+		return dashboardDataResponse{}, err
+	}
+	defer saleRows.Close()
+
+	sales := make([]dashboardSaleDetail, 0, 64)
+	for saleRows.Next() {
+		var (
+			id         int
+			fechaRaw   string
+			producto   string
+			cantidad   int
+			precioUnit float64
+			metodoPago string
+		)
+		if err := saleRows.Scan(&id, &fechaRaw, &producto, &cantidad, &precioUnit, &metodoPago); err != nil {
+			return dashboardDataResponse{}, err
+		}
+		fecha := fechaRaw
+		if len(fechaRaw) >= 10 {
+			fecha = fechaRaw[:10]
+		}
+		sales = append(sales, dashboardSaleDetail{
+			ID:         id,
+			Fecha:      fecha,
+			Producto:   producto,
+			Cantidad:   cantidad,
+			Total:      formatCurrency(precioUnit * float64(cantidad)),
+			MetodoPago: metodoPago,
+		})
+	}
+	if err := saleRows.Err(); err != nil {
+		return dashboardDataResponse{}, err
+	}
+	resp.Sales = sales
 
 	return resp, nil
 }
@@ -2010,6 +2070,7 @@ func main() {
 			MaxTimelineText: salesData.MaxTimelineText,
 			TimelinePoints:  buildTimelinePoints(salesData.Timeline, 560, 180, 24),
 			Timeline:        salesData.Timeline,
+			Sales:           salesData.Sales,
 			CurrentUser:     currentUser,
 			RangeStart:      startStr,
 			RangeEnd:        endStr,
@@ -2043,6 +2104,45 @@ func main() {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(data)
+	})
+
+	mux.HandleFunc("/dashboard/ventas/delete", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONError := func(status int, message string) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{"ok": false, "error": message})
+		}
+		if r.Method != http.MethodPost {
+			writeJSONError(http.StatusMethodNotAllowed, "Método no permitido.")
+			return
+		}
+		currentUser := userFromContext(r)
+		if currentUser == nil || currentUser.Role != "admin" {
+			writeJSONError(http.StatusForbidden, "Solo administrador puede eliminar ventas.")
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			writeJSONError(http.StatusBadRequest, "No se pudo leer el formulario.")
+			return
+		}
+		idValue := strings.TrimSpace(r.FormValue("venta_id"))
+		ventaID, err := strconv.Atoi(idValue)
+		if err != nil || ventaID <= 0 {
+			writeJSONError(http.StatusBadRequest, "ID de venta inválido.")
+			return
+		}
+		res, err := db.Exec(`DELETE FROM ventas WHERE id = ?`, ventaID)
+		if err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo eliminar la venta.")
+			return
+		}
+		affected, err := res.RowsAffected()
+		if err != nil || affected == 0 {
+			writeJSONError(http.StatusNotFound, "La venta no existe o ya fue eliminada.")
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "venta_id": ventaID})
 	})
 
 	mux.HandleFunc("/csv/ventas", func(w http.ResponseWriter, r *http.Request) {
@@ -3352,6 +3452,9 @@ func main() {
 			linea := get(row, "linea")
 			nombre := get(row, "nombre")
 			cantidadRaw := get(row, "cantidad")
+			if cantidadRaw == "-" {
+				cantidadRaw = "0"
+			}
 
 			if sku == "" || linea == "" || nombre == "" {
 				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "SKU, línea y nombre son obligatorios."})
@@ -3359,8 +3462,8 @@ func main() {
 			}
 
 			cantidad, err := parseCSVInt(cantidadRaw)
-			if err != nil || cantidad <= 0 {
-				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Cantidad inválida."})
+			if err != nil || cantidad < 0 {
+				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Cantidad inválida (debe ser 0 o mayor)."})
 				continue
 			}
 

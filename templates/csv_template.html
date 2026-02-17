@@ -611,7 +611,8 @@
         const sku = get("sku");
         const linea = get("linea");
         const nombre = get("nombre");
-        const cantidad = get("cantidad");
+        const cantidadRaw = get("cantidad");
+        const cantidad = cantidadRaw === "-" ? "0" : cantidadRaw;
         const precioBase = get("precio_base");
         const precioVenta = get("precio_venta");
         const precioConsultora = get("precio_consultora");
@@ -626,8 +627,8 @@
         if (!nombre) errors.push("Nombre obligatorio.");
 
         const cantidadNum = Number(cantidad);
-        if (!cantidad || !Number.isInteger(cantidadNum) || cantidadNum <= 0) {
-          errors.push("Cantidad debe ser entero mayor a 0.");
+        if (cantidad === "" || !Number.isInteger(cantidadNum) || cantidadNum < 0) {
+          errors.push("Cantidad debe ser entero mayor o igual a 0.");
         }
 
         const parseNumber = (value) => Number(String(value).replace(",", "."));
@@ -706,7 +707,7 @@
           <td>${row.sku || "-"}</td>
           <td>${row.linea || "-"}</td>
           <td>${row.nombre || "-"}</td>
-          <td>${row.cantidad || "-"}</td>
+          <td>${row.cantidad === "" ? "-" : row.cantidad}</td>
           <td>${row.precioBase || "-"}</td>
           <td>${row.precioVenta || "-"}</td>
           <td>${row.precioConsultora || "-"}</td>

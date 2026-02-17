@@ -651,25 +651,35 @@
         <summary style="list-style:none; cursor:pointer; font-weight:800; color:var(--primary);">
           Ver detalle de ventas
         </summary>
-        <div class="chart-note" style="margin-top:6px;">Detalle por día dentro del rango seleccionado.</div>
-        <table>
-          <thead>
-            <tr>
-              <th>Fecha</th>
-              <th>Ventas</th>
-              <th>Total</th>
-            </tr>
-          </thead>
-          <tbody id="timeline-table-body">
-            {{range .Timeline}}
-            <tr>
-              <td>{{.Fecha}}</td>
-              <td>{{.Cantidad}}</td>
-              <td>{{.Total}}</td>
-            </tr>
-            {{end}}
-          </tbody>
-        </table>
+	        <div class="chart-note" style="margin-top:6px;">Detalle por venta dentro del rango seleccionado.</div>
+	        <table>
+	          <thead>
+	            <tr>
+	              <th>ID</th>
+	              <th>Fecha</th>
+	              <th>Producto</th>
+	              <th>Cantidad</th>
+	              <th>Total</th>
+	              <th>Método</th>
+	              {{if and .CurrentUser (eq .CurrentUser.Role "admin")}}<th>Acción</th>{{end}}
+	            </tr>
+	          </thead>
+	          <tbody id="sales-table-body">
+	            {{range .Sales}}
+		            <tr>
+		              <td>{{.ID}}</td>
+		              <td>{{.Fecha}}</td>
+		              <td>{{.Producto}}</td>
+		              <td>{{.Cantidad}}</td>
+		              <td>{{.Total}}</td>
+		              <td>{{.MetodoPago}}</td>
+	              {{if and $.CurrentUser (eq $.CurrentUser.Role "admin")}}
+	              <td><button type="button" class="button secondary" data-sale-delete="{{.ID}}">Eliminar</button></td>
+	              {{end}}
+	            </tr>
+	            {{end}}
+	          </tbody>
+	        </table>
       </details>
     </article>
 
@@ -718,14 +728,15 @@
       const endInput = document.getElementById("end_date");
       const rangeBadge = document.getElementById("dash-range-badge");
       const downloadBtn = document.getElementById("dash-download");
-      const pieSvg = document.getElementById("pie-svg");
-      const pieLegend = document.getElementById("pie-legend");
-      const timelineSvg = document.getElementById("timeline-svg");
-      const timelineMax = document.getElementById("timeline-max");
-      const timelineDays = document.getElementById("timeline-days");
-	      const timelineTableBody = document.getElementById("timeline-table-body");
+	      const pieSvg = document.getElementById("pie-svg");
+	      const pieLegend = document.getElementById("pie-legend");
+	      const timelineSvg = document.getElementById("timeline-svg");
+	      const timelineMax = document.getElementById("timeline-max");
+	      const timelineDays = document.getElementById("timeline-days");
+	      const salesTableBody = document.getElementById("sales-table-body");
 	      const kpiTotal = document.getElementById("kpi-total");
 	      const kpiSub = document.getElementById("kpi-sub");
+	      const isAdmin = {{if and .CurrentUser (eq .CurrentUser.Role "admin")}}true{{else}}false{{end}};
 
 	      const moneyFmt = (() => {
 	        try {
@@ -912,22 +923,40 @@
           timelineSvg.appendChild(el("text", { x: tx, y: ty, "font-size": 12, fill: "#26221f", "font-weight": 700 }, label));
         });
 
-        if (timelineTableBody) {
-          timelineTableBody.innerHTML = "";
-          timeline.forEach((p) => {
-            const tr = document.createElement("tr");
-            tr.innerHTML = `<td>${p.fecha || "-"}</td><td>${p.cantidad ?? "-"}</td><td>${p.total || "-"}</td>`;
-            timelineTableBody.appendChild(tr);
-          });
-        }
-      };
+	      };
 
-      const applyData = (data) => {
-        if (!data || !data.ok) return;
-        setRangeBadge(data.range_start, data.range_end, data.range_count, data.range_total);
-        renderDonut(data);
-        renderTimeline(data);
-      };
+	      const renderSales = (data) => {
+	        if (!salesTableBody) return;
+	        const sales = Array.isArray(data.sales) ? data.sales : [];
+	        salesTableBody.innerHTML = "";
+	        sales.forEach((s) => {
+	          const tr = document.createElement("tr");
+	          const cells = [
+	            String(s.id ?? "-"),
+	            String(s.fecha || "-"),
+	            String(s.producto || "-"),
+	            String(s.cantidad ?? "-"),
+	            String(s.total || "-"),
+	            String(s.metodo_pago || "-")
+	          ];
+	          if (isAdmin) {
+	            cells.push(`<button type="button" class="button secondary" data-sale-delete="${s.id}">Eliminar</button>`);
+	          }
+	          tr.innerHTML = cells.map((c, i) => {
+	            if (isAdmin && i === cells.length - 1) return `<td>${c}</td>`;
+	            return `<td>${c}</td>`;
+	          }).join("");
+	          salesTableBody.appendChild(tr);
+	        });
+	      };
+
+	      const applyData = (data) => {
+	        if (!data || !data.ok) return;
+	        setRangeBadge(data.range_start, data.range_end, data.range_count, data.range_total);
+	        renderDonut(data);
+	        renderTimeline(data);
+	        renderSales(data);
+	      };
 
       let pending = null;
       const schedule = () => {
@@ -952,11 +981,40 @@
         }, 250);
       };
 
-      if (startInput) startInput.addEventListener("change", schedule);
-      if (endInput) endInput.addEventListener("change", schedule);
+	      if (startInput) startInput.addEventListener("change", schedule);
+	      if (endInput) endInput.addEventListener("change", schedule);
+	      if (salesTableBody && isAdmin) {
+	        salesTableBody.addEventListener("click", async (event) => {
+	          const btn = event.target.closest("[data-sale-delete]");
+	          if (!btn) return;
+	          const saleId = String(btn.getAttribute("data-sale-delete") || "").trim();
+	          if (!saleId) return;
+	          if (!window.confirm("¿Eliminar esta venta? Esta acción no se puede deshacer.")) return;
+	          btn.setAttribute("disabled", "disabled");
+	          try {
+	            const resp = await fetch("/dashboard/ventas/delete", {
+	              method: "POST",
+	              headers: {
+	                "Content-Type": "application/x-www-form-urlencoded",
+	                "Accept": "application/json"
+	              },
+	              body: new URLSearchParams({ venta_id: saleId }).toString()
+	            });
+	            const data = await resp.json().catch(() => ({}));
+	            if (!resp.ok || !data.ok) {
+	              throw new Error(data.error || "No se pudo eliminar la venta.");
+	            }
+	            schedule();
+	          } catch (err) {
+	            alert(err?.message || "No se pudo eliminar la venta.");
+	          } finally {
+	            btn.removeAttribute("disabled");
+	          }
+	        });
+	      }
 
-      // First render: reuse server-provided range values by fetching JSON once.
-      schedule();
+	      // First render: reuse server-provided range values by fetching JSON once.
+	      schedule();
       return { schedule };
     })();
   </script>
