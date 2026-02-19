@@ -220,8 +220,8 @@
         <div class="row">
           <div>
             <label for="sku">SKU</label>
-            <input id="sku" name="sku" type="text" placeholder="SKU único" value="{{.SKU}}" />
-            {{with .Errors}}{{with index . "sku"}}<div class="field-error">{{.}}</div>{{end}}{{end}}
+            <input id="sku" name="sku" type="text" value="{{.SKU}}" readonly />
+            <div class="hint">Se genera automáticamente al guardar.</div>
           </div>
           <div>
             <label for="cantidad">Cantidad</label>
@@ -243,6 +243,10 @@
         </datalist>
         {{with .Errors}}{{with index . "linea"}}<div class="field-error">{{.}}</div>{{end}}{{end}}
 
+        <label for="precio_venta">Precio de venta (opcional)</label>
+        <input id="precio_venta" name="precio_venta" type="text" inputmode="numeric" placeholder="0" value="{{.PrecioVenta}}" />
+        {{with .Errors}}{{with index . "precio_venta"}}<div class="field-error">{{.}}</div>{{end}}{{end}}
+
         <label class="toggle" for="aplica_caducidad">
           <input id="aplica_caducidad" name="aplica_caducidad" type="checkbox" {{if .AplicaCad}}checked{{end}} />
           <span>Aplica caducidad</span>
@@ -262,11 +266,39 @@
   <script>
     const aplica = document.getElementById("aplica_caducidad");
     const fecha = document.getElementById("fecha_caducidad");
+    const precioVenta = document.getElementById("precio_venta");
+
+    const parseCOP = (raw) => {
+      const digits = String(raw || "").replace(/[^\d]/g, "");
+      if (!digits) return NaN;
+      return Number(digits);
+    };
+    const formatCOP = (value) => {
+      const n = Math.max(0, Math.round(Number(value || 0)));
+      return n.toLocaleString("es-CO");
+    };
+
     const sync = () => {
       if (!aplica || !fecha) return;
       fecha.disabled = !aplica.checked;
       if (!aplica.checked) fecha.value = "";
     };
+
+    if (precioVenta) {
+      const initial = parseCOP(precioVenta.value);
+      if (!Number.isNaN(initial) && initial > 0) {
+        precioVenta.value = formatCOP(initial);
+      }
+      precioVenta.addEventListener("input", () => {
+        const n = parseCOP(precioVenta.value);
+        if (Number.isNaN(n)) {
+          precioVenta.value = "";
+          return;
+        }
+        precioVenta.value = formatCOP(n);
+      });
+    }
+
     if (aplica) aplica.addEventListener("change", sync);
     sync();
   </script>

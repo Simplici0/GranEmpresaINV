@@ -149,6 +149,46 @@ func loadProductos(db *sql.DB) ([]productOption, error) {
 	return products, nil
 }
 
+func generateNextProductSKU(db *sql.DB) (string, error) {
+	rows, err := db.Query(`SELECT sku FROM productos WHERE sku LIKE 'P-%'`)
+	if err != nil {
+		return "", err
+	}
+	defer rows.Close()
+
+	maxNum := 0
+	for rows.Next() {
+		var sku string
+		if err := rows.Scan(&sku); err != nil {
+			return "", err
+		}
+		if !strings.HasPrefix(sku, "P-") {
+			continue
+		}
+		n, err := strconv.Atoi(strings.TrimPrefix(sku, "P-"))
+		if err != nil {
+			continue
+		}
+		if n > maxNum {
+			maxNum = n
+		}
+	}
+	if err := rows.Err(); err != nil {
+		return "", err
+	}
+
+	for next := maxNum + 1; ; next++ {
+		candidate := fmt.Sprintf("P-%03d", next)
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM productos WHERE sku = ?`, candidate).Scan(&count); err != nil {
+			return "", err
+		}
+		if count == 0 {
+			return candidate, nil
+		}
+	}
+}
+
 func buildLineSuggestions(products []productOption, current string) []string {
 	seen := make(map[string]struct{})
 	lines := make([]string, 0)
@@ -1410,6 +1450,7 @@ func main() {
 		SKU         string
 		Nombre      string
 		Linea       string
+		PrecioVenta string
 		Lineas      []string
 		Cantidad    int
 		AplicaCad   bool
@@ -1906,9 +1947,15 @@ func main() {
 		productsSnapshot := make([]productOption, len(products))
 		copy(productsSnapshot, products)
 		productsMu.RUnlock()
+		nextSKU, err := generateNextProductSKU(db)
+		if err != nil {
+			http.Error(w, "No se pudo generar el SKU", http.StatusInternalServerError)
+			return
+		}
 		data := productNewData{
 			Title:       "Crear producto",
 			Subtitle:    "Acción reservada para administradores.",
+			SKU:         nextSKU,
 			Cantidad:    1,
 			Lineas:      buildLineSuggestions(productsSnapshot, ""),
 			CurrentUser: userFromContext(r),
@@ -1929,22 +1976,28 @@ func main() {
 			return
 		}
 
-		sku := strings.TrimSpace(r.FormValue("sku"))
 		nombre := strings.TrimSpace(r.FormValue("nombre"))
 		linea := strings.TrimSpace(r.FormValue("linea"))
 		cantidadRaw := strings.TrimSpace(r.FormValue("cantidad"))
+		precioVentaRaw := strings.TrimSpace(r.FormValue("precio_venta"))
 		aplicaCad := r.FormValue("aplica_caducidad") != ""
 		caducidad := strings.TrimSpace(r.FormValue("fecha_caducidad"))
 
 		errors := map[string]string{}
-		if sku == "" {
-			errors["sku"] = "SKU obligatorio."
-		}
 		if nombre == "" {
 			errors["nombre"] = "Nombre obligatorio."
 		}
 		if linea == "" {
 			errors["linea"] = "Línea obligatoria."
+		}
+		precioVenta := 0
+		if precioVentaRaw != "" {
+			parsedPrice, parseErr := parseCOPInteger(precioVentaRaw)
+			if parseErr != nil || parsedPrice < 0 {
+				errors["precio_venta"] = "Precio de venta inválido."
+			} else {
+				precioVenta = parsedPrice
+			}
 		}
 		cantidad, err := strconv.Atoi(cantidadRaw)
 		if err != nil || cantidad <= 0 {
@@ -1968,13 +2021,19 @@ func main() {
 			productsSnapshot := make([]productOption, len(products))
 			copy(productsSnapshot, products)
 			productsMu.RUnlock()
+			nextSKU, skuErr := generateNextProductSKU(db)
+			if skuErr != nil {
+				http.Error(w, "No se pudo generar el SKU", http.StatusInternalServerError)
+				return
+			}
 			w.WriteHeader(http.StatusBadRequest)
 			data := productNewData{
 				Title:       "Crear producto",
 				Subtitle:    "Acción reservada para administradores.",
-				SKU:         sku,
+				SKU:         nextSKU,
 				Nombre:      nombre,
 				Linea:       linea,
+				PrecioVenta: precioVentaRaw,
 				Lineas:      buildLineSuggestions(productsSnapshot, linea),
 				Cantidad:    cantidad,
 				AplicaCad:   aplicaCad,
@@ -1995,9 +2054,18 @@ func main() {
 		}
 		defer tx.Rollback()
 
+		sku, err := generateNextProductSKU(db)
+		if err != nil {
+			http.Error(w, "No se pudo generar el SKU", http.StatusInternalServerError)
+			return
+		}
 		now := time.Now().Format(time.RFC3339)
 		if err := upsertProducto(tx, sku, nombre, linea, now); err != nil {
 			http.Error(w, "No se pudo guardar el producto", http.StatusInternalServerError)
+			return
+		}
+		if _, err := tx.Exec(`UPDATE productos SET precio_venta = ? WHERE sku = ?`, float64(precioVenta), sku); err != nil {
+			http.Error(w, "No se pudo guardar el precio del producto", http.StatusInternalServerError)
 			return
 		}
 
@@ -2029,12 +2097,19 @@ func main() {
 			if products[idx].ID == sku {
 				products[idx].Name = nombre
 				products[idx].Line = linea
+				products[idx].SalePrice = float64(precioVenta)
 				found = true
 				break
 			}
 		}
 		if !found {
-			products = append(products, productOption{ID: sku, Name: nombre, Line: linea, FechaIngreso: time.Now().Format("2006-01-02")})
+			products = append(products, productOption{
+				ID:           sku,
+				Name:         nombre,
+				Line:         linea,
+				FechaIngreso: time.Now().Format("2006-01-02"),
+				SalePrice:    float64(precioVenta),
+			})
 		}
 		productsMu.Unlock()
 
