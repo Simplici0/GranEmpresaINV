@@ -732,7 +732,7 @@
       <label for="statusFilter">Estado</label>
       <select id="statusFilter">
         <option value="all">Todos</option>
-        <option value="available">Disponible</option>
+        <option value="available" selected>Disponible</option>
         <option value="reserved">Reservado</option>
         <option value="sold">Vendido</option>
         <option value="swapped">Cambio</option>
@@ -743,9 +743,6 @@
       <label for="lineFilter">Línea</label>
       <select id="lineFilter">
         <option value="all">Todas</option>
-        <option value="Nutrición">Nutrición</option>
-        <option value="Dermocosmética">Dermocosmética</option>
-        <option value="Pediatría">Pediatría</option>
       </select>
     </div>
     <div class="filter-group">
@@ -962,6 +959,27 @@
     const exportSalesButton = document.getElementById("export-sales");
     const exportChangesButton = document.getElementById("export-changes");
 
+    const normalizeLine = (value) => {
+      const line = String(value || "").trim();
+      return line || "Sin línea";
+    };
+
+    const populateLineFilter = () => {
+      if (!lineFilter) return;
+      const currentValue = lineFilter.value || "all";
+      const lines = Array.from(new Set(products.map((product) => normalizeLine(product.line)))).sort((a, b) =>
+        a.localeCompare(b, "es", { sensitivity: "base" })
+      );
+      lineFilter.innerHTML = '<option value="all">Todas</option>';
+      lines.forEach((line) => {
+        const option = document.createElement("option");
+        option.value = line;
+        option.textContent = line;
+        lineFilter.appendChild(option);
+      });
+      lineFilter.value = lines.includes(currentValue) ? currentValue : "all";
+    };
+
     const formatDate = (value) => new Date(value).toLocaleDateString("es-ES");
     const formatOptionalDate = (value) => {
       if (!value) return "-";
@@ -1031,7 +1049,7 @@
 
       const filtered = products.filter((product) => {
         const matchesStatus = statusValue === "all" || product.statusClass === statusValue;
-        const matchesLine = lineValue === "all" || product.line === lineValue;
+        const matchesLine = lineValue === "all" || normalizeLine(product.line) === lineValue;
         const matchesSearch =
           product.name.toLowerCase().includes(query) || product.id.toLowerCase().includes(query);
         const matchesExpiry =
@@ -1063,7 +1081,7 @@
             </div>
             <div class="fifo-note">SKU ${product.id} · ${product.available} disponibles</div>
           </td>
-          <td>${product.line}</td>
+          <td>${normalizeLine(product.line)}</td>
           <td><span class="status ${product.statusClass}">${statusLabel(product.statusLabel)}</span></td>
           <td><strong>${product.available}</strong></td>
           <td>
@@ -1134,8 +1152,8 @@
       });
     };
 
-    renderTable(products);
-    updateSummary(products);
+    populateLineFilter();
+    applyFilters();
     if (statusFilter && lineFilter && searchFilter && expiryToggle) {
       [statusFilter, lineFilter, searchFilter, expiryToggle].forEach((input) =>
         input.addEventListener("change", applyFilters)
@@ -1377,11 +1395,20 @@
       openModal(saleModal, product ? `${product.name} · SKU ${productId}` : `SKU ${productId}`);
       if (saleQty && maxQty >= 1) saleQty.focus();
 
+      const localSalePrice = Number(product?.salePrice || 0);
+      if (salePrice && localSalePrice > 0) {
+        salePrice.value = formatCOP(localSalePrice);
+        salePrice.dataset.autofilled = "1";
+      }
+
       // Auto-fill unit price from DB (if available) without overriding manual edits.
       if (salePrice) {
-        salePrice.dataset.autofilled = "1";
+        if (!salePrice.dataset.autofilled) {
+          salePrice.dataset.autofilled = "1";
+        }
         fetch(`/api/productos/precio?${new URLSearchParams({ sku: productId }).toString()}`, {
-          headers: { "Accept": "application/json" }
+          headers: { "Accept": "application/json" },
+          credentials: "same-origin"
         })
           .then((resp) => resp.json().then((data) => ({ resp, data })).catch(() => ({ resp, data: {} })))
           .then(({ resp, data }) => {

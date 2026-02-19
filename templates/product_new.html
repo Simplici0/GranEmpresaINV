@@ -237,10 +237,9 @@
         <label for="linea">Línea</label>
         <input id="linea" name="linea" type="text" placeholder="Línea o categoría" value="{{.Linea}}" list="lineas" />
         <datalist id="lineas">
-          <option value="Nutrición"></option>
-          <option value="Dermocosmética"></option>
-          <option value="Pediatría"></option>
-          <option value="Sin línea"></option>
+          {{range .Lineas}}
+            <option value="{{.}}"></option>
+          {{end}}
         </datalist>
         {{with .Errors}}{{with index . "linea"}}<div class="field-error">{{.}}</div>{{end}}{{end}}
 

@@ -15,6 +15,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -146,6 +147,31 @@ func loadProductos(db *sql.DB) ([]productOption, error) {
 		return nil, err
 	}
 	return products, nil
+}
+
+func buildLineSuggestions(products []productOption, current string) []string {
+	seen := make(map[string]struct{})
+	lines := make([]string, 0)
+	add := func(raw string) {
+		line := strings.TrimSpace(raw)
+		if line == "" {
+			return
+		}
+		key := strings.ToLower(line)
+		if _, ok := seen[key]; ok {
+			return
+		}
+		seen[key] = struct{}{}
+		lines = append(lines, line)
+	}
+	for _, p := range products {
+		add(p.Line)
+	}
+	add(current)
+	sort.Slice(lines, func(i, j int) bool {
+		return strings.ToLower(lines[i]) < strings.ToLower(lines[j])
+	})
+	return lines
 }
 
 type cambioFormData struct {
@@ -1384,6 +1410,7 @@ func main() {
 		SKU         string
 		Nombre      string
 		Linea       string
+		Lineas      []string
 		Cantidad    int
 		AplicaCad   bool
 		Caducidad   string
@@ -1875,10 +1902,15 @@ func main() {
 	}))
 
 	mux.HandleFunc("/productos/new", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		productsMu.RLock()
+		productsSnapshot := make([]productOption, len(products))
+		copy(productsSnapshot, products)
+		productsMu.RUnlock()
 		data := productNewData{
 			Title:       "Crear producto",
 			Subtitle:    "Acción reservada para administradores.",
 			Cantidad:    1,
+			Lineas:      buildLineSuggestions(productsSnapshot, ""),
 			CurrentUser: userFromContext(r),
 		}
 		if err := tmpl.ExecuteTemplate(w, "product_new.html", data); err != nil {
@@ -1932,6 +1964,10 @@ func main() {
 		}
 
 		if len(errors) > 0 {
+			productsMu.RLock()
+			productsSnapshot := make([]productOption, len(products))
+			copy(productsSnapshot, products)
+			productsMu.RUnlock()
 			w.WriteHeader(http.StatusBadRequest)
 			data := productNewData{
 				Title:       "Crear producto",
@@ -1939,6 +1975,7 @@ func main() {
 				SKU:         sku,
 				Nombre:      nombre,
 				Linea:       linea,
+				Lineas:      buildLineSuggestions(productsSnapshot, linea),
 				Cantidad:    cantidad,
 				AplicaCad:   aplicaCad,
 				Caducidad:   caducidad,
@@ -2227,10 +2264,18 @@ func main() {
 	mux.HandleFunc("/inventario", func(w http.ResponseWriter, r *http.Request) {
 		currentUser := userFromContext(r)
 		flash := r.URL.Query().Get("mensaje")
-		productsMu.RLock()
-		productsSnapshot := make([]productOption, len(products))
-		copy(productsSnapshot, products)
-		productsMu.RUnlock()
+		productsSnapshot, err := loadProductos(db)
+		if err != nil {
+			productsMu.RLock()
+			productsSnapshot = make([]productOption, len(products))
+			copy(productsSnapshot, products)
+			productsMu.RUnlock()
+		} else {
+			productsMu.Lock()
+			products = make([]productOption, len(productsSnapshot))
+			copy(products, productsSnapshot)
+			productsMu.Unlock()
+		}
 
 		inventoryProducts := make([]inventoryProduct, 0, len(productsSnapshot))
 		for _, product := range productsSnapshot {
@@ -3597,12 +3642,13 @@ func main() {
 				continue
 			}
 
-			// Validate numeric columns even if we don't persist them yet.
+			// Validate numeric columns.
 			if _, err := parseCSVFloat(get(row, "precio_base")); err != nil {
 				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Precio base inválido."})
 				continue
 			}
-			if _, err := parseCSVFloat(get(row, "precio_venta")); err != nil {
+			precioVenta, err := parseCSVFloat(get(row, "precio_venta"))
+			if err != nil {
 				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Precio venta inválido."})
 				continue
 			}
@@ -3645,6 +3691,12 @@ func main() {
 				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Error al guardar producto."})
 				continue
 			}
+			if _, err := tx.Exec(`UPDATE productos SET precio_venta = ? WHERE sku = ?`, precioVenta, sku); err != nil {
+				_, _ = tx.Exec("ROLLBACK TO csv_row")
+				_, _ = tx.Exec("RELEASE csv_row")
+				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Error al guardar precio de venta."})
+				continue
+			}
 
 			// Update in-memory catalog (used by inventario/cambio screens).
 			productsMu.Lock()
@@ -3653,12 +3705,19 @@ func main() {
 				if products[idx].ID == sku {
 					products[idx].Name = nombre
 					products[idx].Line = linea
+					products[idx].SalePrice = precioVenta
 					found = true
 					break
 				}
 			}
 			if !found {
-				products = append(products, productOption{ID: sku, Name: nombre, Line: linea, FechaIngreso: time.Now().Format("2006-01-02")})
+				products = append(products, productOption{
+					ID:           sku,
+					Name:         nombre,
+					Line:         linea,
+					FechaIngreso: time.Now().Format("2006-01-02"),
+					SalePrice:    precioVenta,
+				})
 				resp.CreatedProducts++
 			} else {
 				resp.UpdatedProducts++
