@@ -2605,6 +2605,7 @@ func main() {
 		targetValue := strings.TrimSpace(r.FormValue("cantidad"))
 		nota := strings.TrimSpace(r.FormValue("nota"))
 		priceValue := strings.TrimSpace(r.FormValue("precio_venta"))
+		nameValue := strings.TrimSpace(r.FormValue("nombre"))
 		target, err := strconv.Atoi(targetValue)
 		if productID == "" || err != nil || target < 0 {
 			writeJSONError(http.StatusBadRequest, "Cantidad objetivo inválida.")
@@ -2729,16 +2730,34 @@ func main() {
 				return
 			}
 		}
+		updateName := nameValue != ""
+		if updateName {
+			res, err := tx.Exec(`UPDATE productos SET nombre = ? WHERE sku = ?`, nameValue, productID)
+			if err != nil {
+				writeJSONError(http.StatusInternalServerError, "No se pudo actualizar el nombre del producto.")
+				return
+			}
+			affected, err := res.RowsAffected()
+			if err != nil || affected == 0 {
+				writeJSONError(http.StatusBadRequest, "Producto inválido para actualizar nombre.")
+				return
+			}
+		}
 
 		if err := tx.Commit(); err != nil {
 			writeJSONError(http.StatusInternalServerError, "No se pudo confirmar la transacción.")
 			return
 		}
-		if updatePrice {
+		if updatePrice || updateName {
 			productsMu.Lock()
 			for idx := range products {
 				if products[idx].ID == productID {
-					products[idx].SalePrice = newPrice
+					if updatePrice {
+						products[idx].SalePrice = newPrice
+					}
+					if updateName {
+						products[idx].Name = nameValue
+					}
 					break
 				}
 			}
@@ -2751,6 +2770,15 @@ func main() {
 			message = "Precio de venta actualizado correctamente."
 		} else if delta != 0 && updatePrice {
 			message = "Stock y precio de venta actualizados correctamente."
+		}
+		if updateName && delta == 0 && !updatePrice {
+			message = "Nombre del producto actualizado correctamente."
+		} else if updateName && delta == 0 && updatePrice {
+			message = "Nombre y precio de venta actualizados correctamente."
+		} else if updateName && delta != 0 && !updatePrice {
+			message = "Stock y nombre del producto actualizados correctamente."
+		} else if updateName && delta != 0 && updatePrice {
+			message = "Stock, nombre y precio de venta actualizados correctamente."
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{

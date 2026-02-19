@@ -1273,6 +1273,7 @@
     let actionContext = null;
     let saleContext = null;
     let openMenuContext = null;
+    const actionSubtitleHint = "Doble clic para editar nombre del producto.";
 
     const positionMenuPanel = (button, panel) => {
       if (!button || !panel) return;
@@ -1312,6 +1313,7 @@
       subtitle,
       endpoint,
       productId,
+      productName,
       maxQty,
       defaultQty,
       noteLabel,
@@ -1326,6 +1328,8 @@
       actionContext = {
         endpoint,
         productId,
+        productName: String(productName || "").trim(),
+        editedProductName: "",
         maxQty,
         mode: mode || "units",
         minQty: Number.isFinite(minQty) ? minQty : 1,
@@ -1360,8 +1364,30 @@
       if (actionSubmit) actionSubmit.disabled = false;
       setActionError("");
       openModal(actionModal, subtitle);
+      if (actionSubtitle) {
+        actionSubtitle.title = actionContext.mode === "adjust_stock" ? actionSubtitleHint : "";
+        actionSubtitle.style.cursor = actionContext.mode === "adjust_stock" ? "text" : "";
+      }
       if (actionQty) actionQty.focus();
     };
+
+    if (actionSubtitle) {
+      actionSubtitle.addEventListener("dblclick", () => {
+        if (!actionContext || actionContext.mode !== "adjust_stock") return;
+        const current = String(actionContext.editedProductName || actionContext.productName || "").trim();
+        const raw = window.prompt("Nuevo nombre del producto:", current);
+        if (raw === null) return;
+        const updated = raw.trim();
+        if (!updated) {
+          setActionError("El nombre del producto no puede estar vacío.");
+          return;
+        }
+        actionContext.editedProductName = updated;
+        if (actionSubtitle) {
+          actionSubtitle.textContent = `${updated} · SKU ${actionContext.productId}`;
+        }
+      });
+    }
 
     const setSaleError = (msg) => {
       if (!saleError) return;
@@ -1537,6 +1563,9 @@
             cantidad: String(qty),
             nota: note || ""
           });
+          if (isAdjustMode && String(actionContext.editedProductName || "").trim()) {
+            body.set("nombre", String(actionContext.editedProductName).trim());
+          }
           if (shouldSendPrice) {
             body.set("precio_venta", String(parsedPrice));
           }
@@ -1720,6 +1749,7 @@
             subtitle: `${product.name} · SKU ${productId}`,
             endpoint: "/inventario/reservar",
             productId,
+            productName: product.name,
             maxQty,
             defaultQty,
             noteLabel: "Nota (opcional)",
@@ -1748,6 +1778,7 @@
             subtitle: `${product.name} · SKU ${productId}`,
             endpoint: "/inventario/dano",
             productId,
+            productName: product.name,
             maxQty,
             defaultQty,
             noteLabel: "Descripción del daño (opcional)",
@@ -1762,6 +1793,7 @@
             subtitle: product ? `${product.name} · SKU ${productId}` : `SKU ${productId}`,
             endpoint: "/inventario/stock",
             productId,
+            productName: product?.name || "",
             maxQty: currentStock,
             defaultQty: currentStock,
             valueLabel: "Stock actual",
