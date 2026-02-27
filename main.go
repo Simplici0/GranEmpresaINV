@@ -2588,8 +2588,8 @@ func main() {
 		}
 
 		currentUser := userFromContext(r)
-		if currentUser == nil || currentUser.Role != "admin" {
-			writeJSONError(http.StatusForbidden, "Solo administrador puede ajustar stock y precio.")
+		if currentUser == nil || (currentUser.Role != "admin" && currentUser.Role != "empleado") {
+			writeJSONError(http.StatusForbidden, "Solo personal autorizado puede ajustar stock y precio.")
 			return
 		}
 

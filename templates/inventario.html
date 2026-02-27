@@ -837,7 +837,7 @@
           <div id="action-price-wrap" hidden>
             <label for="action-price">Precio de venta (opcional)</label>
             <input id="action-price" name="precio_venta" type="text" inputmode="numeric" placeholder="0" />
-            <div class="modal-hint">Solo aplica para ajuste manual de stock (admin).</div>
+            <div class="modal-hint">Solo aplica para ajuste manual de stock.</div>
           </div>
           <div class="modal-actions">
             {{if and .CurrentUser (eq .CurrentUser.Role "admin")}}
@@ -1097,7 +1097,7 @@
               <div class="menu-panel" id="menu-${product.id}">
                 <button type="button" data-menu-action="reserve" data-product="${product.id}">Reservar unidades</button>
                 <button type="button" data-menu-action="damage" data-product="${product.id}">Registrar daño</button>
-                {{if and .CurrentUser (eq .CurrentUser.Role "admin")}}
+                {{if and .CurrentUser (or (eq .CurrentUser.Role "admin") (eq .CurrentUser.Role "empleado"))}}
                 <button type="button" data-menu-action="stock" data-product="${product.id}">Ajustar stock</button>
                 {{end}}
                 <button type="button" data-menu-action="history" data-product="${product.id}">Ver historial</button>
