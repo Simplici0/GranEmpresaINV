@@ -302,6 +302,17 @@
       color: var(--muted);
     }
 
+    .field-stack {
+      display: grid;
+      gap: 8px;
+    }
+
+    .search-status {
+      min-height: 16px;
+      font-size: 12px;
+      color: var(--muted);
+    }
+
     .error {
       color: var(--danger);
       font-size: 12px;
@@ -451,11 +462,21 @@
         <div class="row" id="incoming_existing_fields">
           <div>
             <label for="incoming_existing_id">Producto</label>
-            <select id="incoming_existing_id" name="incoming_existing_id">
-              {{range .Productos}}
-                <option value="{{.ID}}" {{if eq $.IncomingExistingID .ID}}selected{{end}}>{{.Name}} ({{.ID}})</option>
-              {{end}}
-            </select>
+            <div class="field-stack">
+              <input
+                id="incoming_existing_search"
+                type="text"
+                placeholder="Buscar por nombre o SKU"
+                autocomplete="off"
+                spellcheck="false"
+              />
+              <select id="incoming_existing_id" name="incoming_existing_id">
+                {{range .Productos}}
+                  <option value="{{.ID}}" {{if eq $.IncomingExistingID .ID}}selected{{end}}>{{.Name}} ({{.ID}})</option>
+                {{end}}
+              </select>
+              <div class="search-status" data-existing-search-status>{{len .Productos}} productos disponibles</div>
+            </div>
             {{with index .Errors "incoming_existing_id"}}
               <div class="error">{{.}}</div>
             {{end}}
@@ -517,18 +538,93 @@
   </main>
   <script>
     const incomingModeSelect = document.querySelector('#incoming_mode');
-    const existingFields = document.querySelectorAll('#incoming_existing_id, #incoming_existing_qty');
+    const incomingExistingSearch = document.querySelector('#incoming_existing_search');
+    const incomingExistingSelect = document.querySelector('#incoming_existing_id');
+    const incomingExistingSearchStatus = document.querySelector('[data-existing-search-status]');
+    const existingFields = document.querySelectorAll('#incoming_existing_search, #incoming_existing_id, #incoming_existing_qty');
     const newFields = document.querySelectorAll('#incoming_new_sku, #incoming_new_name, #incoming_new_line, #incoming_new_qty');
     const existingFieldGroup = document.querySelector('#incoming_existing_fields');
     const newFieldGroup = document.querySelector('#incoming_new_fields');
     const newQtyFieldGroup = document.querySelector('#incoming_new_qty_fields');
     const multiSelect = document.querySelector('[data-multi-select]');
     const selectionCount = document.querySelector('[data-selection-count]');
+    const incomingExistingOptions = incomingExistingSelect
+      ? Array.from(incomingExistingSelect.options).map((option) => ({
+          value: option.value,
+          label: option.textContent
+        }))
+      : [];
+    let lastExistingProductValue = incomingExistingSelect ? incomingExistingSelect.value : "";
 
     const updateSelectionCount = () => {
       if (!multiSelect || !selectionCount) return;
       const checked = multiSelect.querySelectorAll('input[type="checkbox"]:checked').length;
       selectionCount.textContent = checked;
+    };
+
+    const updateIncomingExistingSearchStatus = (count, query) => {
+      if (!incomingExistingSearchStatus) return;
+      const trimmedQuery = String(query || "").trim();
+      if (!trimmedQuery) {
+        incomingExistingSearchStatus.textContent = `${count} productos disponibles`;
+        return;
+      }
+      if (count === 0) {
+        incomingExistingSearchStatus.textContent = `Sin coincidencias para "${trimmedQuery}"`;
+        return;
+      }
+      incomingExistingSearchStatus.textContent = `${count} coincidencia${count === 1 ? "" : "s"} para "${trimmedQuery}"`;
+    };
+
+    const syncIncomingExistingSelectAvailability = () => {
+      if (!incomingExistingSelect) return;
+      const mode = incomingModeSelect ? incomingModeSelect.value : "existing";
+      const hasEmptyResults = incomingExistingSelect.dataset.emptyResults === "true";
+      incomingExistingSelect.toggleAttribute("disabled", mode !== "existing" || hasEmptyResults);
+    };
+
+    const filterIncomingExistingOptions = (query = "") => {
+      if (!incomingExistingSelect) return;
+      const normalizedQuery = String(query || "").trim().toLowerCase();
+      const currentValue = incomingExistingSelect.value;
+      const filteredOptions = incomingExistingOptions.filter(({ value, label }) => {
+        if (!normalizedQuery) return true;
+        return label.toLowerCase().includes(normalizedQuery) || value.toLowerCase().includes(normalizedQuery);
+      });
+
+      let nextSelectedValue = "";
+      if (filteredOptions.some((option) => option.value === currentValue)) {
+        nextSelectedValue = currentValue;
+      } else if (filteredOptions.some((option) => option.value === lastExistingProductValue)) {
+        nextSelectedValue = lastExistingProductValue;
+      } else if (filteredOptions.length > 0) {
+        nextSelectedValue = filteredOptions[0].value;
+      }
+
+      incomingExistingSelect.innerHTML = "";
+
+      if (filteredOptions.length === 0) {
+        const emptyOption = document.createElement("option");
+        emptyOption.value = "";
+        emptyOption.textContent = "Sin coincidencias";
+        emptyOption.disabled = true;
+        emptyOption.selected = true;
+        incomingExistingSelect.appendChild(emptyOption);
+        incomingExistingSelect.dataset.emptyResults = "true";
+      } else {
+        filteredOptions.forEach(({ value, label }) => {
+          const option = document.createElement("option");
+          option.value = value;
+          option.textContent = label;
+          option.selected = value === nextSelectedValue;
+          incomingExistingSelect.appendChild(option);
+        });
+        incomingExistingSelect.dataset.emptyResults = "false";
+        lastExistingProductValue = nextSelectedValue;
+      }
+
+      updateIncomingExistingSearchStatus(filteredOptions.length, query);
+      syncIncomingExistingSelectAvailability();
     };
 
     const updateIncomingMode = () => {
@@ -544,10 +640,24 @@
       if (newQtyFieldGroup) {
         newQtyFieldGroup.classList.toggle("is-hidden", mode !== "new");
       }
+      syncIncomingExistingSelectAvailability();
     };
 
     if (incomingModeSelect) {
       incomingModeSelect.addEventListener("change", updateIncomingMode);
+    }
+    if (incomingExistingSearch) {
+      incomingExistingSearch.addEventListener("input", (event) => {
+        filterIncomingExistingOptions(event.target.value);
+      });
+    }
+    if (incomingExistingSelect) {
+      incomingExistingSelect.addEventListener("change", () => {
+        if (incomingExistingSelect.dataset.emptyResults !== "true") {
+          lastExistingProductValue = incomingExistingSelect.value;
+        }
+      });
+      filterIncomingExistingOptions(incomingExistingSearch ? incomingExistingSearch.value : "");
     }
     updateIncomingMode();
     if (multiSelect) {
