@@ -1,0 +1,41 @@
+name: Deploy to Production
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - name: Checkout code
+      uses: actions/checkout@v3
+    
+    - name: Setup Go
+      uses: actions/setup-go@v4
+      with:
+        go-version: '1.21'
+    
+    - name: Build binary
+      run: |
+        GOOS=linux GOARCH=amd64 go build -o granempresa ./cmd/api
+    
+    - name: Setup SSH
+      run: |
+        mkdir -p ~/.ssh
+        echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
+        chmod 600 ~/.ssh/id_rsa
+        ssh-keyscan -p 2222 204.168.131.158 >> ~/.ssh/known_hosts
+    
+    - name: Deploy to server
+      run: |
+        scp -P 2222 granempresa AlvaroC@204.168.131.158:/tmp/granempresa
+        ssh -p 2222 AlvaroC@204.168.131.158 << 'ENDSSH'
+          sudo systemctl stop granempresa
+          sudo mv /tmp/granempresa /srv/granempresa/app/granempresa
+          sudo chmod +x /srv/granempresa/app/granempresa
+          sudo systemctl start granempresa
+          sudo systemctl status granempresa
+ENDSSH
