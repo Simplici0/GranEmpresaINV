@@ -27,12 +27,12 @@ jobs:
         mkdir -p ~/.ssh
         echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan -p 2222 204.168.131.158 >> ~/.ssh/known_hosts
+        ssh-keyscan -p 2222 37.27.222.238 >> ~/.ssh/known_hosts
     
     - name: Deploy to server
       run: |
-        scp -P 2222 granempresa AlvaroC@204.168.131.158:/tmp/granempresa
-        ssh -p 2222 AlvaroC@204.168.131.158 << 'ENDSSH'
+        scp -P 2222 granempresa AlvaroC@37.27.222.238:/tmp/granempresa
+        ssh -p 2222 AlvaroC@37.27.222.238 << 'ENDSSH'
           sudo systemctl stop granempresa
           sudo mv /tmp/granempresa /srv/granempresa/app/granempresa
           sudo chmod +x /srv/granempresa/app/granempresa
