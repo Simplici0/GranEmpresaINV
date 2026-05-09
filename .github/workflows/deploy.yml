@@ -20,7 +20,7 @@ jobs:
     
     - name: Build binary
       run: |
-        GOOS=linux GOARCH=amd64 go build -o granempresa ./cmd/api
+        GOOS=linux GOARCH=amd64 go build -o granempresa
     
     - name: Setup SSH
       run: |
