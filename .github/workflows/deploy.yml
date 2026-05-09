@@ -19,8 +19,7 @@ jobs:
         go-version: '1.21'
     
     - name: Build binary
-      run: GOOS=linux GOARCH=amd64 go build -o stocki
-    
+	run: GOOS=linux GOARCH=arm64 go build -o stocki
     - name: Setup SSH
       run: |
         mkdir -p ~/.ssh
