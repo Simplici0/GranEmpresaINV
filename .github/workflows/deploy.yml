@@ -20,7 +20,7 @@ jobs:
     
     - name: Build binary
       run: |
-        GOOS=linux GOARCH=amd64 go build -o granempresa
+        GOOS=linux GOARCH=amd64 go build -o stocki
     
     - name: Setup SSH
       run: |
@@ -31,11 +31,11 @@ jobs:
     
     - name: Deploy to server
       run: |
-        scp -P 2222 granempresa AlvaroC@37.27.222.238:/tmp/granempresa
+        scp -P 2222 stocki AlvaroC@37.27.222.238:/tmp/stocki
         ssh -p 2222 AlvaroC@37.27.222.238 << 'ENDSSH'
-          sudo systemctl stop granempresa
-          sudo mv /tmp/granempresa /srv/granempresa/app/granempresa
-          sudo chmod +x /srv/granempresa/app/granempresa
-          sudo systemctl start granempresa
-          sudo systemctl status granempresa
+          sudo systemctl stop stocki
+          sudo mv /tmp/stocki /opt/stocki/stocki
+          sudo chmod +x /opt/stocki/stocki
+          sudo systemctl start stocki
+          sudo systemctl status stocki
 ENDSSH
