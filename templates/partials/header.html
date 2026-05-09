@@ -1,104 +1,660 @@
 {{define "header"}}
+  <script>
+    (() => {
+      const storageKey = "stocki-theme";
+      const getStoredTheme = () => {
+        try {
+          return window.localStorage.getItem(storageKey);
+        } catch (_) {
+          return null;
+        }
+      };
+      const stored = getStoredTheme();
+      const systemDark = window.matchMedia?.("(prefers-color-scheme: dark)")?.matches;
+      const theme = stored === "light" || stored === "dark" ? stored : (systemDark ? "dark" : "light");
+      document.documentElement.dataset.theme = theme;
+    })();
+  </script>
   <style>
-    /* Banner logo overrides: the per-page templates define .logo-placeholder as a pill.
-       Here we override it so SVG logos render cleanly. */
-    .global-banner .logo-placeholder {
-      height: 26px;
-      min-width: 0;
-      padding: 0;
-      border: 0;
-      background: transparent;
+    :root {
+      color-scheme: light;
+      --sidebar-width: 252px;
+      --sidebar-collapsed-width: 86px;
+      --topbar-height: 72px;
+      --color-background: #fbfaf8;
+      --color-surface: #ffffff;
+      --color-surface-muted: #f7f5f2;
+      --color-elevated: rgba(255, 255, 255, 0.88);
+      --color-text: #171923;
+      --color-muted: #667085;
+      --color-subtle: #7a8191;
+      --color-primary: #ff5a1f;
+      --color-primary-strong: #e84f18;
+      --color-primary-soft: #fff3eb;
+      --color-border: #e8e7e3;
+      --color-control: #ffffff;
+      --color-tooltip: #111827;
+      --shadow-app: 0 18px 48px rgba(17, 24, 39, 0.08);
+      --shadow-soft: 0 10px 28px rgba(17, 24, 39, 0.055);
+      --bg: var(--color-background);
+      --card: var(--color-surface);
+      --text: var(--color-text);
+      --muted: var(--color-muted);
+      --primary: var(--color-primary);
+      --primary-strong: var(--color-primary-strong);
+      --primary-soft: var(--color-primary-soft);
+      --border: var(--color-border);
+      --app-surface: var(--color-background);
+      --app-sidebar: var(--color-surface);
+      --app-text: var(--color-text);
+      --app-muted: var(--color-muted);
+      --app-primary: var(--color-primary);
+      --app-primary-soft: var(--color-primary-soft);
+      --app-border: var(--color-border);
+      --app-shadow: var(--shadow-app);
     }
 
-    .global-banner .logo-placeholder img {
-      height: 26px;
-      width: auto;
+    html[data-theme="dark"] {
+      color-scheme: dark;
+      --color-background: #111315;
+      --color-surface: #181b1f;
+      --color-surface-muted: #20242a;
+      --color-elevated: rgba(24, 27, 31, 0.88);
+      --color-text: #f4f5f7;
+      --color-muted: #a2aab8;
+      --color-subtle: #8d96a6;
+      --color-primary: #ff7a3d;
+      --color-primary-strong: #ff8d59;
+      --color-primary-soft: rgba(255, 122, 61, 0.14);
+      --color-border: #2d333b;
+      --color-control: #15181c;
+      --color-tooltip: #f4f5f7;
+      --shadow-app: 0 18px 48px rgba(0, 0, 0, 0.32);
+      --shadow-soft: 0 14px 34px rgba(0, 0, 0, 0.24);
+    }
+
+    body {
+      background: var(--app-surface);
+      color: var(--app-text);
+      transition: background-color 0.18s ease, color 0.18s ease;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      * {
+        transition-duration: 0.01ms !important;
+      }
+    }
+
+    .app-sidebar-toggle {
+      position: fixed;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .app-mobile-toggle {
+      position: fixed;
+      left: 18px;
+      top: 18px;
+      z-index: 140;
+      display: none;
+      width: 40px;
+      height: 40px;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--app-border);
+      border-radius: 12px;
+      background: var(--color-surface);
+      color: var(--app-text);
+      box-shadow: 0 10px 24px rgba(17, 24, 39, 0.08);
+      cursor: pointer;
+    }
+
+    .app-collapse-toggle {
+      position: fixed;
+      opacity: 0;
+      pointer-events: none;
+    }
+
+    .app-sidebar {
+      position: fixed;
+      inset: 0 auto 0 0;
+      z-index: 120;
+      width: var(--sidebar-width);
+      min-height: 100vh;
+      padding: 28px 18px 18px;
+      display: flex;
+      flex-direction: column;
+      border-right: 1px solid var(--app-border);
+      background: var(--app-sidebar);
+      box-shadow: 10px 0 34px rgba(17, 24, 39, 0.04);
+      transition: width 0.22s ease, padding 0.22s ease, transform 0.22s ease, box-shadow 0.22s ease;
+      overflow: visible;
+    }
+
+    .app-sidebar-head {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin: 0 4px 34px 8px;
+    }
+
+    .app-logo {
+      display: inline-flex;
+      align-items: center;
+      width: fit-content;
+      min-width: 0;
+      text-decoration: none;
+    }
+
+    .app-logo img {
+      display: block;
+      width: 112px;
+      height: auto;
+      transition: opacity 0.16s ease, width 0.22s ease;
+    }
+
+    .app-collapse-button {
+      width: 36px;
+      height: 36px;
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 1px solid var(--app-border);
+      border-radius: 12px;
+      background: var(--color-surface);
+      color: var(--app-muted);
+      cursor: pointer;
+      transition: color 0.18s ease, border-color 0.18s ease, background 0.18s ease, transform 0.22s ease;
+    }
+
+    .app-collapse-button:hover {
+      color: var(--app-primary);
+      border-color: rgba(255, 90, 31, 0.28);
+      background: var(--app-primary-soft);
+    }
+
+    .app-nav,
+    .app-help {
+      display: grid;
+      gap: 8px;
+    }
+
+    .app-help {
+      margin-top: auto;
+      padding-top: 24px;
+    }
+
+    .app-nav-link {
+      min-height: 48px;
+      padding: 0 14px;
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      gap: 13px;
+      color: var(--app-muted);
+      text-decoration: none;
+      font-size: 14px;
+      font-weight: 750;
+      transition: background 0.18s ease, color 0.18s ease, transform 0.18s ease;
+      white-space: nowrap;
+      position: relative;
+    }
+
+    .app-nav-link svg {
+      width: 21px;
+      height: 21px;
+      flex: 0 0 auto;
+      stroke-width: 2;
+    }
+
+    .app-nav-link:hover {
+      background: var(--color-surface-muted);
+      color: var(--app-text);
+      transform: translateX(2px);
+    }
+
+    .app-nav-link.active {
+      background: var(--app-primary-soft);
+      color: var(--app-primary);
+    }
+
+    .app-topbar {
+      position: fixed;
+      top: 0;
+      right: 0;
+      left: var(--sidebar-width);
+      z-index: 110;
+      height: var(--topbar-height);
+      padding: 0 32px;
+      display: flex;
+      align-items: center;
+      justify-content: flex-end;
+      gap: 18px;
+      border-bottom: 1px solid var(--app-border);
+      background: var(--color-elevated);
+      backdrop-filter: blur(16px);
+      transition: left 0.22s ease;
+    }
+
+    .app-userbar {
+      display: flex;
+      align-items: center;
+      gap: 14px;
+      color: var(--app-text);
+      font-size: 14px;
+      font-weight: 750;
+    }
+
+    .app-role-pill {
+      display: inline-flex;
+      align-items: center;
+      height: 30px;
+      padding: 0 16px;
+      border-radius: 999px;
+      background: var(--app-primary);
+      color: #ffffff;
+      font-size: 12px;
+      font-weight: 850;
+      text-transform: uppercase;
+      letter-spacing: 0;
+      box-shadow: 0 8px 18px rgba(255, 90, 31, 0.22);
+    }
+
+    .app-icon-button {
+      width: 38px;
+      height: 38px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      border: 0;
+      border-radius: 12px;
+      background: transparent;
+      color: var(--app-muted);
+      padding: 0;
+      cursor: pointer;
+    }
+
+    .app-icon-button:hover {
+      background: var(--color-surface-muted);
+      color: var(--app-text);
+      transform: none;
+    }
+
+    .app-theme-toggle .theme-icon-sun,
+    .app-theme-toggle .theme-icon-moon {
+      display: none;
+    }
+
+    html[data-theme="light"] .app-theme-toggle .theme-icon-moon {
       display: block;
     }
 
-    .header-top {
-      display: flex;
-      justify-content: space-between;
-      align-items: flex-start;
-      gap: 16px;
-      flex-wrap: wrap;
+    html[data-theme="dark"] .app-theme-toggle .theme-icon-sun {
+      display: block;
     }
 
-    .user-bar {
-      display: flex;
-      align-items: center;
-      gap: 12px;
-      font-size: 13px;
-      color: rgba(255, 255, 255, 0.95);
-      font-weight: 600;
-    }
-
-    .role-pill {
-      background: rgba(255, 255, 255, 0.2);
-      border: 1px dashed rgba(255, 255, 255, 0.7);
-      color: #ffffff;
-      padding: 4px 10px;
-      border-radius: 999px;
-      font-size: 11px;
-      text-transform: uppercase;
-      letter-spacing: 0.08em;
-      font-weight: 700;
-      backdrop-filter: blur(4px);
-      box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1);
-    }
-
-    .logout-button {
-      border: 1px solid rgba(255, 255, 255, 0.8);
-      background: rgba(255, 255, 255, 0.08);
-      color: #ffffff;
-      padding: 6px 12px;
-      border-radius: 999px;
-      font-size: 12px;
-      font-weight: 700;
-      cursor: pointer;
-      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-    }
-
-    .logout-button:hover {
-      background: rgba(255, 255, 255, 0.25);
-      transform: translateY(-1px);
-      box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
-    }
-
-    .logout-button:active {
-      transform: translateY(0);
-    }
-
-    .logout-form {
+    .app-logout-form {
       margin: 0;
     }
 
-    /* Center the main navigation group within the page header. */
+    .app-logout-button {
+      min-height: 40px;
+      padding: 0 16px;
+      display: inline-flex;
+      align-items: center;
+      gap: 10px;
+      border: 1px solid var(--app-border);
+      border-radius: 14px;
+      background: var(--color-surface);
+      color: var(--app-text);
+      font-size: 13px;
+      font-weight: 800;
+      box-shadow: 0 8px 18px rgba(17, 24, 39, 0.04);
+    }
+
+    .app-logout-button:hover {
+      border-color: rgba(255, 90, 31, 0.28);
+      color: var(--app-primary);
+      transform: none;
+    }
+
+    .filters,
+    .summary-card,
+    .table-wrap,
+    .card,
+    .modal,
+    .menu-panel,
+    .range-panel,
+    .upload-card,
+    .chart-card,
+    .metric-card,
+    .export-card {
+      background: var(--color-surface) !important;
+      border-color: var(--color-border) !important;
+      color: var(--color-text);
+    }
+
+    .inventory-footer,
+    thead,
+    th,
+    .modal-header {
+      background: var(--color-surface) !important;
+      border-color: var(--color-border) !important;
+      color: var(--color-text);
+    }
+
+    td,
+    th {
+      border-color: var(--color-border) !important;
+    }
+
+    input,
+    select,
+    textarea {
+      background: var(--color-control) !important;
+      border-color: var(--color-border) !important;
+      color: var(--color-text) !important;
+    }
+
+    input::placeholder,
+    textarea::placeholder {
+      color: var(--color-subtle);
+    }
+
+    .fifo-note,
+    .summary-caption,
+    .modal-subtitle,
+    .modal-hint,
+    .pagination-info,
+    .page-header p {
+      color: var(--color-muted) !important;
+    }
+
+    .units-panel,
+    .modal-loading,
+    .modal-empty,
+    .range-pill,
+    .page-button,
+    .page-size,
+    button.ghost:hover {
+      background: var(--color-surface-muted) !important;
+      border-color: var(--color-border) !important;
+      color: var(--color-text) !important;
+    }
+
+    button.secondary {
+      background: var(--color-surface) !important;
+      color: var(--color-primary) !important;
+      border-color: rgba(255, 122, 61, 0.42) !important;
+    }
+
+    tbody tr:hover {
+      background: var(--color-surface-muted) !important;
+    }
+
+    html[data-theme="dark"] .app-logo img {
+      filter: brightness(0) saturate(100%) invert(63%) sepia(85%) saturate(1356%) hue-rotate(334deg) brightness(104%) contrast(101%);
+    }
+
+    .page-header {
+      margin-left: var(--sidebar-width);
+      padding: 104px 34px 18px;
+      display: block;
+      background: transparent;
+      border-bottom: 0;
+      transition: margin-left 0.22s ease;
+    }
+
+    .page-header .header-top {
+      display: block;
+    }
+
+    .page-header h1 {
+      margin: 0;
+      color: var(--app-text);
+      font-size: clamp(28px, 3vw, 42px);
+      line-height: 1.08;
+      font-weight: 850;
+      letter-spacing: 0;
+    }
+
+    .page-header p {
+      max-width: 760px;
+      margin: 10px 0 0;
+      color: var(--app-muted);
+      font-size: 15px;
+      line-height: 1.5;
+    }
+
     .page-header .nav-buttons {
-      margin-left: auto;
-      margin-right: auto;
-      justify-content: center;
+      display: none;
+    }
+
+    .page-content {
+      margin-left: var(--sidebar-width);
+      margin-right: 0;
+      padding-top: 0;
+      transition: margin-left 0.22s ease;
+    }
+
+    @media (min-width: 901px) {
+      .app-collapse-toggle:checked ~ .app-sidebar {
+        width: var(--sidebar-collapsed-width);
+        padding-left: 14px;
+        padding-right: 14px;
+      }
+
+      .app-collapse-toggle:checked ~ .app-sidebar .app-sidebar-head {
+        justify-content: center;
+        margin-left: 0;
+        margin-right: 0;
+      }
+
+      .app-collapse-toggle:checked ~ .app-sidebar .app-logo {
+        display: none;
+      }
+
+      .app-collapse-toggle:checked ~ .app-sidebar .app-collapse-button {
+        transform: rotate(180deg);
+      }
+
+      .app-collapse-toggle:checked ~ .app-sidebar .app-nav,
+      .app-collapse-toggle:checked ~ .app-sidebar .app-help {
+        justify-items: center;
+      }
+
+      .app-collapse-toggle:checked ~ .app-sidebar .app-nav-link {
+        width: 52px;
+        min-height: 52px;
+        padding: 0;
+        justify-content: center;
+        gap: 0;
+      }
+
+      .app-collapse-toggle:checked ~ .app-sidebar .app-nav-link span {
+        position: absolute;
+        left: calc(100% + 12px);
+        top: 50%;
+        z-index: 200;
+        padding: 7px 10px;
+        border-radius: 10px;
+        background: #111827;
+        color: #ffffff;
+        font-size: 12px;
+        font-weight: 800;
+        box-shadow: 0 12px 28px rgba(17, 24, 39, 0.16);
+        opacity: 0;
+        pointer-events: none;
+        transform: translate(-4px, -50%);
+        transition: opacity 0.16s ease, transform 0.16s ease;
+      }
+
+      .app-collapse-toggle:checked ~ .app-sidebar .app-nav-link:hover span,
+      .app-collapse-toggle:checked ~ .app-sidebar .app-nav-link:focus-visible span {
+        opacity: 1;
+        transform: translate(0, -50%);
+      }
+
+      .app-collapse-toggle:checked ~ .app-topbar {
+        left: var(--sidebar-collapsed-width);
+      }
+
+      .app-collapse-toggle:checked ~ .page-header,
+      .app-collapse-toggle:checked ~ .page-content {
+        margin-left: var(--sidebar-collapsed-width);
+      }
+    }
+
+    @media (max-width: 900px) {
+      .app-collapse-button {
+        display: none;
+      }
+
+      .app-mobile-toggle {
+        display: inline-flex;
+      }
+
+      .app-sidebar {
+        transform: translateX(-100%);
+        transition: transform 0.22s ease;
+        box-shadow: var(--app-shadow);
+      }
+
+      .app-sidebar-toggle:checked ~ .app-sidebar {
+        transform: translateX(0);
+      }
+
+      .app-topbar {
+        left: 0;
+        height: 68px;
+        padding: 0 16px 0 72px;
+      }
+
+      .app-userbar {
+        gap: 9px;
+      }
+
+      .app-role-pill {
+        height: 28px;
+        padding: 0 10px;
+      }
+
+      .app-logout-button span {
+        display: none;
+      }
+
+      .page-header,
+      .page-content {
+        margin-left: 0;
+      }
+
+      .page-header {
+        padding: 94px 18px 16px;
+      }
     }
   </style>
 
-  <div class="global-banner">
-    <div class="banner-logos">
-      <div class="logo-placeholder">
-        <a href="/inventario" aria-label="Inicio">
-          <img src="/static/img/logo1.svg" alt="Logo 1" />
-        </a>
-      </div>
+  <input class="app-sidebar-toggle" id="app-sidebar-toggle" type="checkbox" aria-hidden="true" />
+  <input class="app-collapse-toggle" id="app-collapse-toggle" type="checkbox" aria-hidden="true" />
+  <label class="app-mobile-toggle" for="app-sidebar-toggle" aria-label="Abrir menú">
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+      <path d="M4 7h16M4 12h16M4 17h16" stroke-linecap="round" />
+    </svg>
+  </label>
+
+  <aside class="app-sidebar" aria-label="Navegación principal">
+    <div class="app-sidebar-head">
+      <a class="app-logo" href="/inventario" aria-label="Stocki">
+        <img src="/static/img/logo1.svg" alt="stocki" />
+      </a>
+      <label class="app-collapse-button" for="app-collapse-toggle" aria-label="Plegar menú" title="Plegar menú">
+        <svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" aria-hidden="true">
+          <path d="m15 18-6-6 6-6" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </label>
     </div>
+
+    <nav class="app-nav">
+      <a class="app-nav-link" href="/dashboard" data-nav-path="/dashboard">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+          <path d="M4 19V9M10 19V5M16 19v-8M22 19H2" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span>Dashboard</span>
+      </a>
+      <a class="app-nav-link" href="/inventario" data-nav-path="/inventario">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+          <path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5v-7Z" stroke-linejoin="round" />
+          <path d="m4.5 9 7.5 4 7.5-4M12 13v7" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span>Inventario</span>
+      </a>
+      {{if .CurrentUser}}
+        {{if eq .CurrentUser.Role "admin"}}
+          <a class="app-nav-link" href="/productos/new" data-nav-path="/productos/new">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+              <path d="M12 5v14M5 12h14" stroke-linecap="round" />
+            </svg>
+            <span>Nuevo producto</span>
+          </a>
+          <a class="app-nav-link" href="/admin/users" data-nav-path="/admin/users">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+              <path d="M16 19c0-2.2-1.8-4-4-4s-4 1.8-4 4M12 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6ZM20 19c0-1.7-1-3.1-2.5-3.7M17 5.3a3 3 0 0 1 0 5.4" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <span>Usuarios</span>
+          </a>
+          <a class="app-nav-link" href="/csv/template" target="_blank" rel="noreferrer" data-nav-path="/csv/template">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+              <path d="M14 3v4a2 2 0 0 0 2 2h4M7 13h10M7 17h6M6 21h12a2 2 0 0 0 2-2V8l-5-5H6a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2Z" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <span>Agregar productos</span>
+          </a>
+          <a class="app-nav-link" href="/csv/export" target="_blank" rel="noreferrer" data-nav-path="/csv/export">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+              <path d="M12 4v10m0 0 4-4m-4 4-4-4M5 20h14" stroke-linecap="round" stroke-linejoin="round" />
+            </svg>
+            <span>Exportaciones CSV</span>
+          </a>
+        {{end}}
+      {{end}}
+    </nav>
+
+    <div class="app-help">
+      <a class="app-nav-link" href="#" aria-label="Ayuda">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+          <path d="M12 17h.01M9.2 9a3 3 0 1 1 4.6 2.5c-1 .7-1.8 1.2-1.8 2.5M21 12a9 9 0 1 1-18 0 9 9 0 0 1 18 0Z" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <span>Ayuda</span>
+      </a>
+    </div>
+  </aside>
+
+  <div class="app-topbar">
     {{if .CurrentUser}}
-    <div class="user-bar">
+    <div class="app-userbar">
       <span>{{.CurrentUser.Username}}</span>
-      <span class="role-pill">{{.CurrentUser.Role}}</span>
-      <form class="logout-form" method="POST" action="/logout">
-        <button class="logout-button" type="submit">Cerrar sesión</button>
+      <span class="app-role-pill">{{.CurrentUser.Role}}</span>
+      <button class="app-icon-button app-theme-toggle" id="theme-toggle" type="button" aria-label="Cambiar a tema oscuro" title="Cambiar tema">
+        <svg class="theme-icon-moon" viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" aria-hidden="true">
+          <path d="M20.5 14.5A8.5 8.5 0 0 1 9.5 3.5a7 7 0 1 0 11 11Z" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <svg class="theme-icon-sun" viewBox="0 0 24 24" width="21" height="21" fill="none" stroke="currentColor" aria-hidden="true">
+          <path d="M12 4V2m0 20v-2m8-8h2M2 12h2m13.7-5.7 1.4-1.4M4.9 19.1l1.4-1.4m0-11.4L4.9 4.9m14.2 14.2-1.4-1.4M16 12a4 4 0 1 1-8 0 4 4 0 0 1 8 0Z" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+      </button>
+      <form class="app-logout-form" method="POST" action="/logout">
+        <button class="app-logout-button" type="submit">
+          <span>Cerrar sesión</span>
+          <svg viewBox="0 0 24 24" width="18" height="18" fill="none" stroke="currentColor" aria-hidden="true">
+            <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3" stroke-linecap="round" stroke-linejoin="round" />
+          </svg>
+        </button>
       </form>
     </div>
     {{end}}
   </div>
+
   <header class="page-header">
     <div class="header-top">
       <div class="header-text">
@@ -108,17 +664,76 @@
         {{end}}
       </div>
     </div>
-	    <nav class="nav-buttons">
-	      <a href="/dashboard" class="nav-button">Dashboard</a>
-	      <a href="/inventario" class="nav-button">Inventario</a>
-	      {{if .CurrentUser}}
-	        {{if eq .CurrentUser.Role "admin"}}
-	          <a href="/productos/new" class="nav-button">Nuevo producto</a>
-	          <a href="/admin/users" class="nav-button">Usuarios</a>
-          <a href="/csv/template" class="nav-button" target="_blank">Agregar productos</a>
-          <a href="/csv/export" class="nav-button" target="_blank">Exportaciones CSV</a>
-        {{end}}
-      {{end}}
-    </nav>
   </header>
+
+  <script>
+    (() => {
+      const themeStorageKey = "stocki-theme";
+      const getStoredTheme = () => {
+        try {
+          return window.localStorage.getItem(themeStorageKey);
+        } catch (_) {
+          return null;
+        }
+      };
+      const setStoredTheme = (theme) => {
+        try {
+          window.localStorage.setItem(themeStorageKey, theme);
+        } catch (_) {}
+      };
+      const getPreferredTheme = () => {
+        const stored = getStoredTheme();
+        if (stored === "light" || stored === "dark") return stored;
+        return window.matchMedia?.("(prefers-color-scheme: dark)")?.matches ? "dark" : "light";
+      };
+      const applyTheme = (theme) => {
+        document.documentElement.dataset.theme = theme;
+        const themeToggle = document.getElementById("theme-toggle");
+        if (!themeToggle) return;
+        const nextTheme = theme === "dark" ? "light" : "dark";
+        themeToggle.setAttribute("aria-label", `Cambiar a tema ${nextTheme === "dark" ? "oscuro" : "claro"}`);
+        themeToggle.setAttribute("title", `Cambiar a tema ${nextTheme === "dark" ? "oscuro" : "claro"}`);
+      };
+
+      applyTheme(getPreferredTheme());
+
+      const themeToggle = document.getElementById("theme-toggle");
+      if (themeToggle) {
+        themeToggle.addEventListener("click", () => {
+          const currentTheme = document.documentElement.dataset.theme === "dark" ? "dark" : "light";
+          const nextTheme = currentTheme === "dark" ? "light" : "dark";
+          setStoredTheme(nextTheme);
+          applyTheme(nextTheme);
+        });
+      }
+
+      const systemTheme = window.matchMedia?.("(prefers-color-scheme: dark)");
+      systemTheme?.addEventListener?.("change", () => {
+        if (getStoredTheme()) return;
+        applyTheme(getPreferredTheme());
+      });
+
+      const currentPath = window.location.pathname;
+      document.querySelectorAll("[data-nav-path]").forEach((link) => {
+        const path = link.getAttribute("data-nav-path");
+        if (!path) return;
+        if (currentPath === path || (path !== "/" && currentPath.startsWith(path + "/"))) {
+          link.classList.add("active");
+        }
+      });
+
+      const collapseToggle = document.getElementById("app-collapse-toggle");
+      if (!collapseToggle) return;
+      try {
+        collapseToggle.checked = window.localStorage.getItem("stocki-sidebar-collapsed") === "1";
+      } catch (_) {
+        collapseToggle.checked = false;
+      }
+      collapseToggle.addEventListener("change", () => {
+        try {
+          window.localStorage.setItem("stocki-sidebar-collapsed", collapseToggle.checked ? "1" : "0");
+        } catch (_) {}
+      });
+    })();
+  </script>
 {{end}}

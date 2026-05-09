@@ -3359,17 +3359,37 @@ func main() {
 
 	mux.HandleFunc("/cambio", func(w http.ResponseWriter, r *http.Request) {
 		currentUser := userFromContext(r)
+		wantsJSON := strings.Contains(r.Header.Get("Accept"), "application/json") || r.Header.Get("X-Requested-With") == "XMLHttpRequest"
+
+		writeJSONError := func(status int, message string, fields map[string]string) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":     false,
+				"error":  message,
+				"fields": fields,
+			})
+		}
+
 		productsMu.RLock()
 		productsSnapshot := make([]productOption, len(products))
 		copy(productsSnapshot, products)
 		productsMu.RUnlock()
 
 		if r.Method != http.MethodPost {
+			if wantsJSON {
+				writeJSONError(http.StatusMethodNotAllowed, "Método no permitido.", nil)
+				return
+			}
 			http.Redirect(w, r, "/cambio/new", http.StatusSeeOther)
 			return
 		}
 
 		if err := r.ParseForm(); err != nil {
+			if wantsJSON {
+				writeJSONError(http.StatusBadRequest, "No se pudo leer el formulario.", nil)
+				return
+			}
 			http.Error(w, "No se pudo leer el formulario", http.StatusBadRequest)
 			return
 		}
@@ -3401,6 +3421,10 @@ func main() {
 
 		availableUnits, err := availableUnitsByProduct(db, productID)
 		if err != nil {
+			if wantsJSON {
+				writeJSONError(http.StatusInternalServerError, "Error al consultar unidades disponibles.", nil)
+				return
+			}
 			http.Error(w, "Error al consultar unidades disponibles", http.StatusInternalServerError)
 			return
 		}
@@ -3459,6 +3483,17 @@ func main() {
 		}
 
 		if len(errors) > 0 {
+			if wantsJSON {
+				message := "Datos inválidos."
+				for _, key := range []string{"producto_id", "persona_del_cambio", "salientes", "incoming_mode", "incoming_existing_id", "incoming_existing_qty", "incoming_new_sku", "incoming_new_name", "incoming_new_qty"} {
+					if msg, ok := errors[key]; ok && msg != "" {
+						message = msg
+						break
+					}
+				}
+				writeJSONError(http.StatusBadRequest, message, errors)
+				return
+			}
 			data := cambioFormData{
 				Title:               "Registrar cambio",
 				ProductoID:          productID,
@@ -3487,6 +3522,10 @@ func main() {
 
 		tx, err := db.Begin()
 		if err != nil {
+			if wantsJSON {
+				writeJSONError(http.StatusInternalServerError, "Error al iniciar el cambio.", nil)
+				return
+			}
 			http.Error(w, "Error al iniciar el cambio", http.StatusInternalServerError)
 			return
 		}
@@ -3498,6 +3537,12 @@ func main() {
 				log.Printf("rollback cambio: %v", rollbackErr)
 			}
 			if err == errInsufficientStock {
+				if wantsJSON {
+					writeJSONError(http.StatusBadRequest, "No hay stock disponible suficiente para completar el cambio.", map[string]string{
+						"salientes": "No hay stock disponible suficiente para completar el cambio.",
+					})
+					return
+				}
 				errors["salientes"] = "No hay stock disponible suficiente para completar el cambio."
 				data := cambioFormData{
 					Title:               "Registrar cambio",
@@ -3523,6 +3568,10 @@ func main() {
 				}
 				return
 			}
+			if wantsJSON {
+				writeJSONError(http.StatusInternalServerError, "Error al actualizar unidades salientes.", nil)
+				return
+			}
 			http.Error(w, "Error al actualizar unidades salientes", http.StatusInternalServerError)
 			return
 		}
@@ -3532,6 +3581,10 @@ func main() {
 		if err := logMovimientos(tx, productID, salientesMarcadas, "cambio_salida", notaMovimiento, currentUser, now); err != nil {
 			if rollbackErr := tx.Rollback(); rollbackErr != nil {
 				log.Printf("rollback cambio log: %v", rollbackErr)
+			}
+			if wantsJSON {
+				writeJSONError(http.StatusInternalServerError, "Error al registrar movimiento del cambio.", nil)
+				return
 			}
 			http.Error(w, "Error al registrar movimiento del cambio", http.StatusInternalServerError)
 			return
@@ -3561,13 +3614,34 @@ func main() {
 				if rollbackErr := tx.Rollback(); rollbackErr != nil {
 					log.Printf("rollback cambio insert: %v", rollbackErr)
 				}
+				if wantsJSON {
+					writeJSONError(http.StatusInternalServerError, "Error al registrar unidades entrantes.", nil)
+					return
+				}
 				http.Error(w, "Error al registrar unidades entrantes", http.StatusInternalServerError)
 				return
 			}
 		}
 
 		if err := tx.Commit(); err != nil {
+			if wantsJSON {
+				writeJSONError(http.StatusInternalServerError, "Error al confirmar el cambio.", nil)
+				return
+			}
 			http.Error(w, "Error al confirmar el cambio", http.StatusInternalServerError)
+			return
+		}
+
+		if wantsJSON {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":              true,
+				"producto_id":     productID,
+				"producto_nombre": selectedProduct.Name,
+				"salientes":       salientesMarcadas,
+				"entrantes":       entrantes,
+				"mensaje":         "Cambio registrado correctamente.",
+			})
 			return
 		}
 
