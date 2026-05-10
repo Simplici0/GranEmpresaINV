@@ -5,18 +5,25 @@ on:
     branches: [ main ]
   workflow_dispatch:
 
+env:
+  DEPLOY_HOST: 37.27.222.238
+  DEPLOY_PORT: 2222
+  DEPLOY_USER: AlvaroC
+  DEPLOY_PATH: /opt/stocki
+  DEPLOY_SERVICE: stocki
+
 jobs:
   deploy:
     runs-on: ubuntu-latest
     
     steps:
     - name: Checkout code
-      uses: actions/checkout@v3
+      uses: actions/checkout@v4
     
     - name: Setup Go
-      uses: actions/setup-go@v4
+      uses: actions/setup-go@v5
       with:
-        go-version: '1.21'
+        go-version-file: go.mod
     
     - name: Build binary
       run: GOOS=linux GOARCH=arm64 go build -o stocki
@@ -26,9 +33,19 @@ jobs:
         mkdir -p ~/.ssh
         echo "${{ secrets.SSH_PRIVATE_KEY }}" > ~/.ssh/id_rsa
         chmod 600 ~/.ssh/id_rsa
-        ssh-keyscan -p 2222 37.27.222.238 >> ~/.ssh/known_hosts
+        ssh-keyscan -p "$DEPLOY_PORT" "$DEPLOY_HOST" >> ~/.ssh/known_hosts
     
     - name: Deploy to server
       run: |
-        scp -P 2222 stocki AlvaroC@37.27.222.238:/tmp/stocki
-        ssh -p 2222 AlvaroC@37.27.222.238 'sudo systemctl stop stocki && sudo mv /tmp/stocki /opt/stocki/stocki && sudo chmod +x /opt/stocki/stocki && sudo systemctl start stocki'
+        RELEASE_DIR="/tmp/stocki-release-${GITHUB_SHA}"
+        ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "rm -rf '$RELEASE_DIR' && mkdir -p '$RELEASE_DIR'"
+        rsync -az -e "ssh -p $DEPLOY_PORT" stocki templates static "$DEPLOY_USER@$DEPLOY_HOST:$RELEASE_DIR/"
+        ssh -p "$DEPLOY_PORT" "$DEPLOY_USER@$DEPLOY_HOST" "
+          set -e
+          sudo mkdir -p '$DEPLOY_PATH'
+          sudo install -m 755 '$RELEASE_DIR/stocki' '$DEPLOY_PATH/stocki'
+          sudo rsync -a --delete '$RELEASE_DIR/templates/' '$DEPLOY_PATH/templates/'
+          sudo rsync -a --delete '$RELEASE_DIR/static/' '$DEPLOY_PATH/static/'
+          sudo systemctl restart '$DEPLOY_SERVICE'
+          rm -rf '$RELEASE_DIR'
+        "
