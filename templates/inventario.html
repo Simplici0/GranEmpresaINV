@@ -855,6 +855,51 @@
       border-radius: 10px;
     }
 
+    #swap-modal .swap-unit-dropdown {
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      background: var(--color-surface, #ffffff);
+      overflow: hidden;
+    }
+
+    #swap-modal .swap-unit-dropdown summary {
+      min-height: 40px;
+      padding: 0 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      cursor: pointer;
+      list-style: none;
+      font-size: 13px;
+      font-weight: 800;
+      color: var(--text);
+    }
+
+    #swap-modal .swap-unit-dropdown summary::-webkit-details-marker {
+      display: none;
+    }
+
+    #swap-modal .swap-unit-dropdown summary::after {
+      content: "";
+      width: 8px;
+      height: 8px;
+      border-right: 2px solid currentColor;
+      border-bottom: 2px solid currentColor;
+      transform: rotate(45deg) translateY(-2px);
+      opacity: 0.6;
+      transition: transform 0.16s ease;
+    }
+
+    #swap-modal .swap-unit-dropdown[open] summary::after {
+      transform: rotate(225deg) translate(-2px, -1px);
+    }
+
+    #swap-modal .swap-unit-dropdown[open] .swap-unit-list {
+      border-width: 1px 0 0;
+      border-radius: 0;
+    }
+
     #swap-modal .swap-unit-option span {
       min-width: 0;
       overflow: hidden;
@@ -1608,7 +1653,13 @@
           <section class="swap-section">
             <h4>Unidades que salen</h4>
             <div id="swap-units-hint" class="modal-hint"></div>
-            <div id="swap-unit-list" class="swap-unit-list" aria-label="Unidades disponibles"></div>
+            <details id="swap-unit-dropdown" class="swap-unit-dropdown">
+              <summary>
+                <span>Seleccionar unidades</span>
+                <span id="swap-unit-summary">0 seleccionadas</span>
+              </summary>
+              <div id="swap-unit-list" class="swap-unit-list" aria-label="Unidades disponibles"></div>
+            </details>
             <div class="field-error" data-swap-field-error="salientes"></div>
           </section>
 
@@ -2113,7 +2164,9 @@
     const swapProductId = document.getElementById("swap-product-id");
     const swapPerson = document.getElementById("swap-person");
     const swapMode = document.getElementById("swap-mode");
+    const swapUnitDropdown = document.getElementById("swap-unit-dropdown");
     const swapUnitList = document.getElementById("swap-unit-list");
+    const swapUnitSummary = document.getElementById("swap-unit-summary");
     const swapUnitsHint = document.getElementById("swap-units-hint");
     const swapExistingFields = document.getElementById("swap-existing-fields");
     const swapExistingSearch = document.getElementById("swap-existing-search");
@@ -2465,9 +2518,19 @@
       updateSwapExistingStatus(filtered.length, query);
     };
 
+    const updateSwapUnitSummary = () => {
+      if (!swapUnitSummary || !swapUnitList) return;
+      const total = swapUnitList.querySelectorAll('input[name="salientes"]').length;
+      const selected = swapUnitList.querySelectorAll('input[name="salientes"]:checked').length;
+      swapUnitSummary.textContent = total === 0
+        ? "Sin unidades"
+        : `${selected} de ${total} seleccionada${selected === 1 ? "" : "s"}`;
+    };
+
     const populateSwapUnits = (product, defaultQty) => {
       if (!swapUnitList || !swapUnitsHint) return;
       swapUnitList.innerHTML = "";
+      if (swapUnitDropdown) swapUnitDropdown.open = false;
       const availableUnits = (product?.units || []).filter((unit) => unit.statusClass === "available");
       swapUnitsHint.textContent = `${availableUnits.length} disponibles`;
       if (availableUnits.length === 0) {
@@ -2475,6 +2538,7 @@
         empty.className = "modal-empty";
         empty.textContent = "No hay unidades disponibles para este producto.";
         swapUnitList.appendChild(empty);
+        updateSwapUnitSummary();
         return;
       }
       availableUnits.forEach((unit, index) => {
@@ -2491,6 +2555,7 @@
         label.appendChild(text);
         swapUnitList.appendChild(label);
       });
+      updateSwapUnitSummary();
     };
 
     const openSwapModal = ({ product, productId, defaultQty }) => {
@@ -2763,6 +2828,9 @@
           lastSwapExistingValue = swapExistingSelect.value;
         }
       });
+    }
+    if (swapUnitList) {
+      swapUnitList.addEventListener("change", updateSwapUnitSummary);
     }
     if (swapForm) {
       swapForm.addEventListener("submit", async (event) => {
