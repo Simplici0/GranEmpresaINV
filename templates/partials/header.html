@@ -107,6 +107,7 @@
       color: var(--app-text);
       box-shadow: 0 10px 24px rgba(17, 24, 39, 0.08);
       cursor: pointer;
+      transition: opacity 0.18s ease, transform 0.22s ease;
     }
 
     .app-collapse-toggle {
@@ -235,7 +236,7 @@
       border-bottom: 1px solid var(--app-border);
       background: var(--color-elevated);
       backdrop-filter: blur(16px);
-      transition: left 0.22s ease;
+      transition: left 0.22s ease, transform 0.22s ease;
     }
 
     .app-userbar {
@@ -437,6 +438,21 @@
       margin-right: 0;
       padding-top: 0;
       transition: margin-left 0.22s ease;
+    }
+
+    body.app-chrome-hidden:not(.app-menu-open) .app-topbar {
+      transform: translateY(calc(-100% - 10px));
+    }
+
+    body.app-chrome-hidden:not(.app-menu-open) .app-mobile-toggle {
+      opacity: 0;
+      pointer-events: none;
+      transform: translateY(calc(-100% - 18px));
+    }
+
+    body.app-chrome-hidden:not(.app-menu-open) .app-sidebar {
+      box-shadow: none;
+      transform: translateX(-100%);
     }
 
     @media (min-width: 1101px) {
@@ -734,6 +750,48 @@
           window.localStorage.setItem("stocki-sidebar-collapsed", collapseToggle.checked ? "1" : "0");
         } catch (_) {}
       });
+
+      const menuToggle = document.getElementById("app-sidebar-toggle");
+      const syncMenuState = () => {
+        const isOpen = !!menuToggle?.checked;
+        document.body.classList.toggle("app-menu-open", isOpen);
+        if (isOpen) document.body.classList.remove("app-chrome-hidden");
+      };
+
+      menuToggle?.addEventListener("change", syncMenuState);
+      syncMenuState();
+
+      let lastScrollY = window.scrollY || 0;
+      let scrollTicking = false;
+      const scrollDelta = 8;
+      const hideAfter = 96;
+      const updateChromeVisibility = () => {
+        const currentY = window.scrollY || 0;
+        const hasOpenModal = !!document.querySelector(".modal-backdrop.open");
+        const menuOpen = !!menuToggle?.checked;
+
+        if (hasOpenModal || menuOpen || currentY < hideAfter) {
+          document.body.classList.remove("app-chrome-hidden");
+        } else if (currentY > lastScrollY + scrollDelta) {
+          document.body.classList.add("app-chrome-hidden");
+        } else if (currentY < lastScrollY - scrollDelta) {
+          document.body.classList.remove("app-chrome-hidden");
+        }
+
+        lastScrollY = currentY;
+        scrollTicking = false;
+      };
+
+      window.addEventListener(
+        "scroll",
+        () => {
+          if (scrollTicking) return;
+          scrollTicking = true;
+          window.requestAnimationFrame(updateChromeVisibility);
+        },
+        { passive: true }
+      );
+      window.addEventListener("resize", updateChromeVisibility);
     })();
   </script>
 {{end}}
