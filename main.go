@@ -291,6 +291,8 @@ type dashboardSaleDetail struct {
 	Cantidad   int    `json:"cantidad"`
 	Total      string `json:"total"`
 	MetodoPago string `json:"metodo_pago"`
+	Tipo       string `json:"tipo"`
+	EsVenta    bool   `json:"es_venta"`
 }
 
 type pieSlice struct {
@@ -518,11 +520,78 @@ func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, end
 			Cantidad:   cantidad,
 			Total:      formatCurrency(precioUnit * float64(cantidad)),
 			MetodoPago: metodoPago,
+			Tipo:       "Venta",
+			EsVenta:    true,
 		})
 	}
 	if err := saleRows.Err(); err != nil {
 		return dashboardDataResponse{}, err
 	}
+
+	internalRows, err := db.Query(`
+		SELECT
+			MAX(m.id),
+			m.fecha,
+			COALESCE(p.nombre, m.producto_id),
+			COUNT(*),
+			COALESCE(m.usuario, ''),
+			COALESCE(m.nota, '')
+		FROM movimientos m
+		LEFT JOIN productos p ON p.sku = m.producto_id
+		WHERE m.tipo = 'uso_interno' AND date(m.fecha) BETWEEN ? AND ?
+		GROUP BY m.fecha, m.producto_id, COALESCE(p.nombre, m.producto_id), COALESCE(m.usuario, ''), COALESCE(m.nota, '')
+	`, startStr, endStr)
+	if err != nil {
+		return dashboardDataResponse{}, err
+	}
+	defer internalRows.Close()
+
+	for internalRows.Next() {
+		var (
+			id       int
+			fechaRaw string
+			producto string
+			cantidad int
+			usuario  string
+			nota     string
+		)
+		if err := internalRows.Scan(&id, &fechaRaw, &producto, &cantidad, &usuario, &nota); err != nil {
+			return dashboardDataResponse{}, err
+		}
+		fecha := fechaRaw
+		if len(fechaRaw) >= 10 {
+			fecha = fechaRaw[:10]
+		}
+		totalNota := strings.TrimSpace(nota)
+		if usuario != "" {
+			if totalNota != "" {
+				totalNota = fmt.Sprintf("%s | Autorizó: %s", totalNota, usuario)
+			} else {
+				totalNota = fmt.Sprintf("Autorizó: %s", usuario)
+			}
+		}
+		_ = totalNota
+		sales = append(sales, dashboardSaleDetail{
+			ID:         id,
+			Fecha:      fecha,
+			Producto:   producto,
+			Cantidad:   cantidad,
+			Total:      "-",
+			MetodoPago: "Uso interno",
+			Tipo:       "Uso interno",
+			EsVenta:    false,
+		})
+	}
+	if err := internalRows.Err(); err != nil {
+		return dashboardDataResponse{}, err
+	}
+
+	sort.SliceStable(sales, func(i, j int) bool {
+		if sales[i].Fecha != sales[j].Fecha {
+			return sales[i].Fecha > sales[j].Fecha
+		}
+		return sales[i].ID > sales[j].ID
+	})
 	resp.Sales = sales
 
 	return resp, nil
@@ -576,6 +645,8 @@ func estadoClass(estado string) string {
 		return "sold"
 	case "Cambio", "swapped":
 		return "swapped"
+	case "Uso interno", "uso_interno", "internal-use":
+		return "internal-use"
 	default:
 		return "available"
 	}
@@ -838,13 +909,16 @@ func monthsBetween(start, end time.Time) int {
 
 func statusLabel(estado string) string {
 	labels := map[string]string{
-		"available":  "Disponible",
-		"sold":       "Vendido",
-		"swapped":    "Cambio",
-		"Disponible": "Disponible",
-		"Vendida":    "Vendido",
-		"Vendido":    "Vendido",
-		"Cambio":     "Cambio",
+		"available":    "Disponible",
+		"sold":         "Vendido",
+		"swapped":      "Cambio",
+		"internal-use": "Uso interno",
+		"Disponible":   "Disponible",
+		"Vendida":      "Vendido",
+		"Vendido":      "Vendido",
+		"Cambio":       "Cambio",
+		"Uso interno":  "Uso interno",
+		"uso_interno":  "Uso interno",
 	}
 	if label, ok := labels[estado]; ok {
 		return label
@@ -2369,6 +2443,7 @@ func main() {
 			changeCount := 0
 			reservedCount := 0
 			damagedCount := 0
+			internalUseCount := 0
 			fifoIndex := 1
 			for rows.Next() {
 				var id, estado, creadoEn string
@@ -2389,6 +2464,8 @@ func main() {
 					changeCount++
 				} else if estado == "Danada" || estado == "Dañada" || estado == "damaged" {
 					damagedCount++
+				} else if estado == "Uso interno" || estado == "uso_interno" || estado == "internal-use" {
+					internalUseCount++
 				}
 				units = append(units, inventoryUnit{
 					ID:          id,
@@ -2418,6 +2495,9 @@ func main() {
 				} else if damagedCount > 0 {
 					estadoLabel = "Dañado"
 					estadoClass = "damaged"
+				} else if internalUseCount > 0 {
+					estadoLabel = "Uso interno"
+					estadoClass = "internal-use"
 				} else {
 					estadoLabel = "Vendido"
 					estadoClass = "sold"
@@ -2578,6 +2658,106 @@ func main() {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "producto_id": productID, "cantidad": qty})
+	})
+
+	mux.HandleFunc("/inventario/uso-interno", func(w http.ResponseWriter, r *http.Request) {
+		writeJSONError := func(status int, message string, fields map[string]string) {
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(status)
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"ok":     false,
+				"error":  message,
+				"fields": fields,
+			})
+		}
+
+		if r.Method != http.MethodPost {
+			writeJSONError(http.StatusMethodNotAllowed, "Método no permitido.", nil)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			writeJSONError(http.StatusBadRequest, "No se pudo leer el formulario.", nil)
+			return
+		}
+
+		productID := strings.TrimSpace(r.FormValue("producto_id"))
+		uso := strings.TrimSpace(r.FormValue("uso"))
+		autorizadoPor := strings.TrimSpace(r.FormValue("autorizado_por"))
+		notas := strings.TrimSpace(r.FormValue("notas"))
+		qtyValue := strings.TrimSpace(r.FormValue("cantidad"))
+
+		errors := make(map[string]string)
+		if productID == "" {
+			errors["producto_id"] = "Selecciona un producto válido."
+		}
+		if uso == "" {
+			errors["uso"] = "Ingresa el uso interno."
+		}
+		if autorizadoPor == "" {
+			errors["autorizado_por"] = "Ingresa quién autorizó."
+		}
+		qty, err := strconv.Atoi(qtyValue)
+		if err != nil || qty <= 0 {
+			errors["cantidad"] = "La cantidad debe ser un número positivo."
+		}
+		if len(errors) > 0 {
+			message := "Datos inválidos."
+			for _, key := range []string{"producto_id", "uso", "autorizado_por", "cantidad"} {
+				if msg, ok := errors[key]; ok && msg != "" {
+					message = msg
+					break
+				}
+			}
+			writeJSONError(http.StatusBadRequest, message, errors)
+			return
+		}
+
+		tx, err := db.Begin()
+		if err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo iniciar la transacción.", nil)
+			return
+		}
+		defer tx.Rollback()
+
+		unitIDs, err := selectAndMarkUnitsByStatus(tx, productID, qty, "Uso interno")
+		if err != nil {
+			if err == errInsufficientStock {
+				writeJSONError(http.StatusBadRequest, "No hay stock disponible suficiente.", map[string]string{
+					"cantidad": "No hay stock disponible suficiente.",
+				})
+				return
+			}
+			writeJSONError(http.StatusInternalServerError, "No se pudo registrar el uso interno.", nil)
+			return
+		}
+
+		parts := []string{
+			"Uso: " + uso,
+			"Autorizó: " + autorizadoPor,
+		}
+		if notas != "" {
+			parts = append(parts, "Notas: "+notas)
+		}
+		composedNote := strings.Join(parts, " | ")
+
+		now := time.Now().Format(time.RFC3339)
+		if err := logMovimientos(tx, productID, unitIDs, "uso_interno", composedNote, userFromContext(r), now); err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo registrar el movimiento.", nil)
+			return
+		}
+
+		if err := tx.Commit(); err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo confirmar la transacción.", nil)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"ok":          true,
+			"producto_id": productID,
+			"cantidad":    qty,
+			"mensaje":     "Uso interno registrado correctamente.",
+		})
 	})
 
 	mux.HandleFunc("/inventario/stock", func(w http.ResponseWriter, r *http.Request) {

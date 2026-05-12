@@ -278,6 +278,12 @@
       border-color: #f2d1a5;
     }
 
+    .status.internal-use {
+      background: #fff1e6;
+      color: #a84d1b;
+      border-color: #f3c9ad;
+    }
+
     .status.reserved {
       background: #e8f1ff;
       color: #1f3c88;
@@ -666,6 +672,12 @@
       border-color: #f2d1a5;
     }
 
+    .move-tag.uso_interno {
+      background: #fff1e6;
+      color: #a84d1b;
+      border-color: #f3c9ad;
+    }
+
     .modal textarea {
       width: 100%;
       padding: 10px 12px;
@@ -909,6 +921,48 @@
 
     #swap-existing-id {
       margin-top: 6px;
+    }
+
+    #internal-use-modal input:not([type="hidden"]),
+    #internal-use-modal textarea {
+      width: 100%;
+    }
+
+    #internal-use-modal .modal-body {
+      padding: 12px 14px 14px;
+    }
+
+    #internal-use-modal .modal-grid {
+      gap: 10px;
+    }
+
+    #internal-use-modal .modal-row {
+      gap: 10px;
+      align-items: start;
+    }
+
+    #internal-use-modal input:not([type="hidden"]) {
+      min-height: 38px;
+      padding: 8px 10px;
+    }
+
+    #internal-use-modal textarea {
+      min-height: 76px;
+      padding: 9px 10px;
+    }
+
+    #internal-use-modal label {
+      margin-bottom: 4px;
+      font-size: 11px;
+    }
+
+    #internal-use-modal .internal-use-quantity-row {
+      grid-template-columns: minmax(110px, 140px) minmax(120px, 170px);
+      max-width: 330px;
+    }
+
+    #internal-use-modal .modal-actions {
+      padding-top: 2px;
     }
 
     /* Stocki inventory refresh */
@@ -1703,6 +1757,7 @@
         <option value="sold">Vendido</option>
         <option value="swapped">Cambio</option>
         <option value="damaged">Dañado</option>
+        <option value="internal-use">Uso interno</option>
       </select>
     </div>
     <div class="filter-group">
@@ -1987,6 +2042,59 @@
           <div class="modal-actions">
             <button type="button" class="secondary" data-modal-close>Cancelar</button>
             <button id="swap-submit" type="submit" class="primary">Confirmar cambio</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  </div>
+
+  <div id="internal-use-modal" class="modal-backdrop" aria-hidden="true">
+    <div class="modal" role="dialog" aria-modal="true" aria-labelledby="internal-use-title">
+      <div class="modal-header">
+        <div>
+          <h3 id="internal-use-title">Uso interno</h3>
+          <div id="internal-use-subtitle" class="modal-subtitle"></div>
+        </div>
+        <button type="button" class="modal-close" data-modal-close aria-label="Cerrar">✕</button>
+      </div>
+      <div class="modal-body">
+        <form id="internal-use-form" class="modal-grid">
+          <div id="internal-use-error" class="modal-error" hidden></div>
+          <input id="internal-use-product-id" name="producto_id" type="hidden" />
+
+          <div class="modal-row">
+            <div>
+              <label for="internal-use-usage">Uso</label>
+              <input id="internal-use-usage" name="uso" type="text" placeholder="Describe el uso interno" autocomplete="off" />
+              <div class="field-error" data-internal-use-field-error="uso"></div>
+            </div>
+            <div>
+              <label for="internal-use-authorized">Nombre de quien autorizó</label>
+              <input id="internal-use-authorized" name="autorizado_por" type="text" placeholder="Nombre completo" autocomplete="off" />
+              <div class="field-error" data-internal-use-field-error="autorizado_por"></div>
+            </div>
+          </div>
+
+          <div class="modal-row internal-use-quantity-row">
+            <div>
+              <label for="internal-use-qty">Cantidad</label>
+              <input id="internal-use-qty" name="cantidad" type="number" min="1" step="1" value="1" />
+              <div class="field-error" data-internal-use-field-error="cantidad"></div>
+            </div>
+            <div>
+              <label for="internal-use-stock">Disponible</label>
+              <input id="internal-use-stock" type="text" value="-" disabled />
+            </div>
+          </div>
+
+          <div>
+            <label for="internal-use-notes">Notas</label>
+            <textarea id="internal-use-notes" name="notas" placeholder="Observaciones"></textarea>
+          </div>
+
+          <div class="modal-actions">
+            <button type="button" class="secondary" data-modal-close>Cancelar</button>
+            <button id="internal-use-submit" type="submit" class="primary">Confirmar uso</button>
           </div>
         </form>
       </div>
@@ -2307,6 +2415,7 @@
               <div class="menu-panel" id="menu-${product.id}">
                 <button type="button" data-menu-action="reserve" data-product="${product.id}">Reservar unidades</button>
                 <button type="button" data-menu-action="damage" data-product="${product.id}">Registrar daño</button>
+                <button type="button" data-menu-action="internal_use" data-product="${product.id}">Uso interno</button>
                 {{if and .CurrentUser (or (eq .CurrentUser.Role "admin") (eq .CurrentUser.Role "empleado"))}}
                 <button type="button" data-menu-action="stock" data-product="${product.id}">Ajustar stock</button>
                 {{end}}
@@ -2453,6 +2562,20 @@
     let swapContext = null;
     let swapExistingOptions = [];
     let lastSwapExistingValue = "";
+
+    const internalUseModal = document.getElementById("internal-use-modal");
+    const internalUseSubtitle = document.getElementById("internal-use-subtitle");
+    const internalUseForm = document.getElementById("internal-use-form");
+    const internalUseError = document.getElementById("internal-use-error");
+    const internalUseProductId = document.getElementById("internal-use-product-id");
+    const internalUseUsage = document.getElementById("internal-use-usage");
+    const internalUseAuthorized = document.getElementById("internal-use-authorized");
+    const internalUseQty = document.getElementById("internal-use-qty");
+    const internalUseStock = document.getElementById("internal-use-stock");
+    const internalUseNotes = document.getElementById("internal-use-notes");
+    const internalUseSubmit = document.getElementById("internal-use-submit");
+    let internalUseContext = null;
+
     if (salePrice) {
       salePrice.addEventListener("input", () => {
         salePrice.dataset.autofilled = "0";
@@ -2493,6 +2616,7 @@
       if (subtitleText && backdrop === actionModal && actionSubtitle) actionSubtitle.textContent = subtitleText;
       if (subtitleText && backdrop === saleModal && saleSubtitle) saleSubtitle.textContent = subtitleText;
       if (subtitleText && backdrop === swapModal && swapSubtitle) swapSubtitle.textContent = subtitleText;
+      if (subtitleText && backdrop === internalUseModal && internalUseSubtitle) internalUseSubtitle.textContent = subtitleText;
       document.body.style.overflow = "hidden";
     };
 
@@ -2709,6 +2833,30 @@
       swapError.textContent = msg;
     };
 
+    const setInternalUseError = (msg) => {
+      if (!internalUseError) return;
+      if (!msg) {
+        internalUseError.hidden = true;
+        internalUseError.textContent = "";
+        return;
+      }
+      internalUseError.hidden = false;
+      internalUseError.textContent = msg;
+    };
+
+    const clearInternalUseFieldErrors = () => {
+      document.querySelectorAll("[data-internal-use-field-error]").forEach((node) => {
+        node.textContent = "";
+      });
+    };
+
+    const setInternalUseFieldErrors = (fields = {}) => {
+      Object.entries(fields || {}).forEach(([field, message]) => {
+        const node = document.querySelector(`[data-internal-use-field-error="${field}"]`);
+        if (node) node.textContent = message || "";
+      });
+    };
+
     const clearSwapFieldErrors = () => {
       document.querySelectorAll("[data-swap-field-error]").forEach((node) => {
         node.textContent = "";
@@ -2853,6 +3001,38 @@
       if (swapPerson) swapPerson.focus();
     };
 
+    const openInternalUseModal = ({ product, productId, maxQty, defaultQty }) => {
+      if (!internalUseForm || !internalUseModal) return;
+      internalUseContext = { productId, productName: product?.name || "", maxQty: Number.isFinite(maxQty) ? maxQty : 0 };
+      internalUseForm.reset();
+      clearInternalUseFieldErrors();
+      setInternalUseError("");
+      if (internalUseProductId) internalUseProductId.value = productId;
+      if (internalUseSubtitle) {
+        internalUseSubtitle.textContent = product ? `${product.name} · SKU ${productId}` : `SKU ${productId}`;
+      }
+      if (internalUseStock) internalUseStock.value = Number.isFinite(maxQty) ? String(maxQty) : "-";
+      if (internalUseQty) {
+        internalUseQty.min = "1";
+        if (Number.isFinite(maxQty) && maxQty > 0) {
+          internalUseQty.max = String(maxQty);
+          internalUseQty.value = String(Math.min(Math.max(1, defaultQty || 1), maxQty));
+        } else {
+          internalUseQty.removeAttribute("max");
+          internalUseQty.value = String(Math.max(1, defaultQty || 1));
+        }
+      }
+      if (internalUseUsage) internalUseUsage.value = "";
+      if (internalUseAuthorized) internalUseAuthorized.value = "";
+      if (internalUseNotes) internalUseNotes.value = "";
+      if (internalUseSubmit) internalUseSubmit.disabled = Number.isFinite(maxQty) && maxQty < 1;
+      if (Number.isFinite(maxQty) && maxQty < 1) {
+        setInternalUseError("No hay stock disponible para registrar uso interno.");
+      }
+      openModal(internalUseModal, product ? `${product.name} · SKU ${productId}` : `SKU ${productId}`);
+      if (internalUseUsage && (!Number.isFinite(maxQty) || maxQty >= 1)) internalUseUsage.focus();
+    };
+
     const showHistory = async (product) => {
       if (!product) return;
       openModal(historyModal, `${product.name} · SKU ${product.id}`);
@@ -2896,6 +3076,7 @@
             reservar: "Reserva",
             dano: "Daño",
             cambio_salida: "Cambio",
+            uso_interno: "Uso interno",
             ajuste_stock_entrada: "Ajuste +",
             ajuste_stock_salida: "Ajuste -"
           };
@@ -3144,6 +3325,63 @@
       });
     }
 
+    if (internalUseForm) {
+      internalUseForm.addEventListener("submit", async (event) => {
+        event.preventDefault();
+        if (!internalUseContext) return;
+
+        clearInternalUseFieldErrors();
+        setInternalUseError("");
+
+        const qty = parseInt(internalUseQty?.value || "0", 10);
+        const usage = String(internalUseUsage?.value || "").trim();
+        const authorizedBy = String(internalUseAuthorized?.value || "").trim();
+        const notes = String(internalUseNotes?.value || "").trim();
+        const maxQty = Number.isFinite(internalUseContext.maxQty) ? internalUseContext.maxQty : 0;
+
+        const fields = {};
+        if (!usage) fields.uso = "Ingresa el uso interno.";
+        if (!authorizedBy) fields.autorizado_por = "Ingresa quién autorizó.";
+        if (Number.isNaN(qty) || qty < 1) fields.cantidad = "La cantidad debe ser un número positivo.";
+        if (maxQty >= 1 && qty > maxQty) fields.cantidad = "No hay stock disponible suficiente.";
+        if (Object.keys(fields).length > 0) {
+          setInternalUseFieldErrors(fields);
+          setInternalUseError(Object.values(fields)[0] || "Datos inválidos.");
+          return;
+        }
+
+        if (internalUseSubmit) internalUseSubmit.disabled = true;
+        try {
+          const body = new URLSearchParams({
+            producto_id: internalUseContext.productId,
+            uso: usage,
+            autorizado_por: authorizedBy,
+            cantidad: String(qty),
+            notas: notes
+          });
+          const resp = await fetch("/inventario/uso-interno", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+              "Accept": "application/json",
+              "X-Requested-With": "XMLHttpRequest"
+            },
+            body
+          });
+          const data = await resp.json().catch(() => ({}));
+          if (!resp.ok || !data.ok) {
+            setInternalUseFieldErrors(data.fields || {});
+            throw new Error(data.error || "No se pudo registrar el uso interno.");
+          }
+          closeModal(internalUseModal);
+          window.location.href = `/inventario?mensaje=${encodeURIComponent(data.mensaje || "Uso interno registrado correctamente.")}`;
+        } catch (err) {
+          setInternalUseError(err?.message || "No se pudo registrar el uso interno.");
+          if (internalUseSubmit) internalUseSubmit.disabled = false;
+        }
+      });
+    }
+
     document.addEventListener("click", (event) => {
       const closeButton = event.target.closest("[data-modal-close]");
       if (closeButton) {
@@ -3244,6 +3482,26 @@
             defaultQty,
             noteLabel: "Descripción del daño (opcional)",
             notePlaceholder: "Ej: empaque roto, derrame, vencido, etc."
+          });
+          return;
+        }
+        if (action === "internal_use") {
+          if (!product || !Number.isFinite(maxQty) || maxQty < 1) {
+            openInternalUseModal({
+              product,
+              productId,
+              maxQty: 0,
+              defaultQty: 1
+            });
+            setInternalUseError("No hay stock disponible para registrar uso interno.");
+            if (internalUseSubmit) internalUseSubmit.disabled = true;
+            return;
+          }
+          openInternalUseModal({
+            product,
+            productId,
+            maxQty,
+            defaultQty
           });
           return;
         }

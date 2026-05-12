@@ -237,6 +237,30 @@
       font-weight: 700;
     }
 
+    .activity-tag {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      padding: 4px 10px;
+      border-radius: 999px;
+      font-size: 12px;
+      font-weight: 800;
+      border: 1px solid transparent;
+      white-space: nowrap;
+    }
+
+    .activity-tag.venta {
+      background: #ffecef;
+      color: #b73a3a;
+      border-color: #f5c6cf;
+    }
+
+    .activity-tag.uso_interno {
+      background: #fff1e6;
+      color: #a84d1b;
+      border-color: #f3c9ad;
+    }
+
     .card {
       background: var(--card);
       border-radius: 18px;
@@ -651,17 +675,18 @@
         <summary style="list-style:none; cursor:pointer; font-weight:800; color:var(--primary);">
           Ver detalle de ventas
         </summary>
-	        <div class="chart-note" style="margin-top:6px;">Detalle por venta dentro del rango seleccionado.</div>
+	        <div class="chart-note" style="margin-top:6px;">Detalle por ventas y uso interno dentro del rango seleccionado.</div>
 	        <table>
-	          <thead>
-	            <tr>
-	              <th>ID</th>
-	              <th>Fecha</th>
-	              <th>Producto</th>
-	              <th>Cantidad</th>
-	              <th>Total</th>
-	              <th>Método</th>
-	              {{if and .CurrentUser (eq .CurrentUser.Role "admin")}}<th>Acción</th>{{end}}
+          <thead>
+            <tr>
+              <th>ID</th>
+              <th>Fecha</th>
+              <th>Tipo</th>
+              <th>Producto</th>
+              <th>Cantidad</th>
+              <th>Total</th>
+              <th>Método</th>
+              {{if and .CurrentUser (eq .CurrentUser.Role "admin")}}<th>Acción</th>{{end}}
 	            </tr>
 	          </thead>
 	          <tbody id="sales-table-body">
@@ -669,12 +694,17 @@
 		            <tr>
 		              <td>{{.ID}}</td>
 		              <td>{{.Fecha}}</td>
+		              <td><span class="activity-tag {{if eq .Tipo "Uso interno"}}uso_interno{{else}}venta{{end}}">{{if .Tipo}}{{.Tipo}}{{else}}Venta{{end}}</span></td>
 		              <td>{{.Producto}}</td>
 		              <td>{{.Cantidad}}</td>
 		              <td>{{.Total}}</td>
 		              <td>{{.MetodoPago}}</td>
 	              {{if and $.CurrentUser (eq $.CurrentUser.Role "admin")}}
+	              {{if .EsVenta}}
 	              <td><button type="button" class="button secondary" data-sale-delete="{{.ID}}">Eliminar</button></td>
+	              {{else}}
+	              <td><span class="chart-note">Registro informativo</span></td>
+	              {{end}}
 	              {{end}}
 	            </tr>
 	            {{end}}
@@ -733,7 +763,7 @@
 	      const timelineSvg = document.getElementById("timeline-svg");
 	      const timelineMax = document.getElementById("timeline-max");
 	      const timelineDays = document.getElementById("timeline-days");
-	      const salesTableBody = document.getElementById("sales-table-body");
+	          const salesTableBody = document.getElementById("sales-table-body");
 	      const kpiTotal = document.getElementById("kpi-total");
 	      const kpiSub = document.getElementById("kpi-sub");
 	      const isAdmin = {{if and .CurrentUser (eq .CurrentUser.Role "admin")}}true{{else}}false{{end}};
@@ -934,16 +964,20 @@
 	          const cells = [
 	            String(s.id ?? "-"),
 	            String(s.fecha || "-"),
+	            `<span class="activity-tag ${s.tipo === "Uso interno" ? "uso_interno" : "venta"}">${s.tipo || "Venta"}</span>`,
 	            String(s.producto || "-"),
 	            String(s.cantidad ?? "-"),
 	            String(s.total || "-"),
 	            String(s.metodo_pago || "-")
 	          ];
-	          if (isAdmin) {
+	          if (isAdmin && s.es_venta) {
 	            cells.push(`<button type="button" class="button secondary" data-sale-delete="${s.id}">Eliminar</button>`);
+	          } else if (isAdmin) {
+	            cells.push(`<span class="chart-note">Registro informativo</span>`);
 	          }
 	          tr.innerHTML = cells.map((c, i) => {
 	            if (isAdmin && i === cells.length - 1) return `<td>${c}</td>`;
+	            if (i === 2) return `<td>${c}</td>`;
 	            return `<td>${c}</td>`;
 	          }).join("");
 	          salesTableBody.appendChild(tr);
