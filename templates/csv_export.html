@@ -8,7 +8,7 @@
   <link rel="apple-touch-icon" href="/static/favicon.svg" />
   <style>
     :root {
-      color-scheme: light;
+      color-scheme: light dark;
       --bg: #f7f5f2;
       --card: #ffffff;
       --text: #26221f;
@@ -30,8 +30,10 @@
 
     body {
       margin: 0;
-      background: var(--bg);
-      color: var(--text);
+      background:
+        radial-gradient(circle at top left, rgba(255, 90, 31, 0.08), transparent 28%),
+        linear-gradient(180deg, var(--app-surface), var(--color-surface-muted));
+      color: var(--app-text);
     }
 
     .container {
@@ -102,8 +104,8 @@
       flex-wrap: wrap;
       padding: 8px;
       border-radius: 16px;
-      border: 1px solid var(--border);
-      background: var(--card);
+      border: 1px solid var(--app-border);
+      background: var(--color-surface);
       box-shadow: var(--shadow-soft);
       width: fit-content;
     }
@@ -119,13 +121,13 @@
       font-weight: 600;
       transition: all 0.2s ease;
       border: 1px solid transparent;
-      background: var(--primary-soft);
-      color: var(--primary);
+      background: var(--app-primary-soft);
+      color: var(--app-primary);
       cursor: pointer;
     }
 
     .nav-button:hover {
-      background: var(--primary);
+      background: var(--app-primary);
       color: #ffffff;
     }
 
@@ -137,54 +139,57 @@
     }
 
     button {
-      border: 1px solid var(--border);
+      border: 1px solid var(--app-border);
       padding: 12px 24px;
-      border-radius: 12px;
+      border-radius: 14px;
       font-weight: 600;
       cursor: pointer;
       font-size: 14px;
       transition: all 0.2s;
-      background: var(--card);
-      color: var(--text);
+      background: var(--color-surface);
+      color: var(--app-text);
+      box-shadow: 0 1px 0 rgba(17, 24, 39, 0.02);
     }
 
     .primary {
-      background: var(--primary);
-      border-color: var(--primary);
+      background: linear-gradient(180deg, var(--app-primary), var(--primary-strong));
+      border-color: var(--app-primary);
       color: #ffffff;
     }
 
     .primary:hover {
-      background: var(--primary-strong);
+      filter: brightness(1.02);
     }
 
     .secondary {
-      background: var(--primary-soft);
-      color: var(--primary);
-      border-color: #f2c6a8;
+      background: var(--color-surface-muted);
+      color: var(--app-primary);
+      border-color: var(--app-border);
     }
 
     .secondary:hover {
-      background: #f6e2d4;
+      background: rgba(255, 90, 31, 0.08);
+      border-color: rgba(255, 90, 31, 0.26);
     }
 
     .export-panel {
-      background: var(--card);
-      border-radius: 18px;
-      border: 1px solid var(--border);
-      padding: 24px;
+      background: linear-gradient(180deg, var(--color-surface), var(--color-surface-muted));
+      border-radius: 24px;
+      border: 1px solid var(--app-border);
+      padding: 28px;
       margin-bottom: 24px;
       box-shadow: var(--shadow-soft);
     }
 
     .export-panel h2 {
       margin: 0 0 12px 0;
-      font-size: 18px;
+      font-size: 20px;
+      color: var(--app-text);
     }
 
     .export-panel p {
       margin: 0 0 16px 0;
-      color: var(--muted);
+      color: var(--app-muted);
       font-size: 14px;
       line-height: 1.5;
     }
@@ -206,21 +211,22 @@
       font-size: 12px;
       text-transform: uppercase;
       letter-spacing: 0.04em;
-      color: var(--muted);
+      color: var(--app-muted);
     }
 
     input[type="date"] {
       padding: 10px 12px;
       border-radius: 12px;
-      border: 1px solid var(--border);
+      border: 1px solid var(--app-border);
       font-size: 14px;
       width: 100%;
-      background: #ffffff;
+      background: var(--color-control);
+      color: var(--app-text);
     }
 
     input[type="date"]:focus {
       outline: none;
-      border-color: var(--primary);
+      border-color: var(--app-primary);
       box-shadow: 0 0 0 3px rgba(232, 93, 60, 0.16);
     }
 
@@ -233,7 +239,7 @@
 
     .export-hint {
       font-size: 13px;
-      color: var(--muted);
+      color: var(--app-muted);
       margin-left: 4px;
     }
 
@@ -246,15 +252,74 @@
     .export-section {
       margin: 24px 0;
       padding: 20px;
-      background: #f9fafc;
-      border-radius: 8px;
-      border: 1px solid var(--border);
+      background: var(--color-surface-muted);
+      border-radius: 20px;
+      border: 1px solid var(--app-border);
     }
 
     .export-section h3 {
       margin: 0 0 12px 0;
       font-size: 16px;
-      color: var(--text);
+      color: var(--app-text);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .export-section h3::before {
+      content: "";
+      width: 10px;
+      height: 10px;
+      border-radius: 999px;
+      background: var(--app-primary);
+      box-shadow: 0 0 0 4px rgba(255, 90, 31, 0.14);
+      flex: 0 0 auto;
+    }
+
+    .export-button-row button {
+      min-height: 56px;
+      display: inline-flex;
+      flex-direction: column;
+      align-items: flex-start;
+      justify-content: center;
+      text-align: left;
+      gap: 2px;
+      line-height: 1.15;
+    }
+
+    .export-button-row .export-hint {
+      margin-left: 0;
+      font-size: 12px;
+      opacity: 0.9;
+    }
+
+    .export-button-row .primary {
+      box-shadow: 0 14px 30px rgba(255, 90, 31, 0.18);
+    }
+
+    html[data-theme="dark"] .export-panel {
+      background: linear-gradient(180deg, rgba(24, 27, 31, 0.96), rgba(24, 27, 31, 0.86));
+    }
+
+    html[data-theme="dark"] .export-section {
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    html[data-theme="dark"] .nav-button {
+      background: rgba(255, 122, 61, 0.12);
+    }
+
+    html[data-theme="dark"] .nav-button:hover {
+      background: var(--app-primary);
+    }
+
+    html[data-theme="dark"] input[type="date"]::placeholder {
+      color: var(--app-muted);
+    }
+
+    html[data-theme="dark"] button.secondary:hover {
+      background: rgba(255, 122, 61, 0.16);
+      border-color: rgba(255, 122, 61, 0.34);
     }
 
     @media (max-width: 768px) {
