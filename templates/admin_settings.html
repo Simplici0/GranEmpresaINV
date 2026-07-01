@@ -1,0 +1,316 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{.Title}}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" sizes="any" />
+  <link rel="apple-touch-icon" href="/static/favicon.svg" />
+  <style>
+    :root {
+      color-scheme: light dark;
+      --danger: #d64545;
+      --danger-strong: #b82828;
+      --danger-soft: #fff0f0;
+      --danger-border: #f0b8b8;
+    }
+
+    * {
+      box-sizing: border-box;
+      font-family: "Inter", "Segoe UI", sans-serif;
+    }
+
+    body {
+      margin: 0;
+      background: var(--app-surface);
+      color: var(--app-text);
+    }
+
+    .page-content {
+      padding: 24px 32px 40px;
+      max-width: 1120px;
+      margin: 0 auto;
+    }
+
+    .flash {
+      margin-bottom: 16px;
+      background: #eaf7f1;
+      color: #1f6b4f;
+      border: 1px solid #c7e6d7;
+      padding: 12px 16px;
+      border-radius: 12px;
+      font-size: 14px;
+      font-weight: 750;
+    }
+
+    .flash.error {
+      background: #ffecef;
+      color: #b73a3a;
+      border-color: #f5c6cf;
+    }
+
+    .settings-grid {
+      display: grid;
+      gap: 16px;
+    }
+
+    .danger-panel {
+      background: var(--color-surface);
+      border: 1px solid var(--app-border);
+      border-radius: 18px;
+      box-shadow: var(--shadow-soft);
+      overflow: hidden;
+    }
+
+    .danger-panel header {
+      padding: 18px 20px;
+      border-bottom: 1px solid var(--app-border);
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+    }
+
+    .danger-panel h2 {
+      margin: 0;
+      font-size: 17px;
+      color: var(--app-text);
+    }
+
+    .danger-panel p {
+      margin: 6px 0 0;
+      color: var(--app-muted);
+      line-height: 1.5;
+      font-size: 14px;
+    }
+
+    .danger-badge {
+      flex: 0 0 auto;
+      display: inline-flex;
+      align-items: center;
+      height: 28px;
+      padding: 0 10px;
+      border-radius: 999px;
+      background: var(--danger-soft);
+      color: var(--danger);
+      border: 1px solid var(--danger-border);
+      font-size: 12px;
+      font-weight: 850;
+      text-transform: uppercase;
+    }
+
+    .danger-body {
+      padding: 18px 20px 20px;
+      display: grid;
+      gap: 14px;
+    }
+
+    .impact-list {
+      margin: 0;
+      padding-left: 18px;
+      color: var(--app-muted);
+      font-size: 14px;
+      line-height: 1.6;
+    }
+
+    label {
+      display: block;
+      font-size: 12px;
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+      color: var(--app-muted);
+      font-weight: 800;
+      margin-bottom: 6px;
+    }
+
+    input[type="text"] {
+      width: 100%;
+      min-height: 42px;
+      padding: 10px 12px;
+      border-radius: 12px;
+      border: 1px solid var(--app-border);
+      background: var(--color-control);
+      color: var(--app-text);
+      font-size: 14px;
+    }
+
+    input[type="text"]:focus {
+      outline: none;
+      border-color: var(--danger);
+      box-shadow: 0 0 0 3px rgba(214, 69, 69, 0.16);
+    }
+
+    .checkline {
+      display: flex;
+      align-items: flex-start;
+      gap: 10px;
+      color: var(--app-text);
+      font-size: 14px;
+      font-weight: 700;
+      line-height: 1.4;
+      margin: 0;
+      text-transform: none;
+      letter-spacing: 0;
+    }
+
+    .checkline input {
+      margin-top: 2px;
+      flex: 0 0 auto;
+    }
+
+    .confirm-copy {
+      font-weight: 850;
+      color: var(--app-text);
+    }
+
+    .actions {
+      display: flex;
+      justify-content: flex-end;
+      gap: 10px;
+      padding-top: 4px;
+    }
+
+    button {
+      min-height: 42px;
+      border: 1px solid var(--danger);
+      padding: 10px 14px;
+      border-radius: 12px;
+      font-weight: 850;
+      cursor: pointer;
+      background: var(--danger);
+      color: #ffffff;
+      transition: opacity 0.18s ease, background 0.18s ease, border-color 0.18s ease;
+    }
+
+    button:hover:not(:disabled) {
+      background: var(--danger-strong);
+      border-color: var(--danger-strong);
+    }
+
+    button:disabled {
+      opacity: 0.45;
+      cursor: not-allowed;
+    }
+
+    html[data-theme="dark"] {
+      --danger-soft: rgba(214, 69, 69, 0.14);
+      --danger-border: rgba(214, 69, 69, 0.34);
+    }
+
+    html[data-theme="dark"] .flash {
+      background: rgba(45, 157, 120, 0.14);
+      color: #8ee0c0;
+      border-color: rgba(45, 157, 120, 0.35);
+    }
+
+    html[data-theme="dark"] .flash.error {
+      background: rgba(214, 69, 69, 0.16);
+      color: #ffb4b4;
+      border-color: rgba(214, 69, 69, 0.38);
+    }
+
+    @media (max-width: 720px) {
+      .page-content {
+        padding: 16px;
+      }
+
+      .danger-panel header {
+        flex-direction: column;
+      }
+
+      .actions {
+        justify-content: stretch;
+      }
+
+      button {
+        width: 100%;
+      }
+    }
+  </style>
+</head>
+<body>
+  {{template "header" .}}
+
+  <main class="page-content">
+    {{if .Flash}}
+      <div class="flash">{{.Flash}}</div>
+    {{end}}
+    {{if .Error}}
+      <div class="flash error">{{.Error}}</div>
+    {{end}}
+
+    <div class="settings-grid">
+      <section class="danger-panel">
+        <header>
+          <div>
+            <h2>Hard reset de usuarios</h2>
+            <p>Elimina usuarios y sesiones. Después crea de nuevo el usuario administrador definido por <span class="confirm-copy">ADMIN_USER</span> y <span class="confirm-copy">ADMIN_PASS</span>.</p>
+          </div>
+          <span class="danger-badge">Irreversible</span>
+        </header>
+        <form class="danger-body reset-form" method="POST" action="/admin/settings/reset-users" data-confirm="RESET USUARIOS">
+          <ul class="impact-list">
+            <li>Se cierran todas las sesiones activas.</li>
+            <li>Se borran todos los usuarios existentes.</li>
+            <li>La operación se cancela si no hay credenciales de admin inicial configuradas.</li>
+          </ul>
+          <label class="checkline">
+            <input type="checkbox" name="acknowledge" value="1" />
+            Entiendo que esta acción no se puede deshacer.
+          </label>
+          <div>
+            <label for="confirm-users">Escribe <span class="confirm-copy">RESET USUARIOS</span> para confirmar</label>
+            <input id="confirm-users" name="confirmation" type="text" autocomplete="off" />
+          </div>
+          <div class="actions">
+            <button type="submit" disabled>Ejecutar reset de usuarios</button>
+          </div>
+        </form>
+      </section>
+
+      <section class="danger-panel">
+        <header>
+          <div>
+            <h2>Hard reset de inventario y actividad</h2>
+            <p>Elimina inventario, movimientos, ventas, cambios, retomas y registros operativos asociados. Los usuarios y sesiones no se modifican.</p>
+          </div>
+          <span class="danger-badge">Irreversible</span>
+        </header>
+        <form class="danger-body reset-form" method="POST" action="/admin/settings/reset-business" data-confirm="RESET INVENTARIO">
+          <ul class="impact-list">
+            <li>Se borran productos, unidades y movimientos.</li>
+            <li>Se borran ventas, cambios y retomas.</li>
+            <li>Se desactiva la carga automática de datos demo en próximos reinicios.</li>
+          </ul>
+          <label class="checkline">
+            <input type="checkbox" name="acknowledge" value="1" />
+            Entiendo que esta acción no se puede deshacer.
+          </label>
+          <div>
+            <label for="confirm-business">Escribe <span class="confirm-copy">RESET INVENTARIO</span> para confirmar</label>
+            <input id="confirm-business" name="confirmation" type="text" autocomplete="off" />
+          </div>
+          <div class="actions">
+            <button type="submit" disabled>Ejecutar reset de inventario</button>
+          </div>
+        </form>
+      </section>
+    </div>
+  </main>
+
+  <script>
+    document.querySelectorAll(".reset-form").forEach((form) => {
+      const expected = form.dataset.confirm || "";
+      const input = form.querySelector('input[name="confirmation"]');
+      const acknowledge = form.querySelector('input[name="acknowledge"]');
+      const button = form.querySelector('button[type="submit"]');
+      const sync = () => {
+        button.disabled = input.value.trim() !== expected || !acknowledge.checked;
+      };
+      input.addEventListener("input", sync);
+      acknowledge.addEventListener("change", sync);
+      sync();
+    });
+  </script>
+</body>
+</html>

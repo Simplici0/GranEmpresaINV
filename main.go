@@ -1083,10 +1083,7 @@ func userCreateErrorText(err error) string {
 func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
 	// SQLite PRAGMA table_info does not reliably accept a bound parameter for table name,
 	// so we build the statement after validating the identifier.
-	for i, r := range table {
-		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_' || (i > 0 && r >= '0' && r <= '9') {
-			continue
-		}
+	if !validSQLiteIdentifier(table) {
 		return nil, fmt.Errorf("invalid table name: %q", table)
 	}
 	rows, err := db.Query(fmt.Sprintf("SELECT name FROM pragma_table_info('%s')", table))
@@ -1107,6 +1104,37 @@ func tableColumns(db *sql.DB, table string) (map[string]bool, error) {
 		return nil, err
 	}
 	return cols, nil
+}
+
+func validSQLiteIdentifier(name string) bool {
+	if name == "" {
+		return false
+	}
+	for i, r := range name {
+		if (r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || r == '_' || (i > 0 && r >= '0' && r <= '9') {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+func ensureAppMetaTable(exec sqlExecer) error {
+	_, err := exec.Exec(`
+		CREATE TABLE IF NOT EXISTS app_meta (
+			key TEXT PRIMARY KEY,
+			value TEXT NOT NULL
+		)
+	`)
+	return err
+}
+
+func demoSeedDisabled(db *sql.DB) bool {
+	var value string
+	if err := db.QueryRow(`SELECT value FROM app_meta WHERE key = 'demo_seed_disabled'`).Scan(&value); err != nil {
+		return false
+	}
+	return value == "1"
 }
 
 func initDB(path string, paymentMethods []string) (*sql.DB, error) {
@@ -1184,6 +1212,10 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 		return nil, err
 	}
 
+	if err := ensureAppMetaTable(db); err != nil {
+		return nil, err
+	}
+
 	if err := ensureMovimientosTable(db); err != nil {
 		return nil, err
 	}
@@ -1246,25 +1278,28 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 		}
 	}
 
-	var ventasCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM ventas").Scan(&ventasCount); err != nil {
-		return nil, err
-	}
-
-	if ventasCount == 0 {
-		if err := seedVentas(db, paymentMethods); err != nil {
+	seedDemoData := !demoSeedDisabled(db)
+	if seedDemoData {
+		var ventasCount int
+		if err := db.QueryRow("SELECT COUNT(*) FROM ventas").Scan(&ventasCount); err != nil {
 			return nil, err
 		}
-	}
 
-	var unidadesCount int
-	if err := db.QueryRow("SELECT COUNT(*) FROM unidades").Scan(&unidadesCount); err != nil {
-		return nil, err
-	}
+		if ventasCount == 0 {
+			if err := seedVentas(db, paymentMethods); err != nil {
+				return nil, err
+			}
+		}
 
-	if unidadesCount == 0 {
-		if err := seedUnidades(db); err != nil {
+		var unidadesCount int
+		if err := db.QueryRow("SELECT COUNT(*) FROM unidades").Scan(&unidadesCount); err != nil {
 			return nil, err
+		}
+
+		if unidadesCount == 0 {
+			if err := seedUnidades(db); err != nil {
+				return nil, err
+			}
 		}
 	}
 
@@ -1375,6 +1410,208 @@ func seedAdminUser(db *sql.DB) error {
 	return err
 }
 
+func insertSeedAdminUser(tx *sql.Tx) error {
+	adminUser := strings.TrimSpace(os.Getenv("ADMIN_USER"))
+	adminPass := os.Getenv("ADMIN_PASS")
+	if adminUser == "" || adminPass == "" {
+		return fmt.Errorf("ADMIN_USER y ADMIN_PASS deben estar configurados para ejecutar este reset")
+	}
+
+	hashed, err := bcrypt.GenerateFromPassword([]byte(adminPass), bcrypt.DefaultCost)
+	if err != nil {
+		return err
+	}
+
+	cols, err := tableColumnsTx(tx, "users")
+	if err != nil {
+		return err
+	}
+
+	insertCols := []string{"username", "password_hash", "role", "created_at"}
+	args := []any{adminUser, string(hashed), "admin", time.Now().Format(time.RFC3339)}
+	if cols["is_active"] {
+		insertCols = append(insertCols, "is_active")
+		args = append(args, 1)
+	}
+	if cols["active"] {
+		insertCols = append(insertCols, "active")
+		args = append(args, 1)
+	}
+	if cols["name"] {
+		insertCols = append(insertCols, "name")
+		args = append(args, adminUser)
+	}
+	if cols["email"] {
+		insertCols = append(insertCols, "email")
+		args = append(args, adminUser+"@local")
+	}
+
+	placeholders := make([]string, len(insertCols))
+	for i := range placeholders {
+		placeholders[i] = "?"
+	}
+	_, err = tx.Exec(
+		fmt.Sprintf("INSERT INTO users (%s) VALUES (%s)", strings.Join(insertCols, ", "), strings.Join(placeholders, ", ")),
+		args...,
+	)
+	return err
+}
+
+func tableColumnsTx(tx *sql.Tx, table string) (map[string]bool, error) {
+	if !validSQLiteIdentifier(table) {
+		return nil, fmt.Errorf("invalid table name: %q", table)
+	}
+	rows, err := tx.Query(fmt.Sprintf("SELECT name FROM pragma_table_info('%s')", table))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	cols := map[string]bool{}
+	for rows.Next() {
+		var name string
+		if err := rows.Scan(&name); err != nil {
+			return nil, err
+		}
+		cols[name] = true
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return cols, nil
+}
+
+func tableExistsTx(tx *sql.Tx, table string) (bool, error) {
+	if !validSQLiteIdentifier(table) {
+		return false, fmt.Errorf("invalid table name: %q", table)
+	}
+	var count int
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil {
+		return false, err
+	}
+	return count > 0, nil
+}
+
+func deleteTableIfExists(tx *sql.Tx, table string) error {
+	exists, err := tableExistsTx(tx, table)
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	_, err = tx.Exec(fmt.Sprintf("DELETE FROM %s", table))
+	return err
+}
+
+func resetSQLiteSequences(tx *sql.Tx, tables []string) error {
+	exists, err := tableExistsTx(tx, "sqlite_sequence")
+	if err != nil {
+		return err
+	}
+	if !exists {
+		return nil
+	}
+	for _, table := range tables {
+		if !validSQLiteIdentifier(table) {
+			return fmt.Errorf("invalid table name: %q", table)
+		}
+		if _, err := tx.Exec(`DELETE FROM sqlite_sequence WHERE name = ?`, table); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func resetBusinessData(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if err := ensureAppMetaTable(tx); err != nil {
+		return err
+	}
+
+	tables := []string{
+		"invoice_items",
+		"invoices",
+		"product_loan_units",
+		"product_loans",
+		"credit_installments",
+		"credit_sales",
+		"customer_events",
+		"customers",
+		"audit_events",
+		"cambios",
+		"retomas",
+		"movimientos",
+		"ventas",
+		"unidades",
+		"precio_venta_historial",
+		"productos",
+	}
+	for _, table := range tables {
+		if err := deleteTableIfExists(tx, table); err != nil {
+			return fmt.Errorf("reset %s: %w", table, err)
+		}
+	}
+	if err := resetSQLiteSequences(tx, tables); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		INSERT INTO app_meta (key, value)
+		VALUES ('demo_seed_disabled', '1')
+		ON CONFLICT(key) DO UPDATE SET value = excluded.value
+	`); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func resetUsersData(db *sql.DB) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	if err := deleteTableIfExists(tx, "sessions"); err != nil {
+		return err
+	}
+	if err := deleteTableIfExists(tx, "users"); err != nil {
+		return err
+	}
+	if err := resetSQLiteSequences(tx, []string{"users"}); err != nil {
+		return err
+	}
+	if err := insertSeedAdminUser(tx); err != nil {
+		return err
+	}
+
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
 func main() {
 	port := os.Getenv("PORT")
 	if port == "" {
@@ -1387,6 +1624,7 @@ func main() {
 
 	tmpl := template.Must(template.ParseFiles(
 		"templates/admin_users.html",
+		"templates/admin_settings.html",
 		"templates/dashboard.html",
 		"templates/inventario.html",
 		"templates/login.html",
@@ -1449,8 +1687,10 @@ func main() {
 			Line: "Pediatría",
 		},
 	}
-	if err := seedProductosIfMissing(db, defaultProducts); err != nil {
-		log.Fatalf("Error al seed de productos: %v", err)
+	if !demoSeedDisabled(db) {
+		if err := seedProductosIfMissing(db, defaultProducts); err != nil {
+			log.Fatalf("Error al seed de productos: %v", err)
+		}
 	}
 	products, err := loadProductos(db)
 	if err != nil {
@@ -1515,6 +1755,14 @@ func main() {
 		Flash       string
 		Error       string
 		Users       []adminUserRow
+		CurrentUser *User
+	}
+
+	type adminSettingsData struct {
+		Title       string
+		Subtitle    string
+		Flash       string
+		Error       string
 		CurrentUser *User
 	}
 
@@ -2017,6 +2265,63 @@ func main() {
 		}
 
 		redirectWithMessage(w, r, "/admin/users", "Usuario eliminado.", "")
+	}))
+
+	mux.HandleFunc("/admin/settings", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		data := adminSettingsData{
+			Title:       "Configuración",
+			Subtitle:    "Herramientas administrativas críticas.",
+			Flash:       r.URL.Query().Get("mensaje"),
+			Error:       r.URL.Query().Get("error"),
+			CurrentUser: userFromContext(r),
+		}
+		if err := tmpl.ExecuteTemplate(w, "admin_settings.html", data); err != nil {
+			http.Error(w, "Error al renderizar configuración", http.StatusInternalServerError)
+		}
+	}))
+
+	mux.HandleFunc("/admin/settings/reset-users", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			redirectWithMessage(w, r, "/admin/settings", "", "Método no permitido.")
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			redirectWithMessage(w, r, "/admin/settings", "", "No se pudo leer el formulario.")
+			return
+		}
+		if r.FormValue("acknowledge") != "1" || strings.TrimSpace(r.FormValue("confirmation")) != "RESET USUARIOS" {
+			redirectWithMessage(w, r, "/admin/settings", "", "Confirmación inválida para reset de usuarios.")
+			return
+		}
+		if err := resetUsersData(db); err != nil {
+			redirectWithMessage(w, r, "/admin/settings", "", "No se pudo ejecutar el reset de usuarios: "+err.Error())
+			return
+		}
+		clearSessionCookie(w)
+		http.Redirect(w, r, "/login", http.StatusSeeOther)
+	}))
+
+	mux.HandleFunc("/admin/settings/reset-business", adminOnly(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			redirectWithMessage(w, r, "/admin/settings", "", "Método no permitido.")
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			redirectWithMessage(w, r, "/admin/settings", "", "No se pudo leer el formulario.")
+			return
+		}
+		if r.FormValue("acknowledge") != "1" || strings.TrimSpace(r.FormValue("confirmation")) != "RESET INVENTARIO" {
+			redirectWithMessage(w, r, "/admin/settings", "", "Confirmación inválida para reset de inventario.")
+			return
+		}
+		if err := resetBusinessData(db); err != nil {
+			redirectWithMessage(w, r, "/admin/settings", "", "No se pudo ejecutar el reset de inventario: "+err.Error())
+			return
+		}
+		productsMu.Lock()
+		products = []productOption{}
+		productsMu.Unlock()
+		redirectWithMessage(w, r, "/admin/settings", "Inventario, ventas, cambios, retomas y movimientos fueron eliminados.", "")
 	}))
 
 	mux.HandleFunc("/productos/new", adminOnly(func(w http.ResponseWriter, r *http.Request) {
