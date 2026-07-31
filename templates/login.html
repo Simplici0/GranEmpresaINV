@@ -182,6 +182,48 @@
         0 1px 3px rgba(232, 93, 60, 0.15);
     }
 
+    .password-field {
+      position: relative;
+      margin-bottom: 18px;
+    }
+
+    .password-field input {
+      margin-bottom: 0;
+      padding-right: 82px;
+    }
+
+    .password-toggle {
+      position: absolute;
+      top: 50%;
+      right: 8px;
+      width: auto;
+      padding: 6px 8px;
+      border: 0;
+      border-radius: 8px;
+      background: transparent;
+      color: var(--primary);
+      box-shadow: none;
+      font-size: 12px;
+      transform: translateY(-50%);
+      overflow: visible;
+    }
+
+    .password-toggle::before {
+      display: none;
+    }
+
+    .password-toggle:hover,
+    .password-toggle:active {
+      background: rgba(232, 93, 60, 0.08);
+      box-shadow: none;
+      transform: translateY(-50%);
+    }
+
+    .password-toggle:focus-visible {
+      outline: 2px solid var(--primary);
+      outline-offset: 2px;
+    }
+
     .error {
       background: linear-gradient(135deg, #fff5f5 0%, #ffe8e8 100%);
       border: 1.5px solid #ffcaca;
@@ -212,9 +254,27 @@
       <label for="username">Usuario</label>
       <input id="username" name="username" type="text" value="{{.Username}}" required />
       <label for="password">Contraseña</label>
-      <input id="password" name="password" type="password" required />
+      <div class="password-field">
+        <input id="password" name="password" type="password" autocomplete="current-password" required />
+        <button id="password-toggle" class="password-toggle" type="button" aria-controls="password" aria-label="Mostrar contraseña" aria-pressed="false">Mostrar</button>
+      </div>
       <button type="submit">Entrar</button>
     </form>
   </div>
+  <script>
+    const passwordInput = document.getElementById("password");
+    const passwordToggle = document.getElementById("password-toggle");
+
+    if (passwordInput && passwordToggle) {
+      passwordToggle.addEventListener("click", () => {
+        const isVisible = passwordInput.type === "text";
+        passwordInput.type = isVisible ? "password" : "text";
+        passwordToggle.textContent = isVisible ? "Mostrar" : "Ocultar";
+        passwordToggle.setAttribute("aria-label", isVisible ? "Mostrar contraseña" : "Ocultar contraseña");
+        passwordToggle.setAttribute("aria-pressed", String(!isVisible));
+        passwordInput.focus();
+      });
+    }
+  </script>
 </body>
 </html>

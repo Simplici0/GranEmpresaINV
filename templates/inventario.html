@@ -451,6 +451,14 @@
       color: var(--muted);
     }
 
+    .stock-reserved {
+      display: block;
+      margin-top: 3px;
+      color: #9a3412;
+      font-size: 12px;
+      font-weight: 750;
+    }
+
     .age-pill {
       display: inline-flex;
       align-items: center;
@@ -993,7 +1001,7 @@
     }
 
     .filters {
-      grid-template-columns: 1fr 1fr minmax(260px, 1.2fr) minmax(180px, 0.8fr);
+      grid-template-columns: minmax(300px, 2fr) minmax(140px, 0.75fr) minmax(140px, 0.75fr) minmax(180px, 1fr);
       gap: 18px 22px;
       padding: 22px;
       border-radius: 18px;
@@ -1350,6 +1358,9 @@
       background: var(--primary);
       border-color: var(--primary);
       color: #ffffff;
+      cursor: default;
+      font-weight: 850;
+      box-shadow: 0 0 0 3px rgba(255, 90, 31, 0.16), 0 5px 12px rgba(255, 90, 31, 0.2);
     }
 
     .page-button:disabled {
@@ -1749,8 +1760,17 @@
       <div class="flash" data-flash-message="{{.Flash}}">{{.Flash}}</div>
     {{end}}
     <div id="toast" class="toast" role="status" aria-live="polite"></div>
-    <!-- Estado - Sección de filtros -->
+    <!-- Sección de filtros -->
     <section class="filters">
+    <div class="filter-group">
+      <label for="searchFilter">Búsqueda</label>
+      <div class="search-control">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+          <path d="m21 21-4.3-4.3M10.8 18a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4Z" stroke-linecap="round" stroke-linejoin="round" />
+        </svg>
+        <input id="searchFilter" type="search" placeholder="Nombre o SKU" />
+      </div>
+    </div>
     <div class="filter-group">
       <label for="statusFilter">Estado</label>
       <select id="statusFilter">
@@ -1768,15 +1788,6 @@
       <select id="lineFilter">
         <option value="all">Todas</option>
       </select>
-    </div>
-    <div class="filter-group">
-      <label for="searchFilter">Búsqueda</label>
-      <div class="search-control">
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
-          <path d="m21 21-4.3-4.3M10.8 18a7.2 7.2 0 1 1 0-14.4 7.2 7.2 0 0 1 0 14.4Z" stroke-linecap="round" stroke-linejoin="round" />
-        </svg>
-        <input id="searchFilter" type="search" placeholder="Nombre o SKU" />
-      </div>
     </div>
     <div class="filter-group">
       <label>Caducidad</label>
@@ -1872,10 +1883,20 @@
             <label id="action-note-label" for="action-note">Nota</label>
             <textarea id="action-note" name="nota" placeholder=""></textarea>
           </div>
+          <div id="action-product-fields" class="modal-row" hidden>
+            <div>
+              <label for="action-name">Nombre</label>
+              <input id="action-name" name="nombre" type="text" placeholder="Nombre del producto" autocomplete="off" />
+            </div>
+            <div>
+              <label for="action-line">Línea</label>
+              <input id="action-line" name="linea" type="text" placeholder="Línea o categoría" autocomplete="off" />
+            </div>
+          </div>
           <div id="action-price-wrap" hidden>
             <label for="action-price">Precio de venta (opcional)</label>
             <input id="action-price" name="precio_venta" type="text" inputmode="numeric" placeholder="0" />
-            <div class="modal-hint">Solo aplica para ajuste manual de stock.</div>
+            <div class="modal-hint">Se guarda junto con los datos del producto.</div>
           </div>
           <div class="modal-actions">
             {{if and .CurrentUser (eq .CurrentUser.Role "admin")}}
@@ -2118,6 +2139,7 @@
         statusClass: "{{js .EstadoClass}}",
         statusLabel: "{{js .EstadoLabel}}",
         available: {{.Disponible}},
+        reserved: {{.Reservadas}},
         units: [
           {{- range .Unidades }}
           {
@@ -2290,7 +2312,9 @@
       const expiryOnly = expiryToggle.checked;
 
       const filtered = products.filter((product) => {
-        const matchesStatus = statusValue === "all" || product.statusClass === statusValue;
+        const matchesStatus = statusValue === "all" ||
+          (statusValue === "reserved" ? product.reserved > 0 :
+            statusValue === "available" ? product.available > 0 : product.statusClass === statusValue);
         const matchesLine = lineValue === "all" || normalizeLine(product.line) === lineValue;
         const matchesSearch =
           product.name.toLowerCase().includes(query) || product.id.toLowerCase().includes(query);
@@ -2346,9 +2370,13 @@
         const button = document.createElement("button");
         button.type = "button";
         button.className = "page-button";
+        button.dataset.page = String(page);
         button.textContent = label;
         button.disabled = !!options.disabled;
-        if (options.active) button.classList.add("active");
+        if (options.active) {
+          button.classList.add("active");
+          button.setAttribute("aria-current", "page");
+        }
         button.addEventListener("click", () => {
           if (button.disabled || currentPage === page) return;
           currentPage = page;
@@ -2400,11 +2428,15 @@
               ${product.name}
               ${product.ageAlert ? `<span class="age-pill" title="En stock ${product.ageMonths} meses (fecha ingreso: ${product.ingreso || '-'})">+6 meses</span>` : ``}
             </div>
-            <div class="fifo-note">SKU ${product.id} · ${product.available} disponibles</div>
+            <div class="fifo-note">SKU ${product.id} · ${product.available} disponibles · ${product.reserved} reservadas</div>
           </td>
           <td>${normalizeLine(product.line)}</td>
           <td><span class="status ${product.statusClass}">${statusLabel(product.statusLabel)}</span></td>
-          <td><strong>${product.available}</strong></td>
+          <td>
+            <strong>${product.available}</strong>
+            <span class="fifo-note">disponibles</span>
+            ${product.reserved > 0 ? `<span class="stock-reserved">${product.reserved} reservadas</span>` : ``}
+          </td>
           <td>
             <div class="actions">
               <input type="number" min="1" max="${Math.max(product.available, 1)}" value="1" data-qty="${product.id}" />
@@ -2419,8 +2451,8 @@
                 <button type="button" data-menu-action="reserve" data-product="${product.id}">Reservar unidades</button>
                 <button type="button" data-menu-action="damage" data-product="${product.id}">Registrar daño</button>
                 <button type="button" data-menu-action="internal_use" data-product="${product.id}">Uso interno</button>
-                {{if and .CurrentUser (or (eq .CurrentUser.Role "admin") (eq .CurrentUser.Role "empleado"))}}
-                <button type="button" data-menu-action="stock" data-product="${product.id}">Ajustar stock</button>
+                {{if and .CurrentUser (eq .CurrentUser.Role "admin")}}
+                <button type="button" data-menu-action="edit_product" data-product="${product.id}">Editar producto</button>
                 {{end}}
                 <button type="button" data-menu-action="history" data-product="${product.id}">Ver historial</button>
               </div>
@@ -2512,6 +2544,9 @@
     const actionError = document.getElementById("action-error");
     const actionNote = document.getElementById("action-note");
     const actionNoteLabel = document.getElementById("action-note-label");
+    const actionProductFields = document.getElementById("action-product-fields");
+    const actionName = document.getElementById("action-name");
+    const actionLine = document.getElementById("action-line");
     const actionPriceWrap = document.getElementById("action-price-wrap");
     const actionPrice = document.getElementById("action-price");
     const actionSubmit = document.getElementById("action-submit");
@@ -2646,7 +2681,6 @@
     let actionContext = null;
     let saleContext = null;
     let openMenuContext = null;
-    const actionSubtitleHint = "Doble clic para editar nombre del producto.";
 
     const positionMenuPanel = (button, panel) => {
       if (!button || !panel) return;
@@ -2696,24 +2730,30 @@
       minQty,
       allowGreaterThanMax,
       allowPriceEdit,
-      defaultPrice
+      defaultPrice,
+      allowProductEdit,
+      defaultName,
+      defaultLine
     }) => {
       actionContext = {
         endpoint,
         productId,
         productName: String(productName || "").trim(),
-        editedProductName: "",
         maxQty,
         mode: mode || "units",
         minQty: Number.isFinite(minQty) ? minQty : 1,
         allowGreaterThanMax: !!allowGreaterThanMax,
-        allowPriceEdit: !!allowPriceEdit
+        allowPriceEdit: !!allowPriceEdit,
+        allowProductEdit: !!allowProductEdit
       };
       if (actionTitle) actionTitle.textContent = title;
       if (actionNoteLabel) actionNoteLabel.textContent = noteLabel || "Nota";
       if (actionMaxLabel) actionMaxLabel.textContent = valueLabel || "Disponible";
       if (actionNote) actionNote.placeholder = notePlaceholder || "";
       if (actionNote) actionNote.value = "";
+      if (actionProductFields) actionProductFields.hidden = !actionContext.allowProductEdit;
+      if (actionName) actionName.value = actionContext.allowProductEdit ? String(defaultName || "") : "";
+      if (actionLine) actionLine.value = actionContext.allowProductEdit ? String(defaultLine || "") : "";
       if (actionPriceWrap) actionPriceWrap.hidden = !actionContext.allowPriceEdit;
       if (actionPrice) {
         actionPrice.value = actionContext.allowPriceEdit && Number.isFinite(defaultPrice) ? formatCOP(defaultPrice) : "";
@@ -2731,36 +2771,14 @@
         }
       }
       if (actionDeleteProduct) {
-        actionDeleteProduct.hidden = actionContext.mode !== "adjust_stock";
+        actionDeleteProduct.hidden = actionContext.mode !== "edit_product";
         actionDeleteProduct.disabled = false;
       }
       if (actionSubmit) actionSubmit.disabled = false;
       setActionError("");
       openModal(actionModal, subtitle);
-      if (actionSubtitle) {
-        actionSubtitle.title = actionContext.mode === "adjust_stock" ? actionSubtitleHint : "";
-        actionSubtitle.style.cursor = actionContext.mode === "adjust_stock" ? "text" : "";
-      }
       if (actionQty) actionQty.focus();
     };
-
-    if (actionSubtitle) {
-      actionSubtitle.addEventListener("dblclick", () => {
-        if (!actionContext || actionContext.mode !== "adjust_stock") return;
-        const current = String(actionContext.editedProductName || actionContext.productName || "").trim();
-        const raw = window.prompt("Nuevo nombre del producto:", current);
-        if (raw === null) return;
-        const updated = raw.trim();
-        if (!updated) {
-          setActionError("El nombre del producto no puede estar vacío.");
-          return;
-        }
-        actionContext.editedProductName = updated;
-        if (actionSubtitle) {
-          actionSubtitle.textContent = `${updated} · SKU ${actionContext.productId}`;
-        }
-      });
-    }
 
     const setSaleError = (msg) => {
       if (!saleError) return;
@@ -3121,10 +3139,20 @@
         if (!actionContext) return;
 
         const qty = parseInt(actionQty?.value || "0", 10);
-        const isAdjustMode = actionContext.mode === "adjust_stock";
+        const isEditMode = actionContext.mode === "edit_product";
+        const productName = String(actionName?.value || "").trim();
+        const productLine = String(actionLine?.value || "").trim();
         const priceText = String(actionPrice?.value || "").trim();
-        const shouldSendPrice = actionContext.allowPriceEdit && priceText !== "";
-        const parsedPrice = shouldSendPrice ? parseCOP(priceText) : NaN;
+        const shouldSendPrice = actionContext.allowPriceEdit && (priceText !== "" || isEditMode);
+        const parsedPrice = shouldSendPrice ? (priceText === "" ? 0 : parseCOP(priceText)) : NaN;
+        if (isEditMode && !productName) {
+          setActionError("El nombre del producto es obligatorio.");
+          return;
+        }
+        if (isEditMode && !productLine) {
+          setActionError("La línea del producto es obligatoria.");
+          return;
+        }
         if (shouldSendPrice && (Number.isNaN(parsedPrice) || parsedPrice < 0)) {
           setActionError("Precio de venta inválido.");
           return;
@@ -3133,7 +3161,7 @@
           setActionError("Cantidad inválida.");
           return;
         }
-        if (!isAdjustMode && (!Number.isFinite(actionContext.maxQty) || qty > actionContext.maxQty)) {
+        if (!isEditMode && (!Number.isFinite(actionContext.maxQty) || qty > actionContext.maxQty)) {
           setActionError("Cantidad inválida.");
           return;
         }
@@ -3148,8 +3176,9 @@
             cantidad: String(qty),
             nota: note || ""
           });
-          if (isAdjustMode && String(actionContext.editedProductName || "").trim()) {
-            body.set("nombre", String(actionContext.editedProductName).trim());
+          if (isEditMode) {
+            body.set("nombre", productName);
+            body.set("linea", productLine);
           }
           if (shouldSendPrice) {
             body.set("precio_venta", String(parsedPrice));
@@ -3164,7 +3193,7 @@
             throw new Error(data.error || "No se pudo completar la acción.");
           }
           closeModal(actionModal);
-          window.location.href = `/inventario?mensaje=${encodeURIComponent(data.mensaje || "Ajuste aplicado correctamente.")}`;
+          window.location.href = `/inventario?mensaje=${encodeURIComponent(data.mensaje || "Producto actualizado correctamente.")}`;
         } catch (err) {
           setActionError(err?.message || "No se pudo completar la acción.");
           if (actionSubmit) actionSubmit.disabled = false;
@@ -3174,7 +3203,7 @@
 
     if (actionDeleteProduct) {
       actionDeleteProduct.addEventListener("click", async () => {
-        if (!actionContext || actionContext.mode !== "adjust_stock") return;
+        if (!actionContext || actionContext.mode !== "edit_product") return;
         const confirmed = window.confirm("Esta acción eliminará el producto y sus unidades del inventario. ¿Deseas continuar?");
         if (!confirmed) return;
         if (actionSubmit) actionSubmit.disabled = true;
@@ -3508,10 +3537,10 @@
           });
           return;
         }
-        if (action === "stock") {
+        if (action === "edit_product") {
           const currentStock = Number.isFinite(maxQty) ? Math.max(0, maxQty) : 0;
           openActionModal({
-            title: "Ajustar stock",
+            title: "Editar producto",
             subtitle: product ? `${product.name} · SKU ${productId}` : `SKU ${productId}`,
             endpoint: "/inventario/stock",
             productId,
@@ -3519,11 +3548,14 @@
             maxQty: currentStock,
             defaultQty: currentStock,
             valueLabel: "Stock actual",
-            mode: "adjust_stock",
+            mode: "edit_product",
             minQty: 0,
             allowGreaterThanMax: true,
             allowPriceEdit: true,
             defaultPrice: Number(product?.salePrice || 0),
+            allowProductEdit: true,
+            defaultName: product?.name || "",
+            defaultLine: product?.line || "",
             noteLabel: "Nota del ajuste (opcional)",
             notePlaceholder: "Ej: conteo físico de inventario."
           });

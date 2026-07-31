@@ -28,6 +28,22 @@ func setupTestDB(t *testing.T) *sql.DB {
 	return db
 }
 
+func TestCountInventoryUnitsIncludesReservedUnits(t *testing.T) {
+	counts := countInventoryUnits([]inventoryUnit{
+		{EstadoClass: "available"},
+		{EstadoClass: "reserved"},
+		{EstadoClass: "reserved"},
+		{EstadoClass: "sold"},
+	})
+
+	if counts.available != 1 {
+		t.Fatalf("expected one available unit, got %d", counts.available)
+	}
+	if counts.reserved != 2 {
+		t.Fatalf("expected two reserved units, got %d", counts.reserved)
+	}
+}
+
 func TestSelectAndMarkUnitsSoldFIFO(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()

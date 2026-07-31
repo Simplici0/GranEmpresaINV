@@ -78,12 +78,40 @@ type inventoryProduct struct {
 	EstadoLabel       string
 	EstadoClass       string
 	Disponible        int
+	Reservadas        int
 	Unidades          []inventoryUnit
 	DisabledSale      bool
 	FechaIngreso      string
 	MesesEnStock      int
 	AlertaPermanencia bool
 	SalePrice         float64
+}
+
+type inventoryCounts struct {
+	available   int
+	reserved    int
+	change      int
+	damaged     int
+	internalUse int
+}
+
+func countInventoryUnits(units []inventoryUnit) inventoryCounts {
+	counts := inventoryCounts{}
+	for _, unit := range units {
+		switch unit.EstadoClass {
+		case "available":
+			counts.available++
+		case "reserved":
+			counts.reserved++
+		case "swapped":
+			counts.change++
+		case "damaged":
+			counts.damaged++
+		case "internal-use":
+			counts.internalUse++
+		}
+	}
+	return counts
 }
 
 var errInsufficientStock = fmt.Errorf("stock insuficiente")
@@ -1769,6 +1797,7 @@ func main() {
 	type productNewData struct {
 		Title       string
 		Subtitle    string
+		Flash       string
 		SKU         string
 		Nombre      string
 		Linea       string
@@ -2337,6 +2366,7 @@ func main() {
 		data := productNewData{
 			Title:       "Crear producto",
 			Subtitle:    "Acción reservada para administradores.",
+			Flash:       r.URL.Query().Get("mensaje"),
 			SKU:         nextSKU,
 			Cantidad:    1,
 			Lineas:      buildLineSuggestions(productsSnapshot, ""),
@@ -2495,7 +2525,7 @@ func main() {
 		}
 		productsMu.Unlock()
 
-		http.Redirect(w, r, "/inventario?mensaje=Producto+agregado", http.StatusSeeOther)
+		redirectWithMessage(w, r, "/productos/new", "Producto agregado correctamente.", "")
 	}))
 
 	mux.HandleFunc("/dashboard", func(w http.ResponseWriter, r *http.Request) {
@@ -2747,11 +2777,6 @@ func main() {
 			}
 
 			units := []inventoryUnit{}
-			availableCount := 0
-			changeCount := 0
-			reservedCount := 0
-			damagedCount := 0
-			internalUseCount := 0
 			fifoIndex := 1
 			for rows.Next() {
 				var id, estado, creadoEn string
@@ -2765,15 +2790,6 @@ func main() {
 				if estado == "Disponible" || estado == "available" {
 					fifo = strconv.Itoa(fifoIndex)
 					fifoIndex++
-					availableCount++
-				} else if estado == "Reservada" || estado == "reserved" {
-					reservedCount++
-				} else if estado == "Cambio" || estado == "swapped" {
-					changeCount++
-				} else if estado == "Danada" || estado == "Dañada" || estado == "damaged" {
-					damagedCount++
-				} else if estado == "Uso interno" || estado == "uso_interno" || estado == "internal-use" {
-					internalUseCount++
 				}
 				units = append(units, inventoryUnit{
 					ID:          id,
@@ -2790,6 +2806,12 @@ func main() {
 				return
 			}
 			rows.Close()
+			counts := countInventoryUnits(units)
+			availableCount := counts.available
+			reservedCount := counts.reserved
+			changeCount := counts.change
+			damagedCount := counts.damaged
+			internalUseCount := counts.internalUse
 
 			estadoLabel := "Disponible"
 			estadoClass := "available"
@@ -2836,6 +2858,7 @@ func main() {
 				EstadoLabel:       estadoLabel,
 				EstadoClass:       estadoClass,
 				Disponible:        availableCount,
+				Reservadas:        reservedCount,
 				Unidades:          units,
 				DisabledSale:      availableCount == 0,
 				FechaIngreso:      fechaIngresoISO,
@@ -3068,7 +3091,7 @@ func main() {
 		})
 	})
 
-	mux.HandleFunc("/inventario/stock", func(w http.ResponseWriter, r *http.Request) {
+	mux.HandleFunc("/inventario/stock", adminOnly(func(w http.ResponseWriter, r *http.Request) {
 		writeJSONError := func(status int, message string) {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(status)
@@ -3076,10 +3099,6 @@ func main() {
 		}
 
 		currentUser := userFromContext(r)
-		if currentUser == nil || (currentUser.Role != "admin" && currentUser.Role != "empleado") {
-			writeJSONError(http.StatusForbidden, "Solo personal autorizado puede ajustar stock y precio.")
-			return
-		}
 
 		if r.Method != http.MethodPost {
 			writeJSONError(http.StatusMethodNotAllowed, "Método no permitido.")
@@ -3094,14 +3113,22 @@ func main() {
 		nota := strings.TrimSpace(r.FormValue("nota"))
 		priceValue := strings.TrimSpace(r.FormValue("precio_venta"))
 		nameValue := strings.TrimSpace(r.FormValue("nombre"))
+		lineValue := strings.TrimSpace(r.FormValue("linea"))
 		target, err := strconv.Atoi(targetValue)
 		if productID == "" || err != nil || target < 0 {
 			writeJSONError(http.StatusBadRequest, "Cantidad objetivo inválida.")
 			return
 		}
-		updatePrice := priceValue != ""
+		if nameValue == "" {
+			writeJSONError(http.StatusBadRequest, "El nombre del producto es obligatorio.")
+			return
+		}
+		if lineValue == "" {
+			writeJSONError(http.StatusBadRequest, "La línea del producto es obligatoria.")
+			return
+		}
 		newPrice := 0.0
-		if updatePrice {
+		if priceValue != "" {
 			parsed, err := parseCOPInteger(priceValue)
 			if err != nil || parsed < 0 {
 				writeJSONError(http.StatusBadRequest, "Precio de venta inválido.")
@@ -3116,6 +3143,15 @@ func main() {
 			return
 		}
 		defer tx.Rollback()
+		var existingProduct string
+		if err := tx.QueryRow(`SELECT sku FROM productos WHERE sku = ?`, productID).Scan(&existingProduct); err != nil {
+			if err == sql.ErrNoRows {
+				writeJSONError(http.StatusBadRequest, "Producto inválido.")
+			} else {
+				writeJSONError(http.StatusInternalServerError, "No se pudo validar el producto.")
+			}
+			return
+		}
 
 		rows, err := tx.Query(`
 			SELECT id
@@ -3206,67 +3242,31 @@ func main() {
 				return
 			}
 		}
-		if updatePrice {
-			res, err := tx.Exec(`UPDATE productos SET precio_venta = ? WHERE sku = ?`, newPrice, productID)
-			if err != nil {
-				writeJSONError(http.StatusInternalServerError, "No se pudo actualizar el precio de venta.")
-				return
-			}
-			affected, err := res.RowsAffected()
-			if err != nil || affected == 0 {
-				writeJSONError(http.StatusBadRequest, "Producto inválido para actualizar precio.")
-				return
-			}
-		}
-		updateName := nameValue != ""
-		if updateName {
-			res, err := tx.Exec(`UPDATE productos SET nombre = ? WHERE sku = ?`, nameValue, productID)
-			if err != nil {
-				writeJSONError(http.StatusInternalServerError, "No se pudo actualizar el nombre del producto.")
-				return
-			}
-			affected, err := res.RowsAffected()
-			if err != nil || affected == 0 {
-				writeJSONError(http.StatusBadRequest, "Producto inválido para actualizar nombre.")
-				return
-			}
+		if _, err := tx.Exec(
+			`UPDATE productos SET nombre = ?, linea = ?, precio_venta = ? WHERE sku = ?`,
+			nameValue, lineValue, newPrice, productID,
+		); err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo actualizar el producto.")
+			return
 		}
 
 		if err := tx.Commit(); err != nil {
 			writeJSONError(http.StatusInternalServerError, "No se pudo confirmar la transacción.")
 			return
 		}
-		if updatePrice || updateName {
-			productsMu.Lock()
-			for idx := range products {
-				if products[idx].ID == productID {
-					if updatePrice {
-						products[idx].SalePrice = newPrice
-					}
-					if updateName {
-						products[idx].Name = nameValue
-					}
-					break
-				}
+		productsMu.Lock()
+		for idx := range products {
+			if products[idx].ID == productID {
+				products[idx].Name = nameValue
+				products[idx].Line = lineValue
+				products[idx].SalePrice = newPrice
+				break
 			}
-			productsMu.Unlock()
 		}
-		message := "Stock ajustado correctamente."
-		if delta == 0 && !updatePrice {
-			message = "Stock sin cambios."
-		} else if delta == 0 && updatePrice {
-			message = "Precio de venta actualizado correctamente."
-		} else if delta != 0 && updatePrice {
-			message = "Stock y precio de venta actualizados correctamente."
-		}
-		if updateName && delta == 0 && !updatePrice {
-			message = "Nombre del producto actualizado correctamente."
-		} else if updateName && delta == 0 && updatePrice {
-			message = "Nombre y precio de venta actualizados correctamente."
-		} else if updateName && delta != 0 && !updatePrice {
-			message = "Stock y nombre del producto actualizados correctamente."
-		} else if updateName && delta != 0 && updatePrice {
-			message = "Stock, nombre y precio de venta actualizados correctamente."
+		productsMu.Unlock()
+		message := "Producto actualizado correctamente."
+		if delta != 0 {
+			message = "Producto y stock actualizados correctamente."
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -3277,7 +3277,7 @@ func main() {
 			"delta":       delta,
 			"mensaje":     message,
 		})
-	})
+	}))
 
 	mux.HandleFunc("/inventario/producto/eliminar", func(w http.ResponseWriter, r *http.Request) {
 		writeJSONError := func(status int, message string) {
