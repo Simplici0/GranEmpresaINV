@@ -288,14 +288,6 @@ type estadoCount struct {
 	Link     string
 }
 
-type periodTotal struct {
-	Label   string
-	Total   string
-	Range   string
-	Value   float64
-	Percent float64
-}
-
 type metodoPagoTotal struct {
 	Metodo   string  `json:"metodo"`
 	Cantidad int     `json:"cantidad"`
@@ -308,8 +300,6 @@ type timelinePoint struct {
 	Cantidad int     `json:"cantidad"`
 	Total    string  `json:"total"`
 	Value    float64 `json:"value"`
-	Index    int     `json:"index"`
-	Percent  float64 `json:"percent"`
 }
 
 type dashboardSaleDetail struct {
@@ -327,8 +317,6 @@ type pieSlice struct {
 	Metodo  string  `json:"metodo"`
 	Total   string  `json:"total"`
 	Percent float64 `json:"percent"`
-	Offset  float64 `json:"offset"`
-	Gap     float64 `json:"gap"`
 	Color   string  `json:"color"`
 }
 
@@ -341,7 +329,6 @@ type dashboardData struct {
 	PieTotal        string
 	MaxTimeline     float64
 	MaxTimelineText string
-	TimelinePoints  string
 	Timeline        []timelinePoint
 	Sales           []dashboardSaleDetail
 	CurrentUser     *User
@@ -424,23 +411,18 @@ func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, end
 
 	pieColors := []string{"#2c6bed", "#7d4cf6", "#22a88b", "#f5a524", "#e5484d", "#14b8a6"}
 	pieSlices := []pieSlice{}
-	offset := 25.0
 	for i, metodo := range metodosPago {
 		percent := 0.0
 		if totalPago > 0 {
 			percent = (metodo.Value / totalPago) * 100
 		}
-		gap := 100 - percent
 		color := pieColors[i%len(pieColors)]
 		pieSlices = append(pieSlices, pieSlice{
 			Metodo:  metodo.Metodo,
 			Total:   metodo.Total,
 			Percent: percent,
-			Offset:  offset,
-			Gap:     gap,
 			Color:   color,
 		})
-		offset -= percent
 	}
 	resp.PieSlices = pieSlices
 
@@ -476,7 +458,6 @@ func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, end
 
 	timeline := []timelinePoint{}
 	maxTimeline := 0.0
-	index := 0
 	for cursor := startDate; !cursor.After(endDate); cursor = cursor.AddDate(0, 0, 1) {
 		fecha := cursor.Format("2006-01-02")
 		point, ok := timelineByDate[fecha]
@@ -488,17 +469,9 @@ func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, end
 				Value:    0,
 			}
 		}
-		point.Index = index
 		timeline = append(timeline, point)
 		if point.Value > maxTimeline {
 			maxTimeline = point.Value
-		}
-		index++
-	}
-
-	if maxTimeline > 0 {
-		for i := range timeline {
-			timeline[i].Percent = (timeline[i].Value / maxTimeline) * 100
 		}
 	}
 
@@ -952,25 +925,6 @@ func statusLabel(estado string) string {
 		return label
 	}
 	return estado
-}
-
-func buildTimelinePoints(timeline []timelinePoint, width, height, padding float64) string {
-	if len(timeline) == 0 {
-		return ""
-	}
-	if len(timeline) == 1 {
-		x := padding
-		y := height - padding - (timeline[0].Percent/100)*(height-2*padding)
-		return fmt.Sprintf("%.1f,%.1f", x, y)
-	}
-	step := (width - 2*padding) / float64(len(timeline)-1)
-	points := make([]string, 0, len(timeline))
-	for i, point := range timeline {
-		x := padding + step*float64(i)
-		y := height - padding - (point.Percent/100)*(height-2*padding)
-		points = append(points, fmt.Sprintf("%.1f,%.1f", x, y))
-	}
-	return strings.Join(points, " ")
 }
 
 func generateToken() (string, error) {
@@ -2592,7 +2546,6 @@ func main() {
 			PieTotal:        salesData.PieTotal,
 			MaxTimeline:     salesData.MaxTimeline,
 			MaxTimelineText: salesData.MaxTimelineText,
-			TimelinePoints:  buildTimelinePoints(salesData.Timeline, 560, 180, 24),
 			Timeline:        salesData.Timeline,
 			Sales:           salesData.Sales,
 			CurrentUser:     currentUser,

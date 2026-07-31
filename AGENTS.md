@@ -17,9 +17,9 @@ GranEmpresaINV es una aplicación web interna para gestionar inventario, ventas 
 ## Estructura relevante
 
 - `main.go`: modelos de vista, acceso a datos, esquema/migraciones ad-hoc, autenticación, handlers HTTP y servidor.
-- `main_test.go`: pruebas unitarias de FIFO, stock insuficiente y operaciones de reset.
+- `main_test.go`: pruebas unitarias de FIFO, conteo de unidades reservadas, stock insuficiente y operaciones de reset.
 - `templates/`: vistas HTML; `templates/partials/header.html` contiene el layout y estilos compartidos.
-- `static/`: favicon y recursos gráficos.
+- `static/`: favicon, recursos gráficos y dependencias frontend versionadas localmente (`static/vendor/chart.js/`).
 - `deploy/`: servicio systemd, configuración Caddy y script de backup SQLite.
 - `.github/workflows/deploy.yml`: compilación y despliegue automatizado.
 - `README.md`: guía de despliegue orientada a un servidor Hetzner.
@@ -29,7 +29,8 @@ GranEmpresaINV es una aplicación web interna para gestionar inventario, ventas 
 
 - `/login` y `/logout`: inicio y cierre de sesión.
 - `/inventario`: consulta de productos y unidades.
-- `/inventario/reservar`, `/inventario/dano`, `/inventario/uso-interno` y `/inventario/stock`: operaciones sobre unidades.
+- `/inventario/reservar`, `/inventario/dano` y `/inventario/uso-interno`: operaciones sobre unidades.
+- `/inventario/stock`: edición administrativa del producto y ajuste de sus unidades disponibles.
 - `/productos/new`, `/productos` y `/productos/historial`: creación, consulta y movimientos de productos.
 - `/venta/new`, `/venta` y `/venta/confirm`: creación y confirmación de ventas.
 - `/cambio/new` y `/cambio`: creación y confirmación de cambios.
@@ -56,18 +57,33 @@ GranEmpresaINV es una aplicación web interna para gestionar inventario, ventas 
 - El middleware global deja públicos `/login`, `/health` y `/static/`; el resto de rutas exige una sesión válida.
 - Las sesiones duran 24 horas y se identifican mediante la cookie `session_token`.
 - `adminOnly` permite acceso exclusivamente cuando `User.Role == "admin"`.
+- `/inventario/stock` está protegido server-side para administradores; la UI tampoco muestra "Editar producto" a empleados.
 - La creación automática del administrador usa `ADMIN_USER` y `ADMIN_PASS`; si no están configuradas, no se crea ningún administrador.
 - Las operaciones de negocio no deben considerarse administrativas solo porque la UI las oculte: revisar siempre el handler y sus permisos efectivos.
 - No hay protección CSRF ni rate limiting. Al añadir formularios o acciones destructivas, considerar explícitamente estas limitaciones.
 - La cookie segura se calcula a partir de `r.TLS`; detrás de un reverse proxy TLS puede terminar antes de llegar a Go. Revisar este comportamiento antes de cambiar autenticación o despliegue.
+
+## Comportamiento actual de la interfaz
+
+- Inventario transporta y muestra por separado las unidades disponibles y reservadas. El filtro inicial sigue siendo `Disponible`; el filtro `Reservado` incluye productos con reservas aunque también tengan unidades disponibles.
+- Las unidades reservadas no cuentan como disponibles para vender ni para ajustar la cantidad disponible.
+- El alta exitosa en `/productos` usa POST-Redirect-GET hacia `/productos/new`, muestra un mensaje de confirmación y deja el formulario limpio con el siguiente SKU. Los errores conservan los valores introducidos.
+- La acción administrativa del inventario se llama `Editar producto` y permite modificar cantidad disponible, nombre, línea y precio de venta. El SKU no se modifica y las unidades reservadas quedan intactas.
+- El login incluye un control `Mostrar/Ocultar` para la contraseña, oculta por defecto y sin alterar el flujo de autenticación.
+- Los filtros del inventario aparecen en el orden Búsqueda, Estado, Línea y Caducidad. Búsqueda tiene mayor peso visual en escritorio y los breakpoints responsive se mantienen.
+- La paginación marca visualmente el número activo y lo expone mediante `aria-current="page"`.
+- El dashboard usa Chart.js local para la línea temporal de ventas y la dona por método de pago. El KPI, la leyenda, los conteos por estado y la tabla permanecen como HTML accesible.
+- Las gráficas del dashboard se actualizan sin recarga al cambiar el rango, cancelan peticiones anteriores y muestran estados de carga o error.
 
 ## Convenciones de implementación
 
 - Mantener los cambios pequeños y coherentes con el monolito existente; no introducir un framework o una capa nueva sin necesidad concreta.
 - Usar consultas parametrizadas para valores SQL. Los nombres de tabla/columna dinámicos deben validarse antes de interpolarse.
 - Las operaciones que modifican stock y ventas deben usar transacciones y preservar la regla FIFO cuando aplique.
+- En la edición de producto, `cantidad` significa objetivo de unidades disponibles; no convertirla en stock total sin revisar primero el tratamiento de reservas.
 - Mantener sincronizados la base de datos y el estado `products` en memoria; después de cambios de catálogo, revisar si es necesario recargar o actualizar el snapshot.
 - Para cambios en plantillas, revisar tanto el HTML server-side como el JavaScript inline y los estilos responsive.
+- Las librerías frontend de terceros deben fijarse a una versión exacta, servirse desde `static/vendor/` y conservar su licencia/procedencia.
 - No interpolar valores de usuario, CSV o base de datos en `innerHTML`; preferir `textContent`, creación de nodos o escape explícito.
 - Validar en servidor aunque exista validación en el navegador.
 - No agregar compatibilidad legacy por anticipación. Si el cambio requiere soportar una base existente, identificar el esquema concreto y añadir una migración verificable.

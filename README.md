@@ -54,13 +54,14 @@ Copia las plantillas:
 
 ```bash
 sudo -u granempresa rsync -a /srv/granempresa/src/templates /srv/granempresa/app/
+sudo -u granempresa rsync -a /srv/granempresa/src/static /srv/granempresa/app/
 ```
 
 ### Opción B: compilar localmente y subir
 
 ```bash
 GOOS=linux GOARCH=amd64 go build -o granempresa .
-rsync -av granempresa templates/ granempresa@<IP>:/srv/granempresa/app/
+rsync -av granempresa templates static granempresa@<IP>:/srv/granempresa/app/
 ```
 
 ## 5) Configurar systemd

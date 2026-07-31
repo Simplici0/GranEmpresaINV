@@ -22,6 +22,21 @@
       --border: #e6dfd8;
       --shadow: 0 16px 30px rgba(18, 23, 38, 0.08);
       --shadow-soft: 0 8px 18px rgba(18, 23, 38, 0.08);
+      --chart-pie-1: #667085;
+      --chart-pie-2: #7a8191;
+      --chart-pie-3: #98a2b3;
+      --chart-pie-4: #b8c0cc;
+      --chart-pie-5: #cbd5e1;
+      --chart-pie-6: #d0d5dd;
+    }
+
+    html[data-theme="dark"] {
+      --chart-pie-1: #ff7a3d;
+      --chart-pie-2: #ff955f;
+      --chart-pie-3: #ffb07c;
+      --chart-pie-4: #e86b32;
+      --chart-pie-5: #d95625;
+      --chart-pie-6: #ffc49f;
     }
 
     * {
@@ -145,12 +160,26 @@
 
     .range-pill {
       border: 1px solid var(--border);
-      background: #fbfaf8;
+      background: var(--card);
       border-radius: 999px;
       padding: 6px 10px;
       font-size: 12px;
       color: var(--muted);
       font-weight: 700;
+    }
+
+    .dashboard-status {
+      min-width: 0;
+      margin-right: auto;
+      color: var(--muted);
+    }
+
+    .dashboard-status:empty {
+      display: none;
+    }
+
+    .dashboard-status[data-state="error"] {
+      color: var(--danger);
     }
 
     details.range-picker {
@@ -299,12 +328,12 @@
       padding: 10px 12px;
       border-radius: 14px;
       border: 1px solid var(--border);
-      background: #fbfaf8;
+      background: var(--color-surface-muted, var(--card));
       transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
     }
 
     .state-list a:hover {
-      background: #ffffff;
+      background: var(--card);
       border-color: var(--primary);
       transform: translateX(4px);
       box-shadow: 0 2px 8px rgba(232, 93, 60, 0.1);
@@ -312,11 +341,6 @@
 
     .state-list span {
       font-weight: 600;
-    }
-
-    .periods {
-      display: grid;
-      gap: 12px;
     }
 
     .range-form {
@@ -342,7 +366,8 @@
       border: 1px solid var(--border);
       font-size: 13px;
       transition: all 0.2s ease;
-      background: #ffffff;
+      background: var(--color-control, var(--card));
+      color: var(--text);
     }
 
     .range-form input:focus {
@@ -353,61 +378,6 @@
 
     .range-form input:hover {
       border-color: rgba(232, 93, 60, 0.3);
-    }
-
-    .range-summary {
-      margin-top: 12px;
-      display: grid;
-      gap: 6px;
-      padding: 14px;
-      border-radius: 14px;
-      border: 1px solid var(--border);
-      background: #fbfaf8;
-    }
-
-    .range-summary strong {
-      font-size: 20px;
-    }
-
-    .bar-chart {
-      display: grid;
-      gap: 12px;
-    }
-
-    .bar-row {
-      display: grid;
-      grid-template-columns: 80px 1fr;
-      gap: 12px;
-      align-items: center;
-    }
-
-    .bar {
-      position: relative;
-      height: 12px;
-      background: #eef2ff;
-      border-radius: 999px;
-      overflow: hidden;
-    }
-
-    .bar span {
-      position: absolute;
-      left: 0;
-      top: 0;
-      bottom: 0;
-      background: linear-gradient(90deg, #2c6bed, #7d4cf6);
-      border-radius: 999px;
-    }
-
-    .period {
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      padding: 12px;
-    }
-
-    .period strong {
-      font-size: 18px;
-      display: block;
-      margin-top: 6px;
     }
 
     table {
@@ -431,7 +401,7 @@
     }
 
     .badge {
-      background: linear-gradient(135deg, var(--primary-soft) 0%, #ffe8dc 100%);
+      background: var(--primary-soft);
       color: var(--primary);
       padding: 3px 10px;
       border-radius: 999px;
@@ -463,13 +433,13 @@
 	      aspect-ratio: 1 / 1;
 	      padding: 14px;
 	      border-radius: 14px;
-	      background: #fbfaf8;
+	      background: var(--card);
 	      border: 1px solid var(--border);
 	      display: grid;
 	      place-items: center;
 	    }
 
-    .pie-chart svg {
+    .pie-chart canvas {
       width: 100%;
       height: 100%;
       display: block;
@@ -543,7 +513,7 @@
       border: 1px solid var(--border);
       border-radius: 16px;
       padding: 16px;
-      background: #fbfaf8;
+      background: var(--card);
     }
 
     .summary-block h3 {
@@ -566,12 +536,26 @@
       border-radius: 50%;
     }
 
+    .pie-legend .legend-item:nth-child(1) .legend-dot { background: var(--chart-pie-1); }
+    .pie-legend .legend-item:nth-child(2) .legend-dot { background: var(--chart-pie-2); }
+    .pie-legend .legend-item:nth-child(3) .legend-dot { background: var(--chart-pie-3); }
+    .pie-legend .legend-item:nth-child(4) .legend-dot { background: var(--chart-pie-4); }
+    .pie-legend .legend-item:nth-child(5) .legend-dot { background: var(--chart-pie-5); }
+    .pie-legend .legend-item:nth-child(6) .legend-dot { background: var(--chart-pie-6); }
+
     .line-chart {
       width: 100%;
-      height: auto;
-      background: #fbfaf8;
+      height: 260px;
+      background: var(--card);
       border-radius: 12px;
       border: 1px solid var(--border);
+      position: relative;
+    }
+
+    .line-chart canvas {
+      display: block;
+      width: 100% !important;
+      height: 100% !important;
     }
 
     .timeline-grid {
@@ -585,6 +569,18 @@
       font-size: 12px;
       color: var(--muted);
       margin-top: 2px;
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
     }
 
     .button,
@@ -601,7 +597,7 @@
 
     .button:hover,
     button:hover {
-      background: #f9f7f4;
+      background: var(--color-surface-muted, #f9f7f4);
       transform: translateY(-1px);
     }
 
@@ -624,12 +620,14 @@
       transform: translateY(0);
     }
   </style>
+  <script src="/static/vendor/chart.js/chart.umd.min.js"></script>
 </head>
 <body>
   {{template "header" .}}
 
   <main class="page-content">
     <div class="dashboard-toolbar">
+      <span id="dash-status" class="dashboard-status chart-note" role="status" aria-live="polite"></span>
       <span id="dash-range-badge" class="range-pill">{{.RangeStart}} → {{.RangeEnd}} · {{.RangeCount}} ventas</span>
       <a id="dash-download" class="button" href="/csv/ventas?start_date={{.RangeStart}}&end_date={{.RangeEnd}}" title="Descargar ventas del periodo">Descargar ventas</a>
       <details class="range-picker" id="dash-range">
@@ -667,7 +665,10 @@
         </div>
       </div>
 
-      <svg id="timeline-svg" class="line-chart" viewBox="0 0 1000 260" role="img" aria-label="Histórico de ventas"></svg>
+      <div class="line-chart">
+        <canvas id="timeline-chart" role="img" aria-label="Ventas por día" aria-describedby="timeline-description">Gráfica de ventas por día.</canvas>
+      </div>
+      <div id="timeline-description" class="sr-only">Histórico de ventas por día. Consulte el detalle de ventas para los valores exactos.</div>
       <div class="timeline-grid">
         <div id="timeline-max">Máximo: {{.MaxTimelineText}}</div>
         <div id="timeline-days">Días visibles: {{len .Timeline}}</div>
@@ -734,13 +735,14 @@
           <h3>Ventas por método de pago</h3>
           <div class="pie-wrap">
             <div class="pie-chart">
-              <svg id="pie-svg" viewBox="-10 -10 140 140" role="img" aria-label="Ventas por método de pago"></svg>
+              <canvas id="pie-chart" role="img" aria-label="Ventas por método de pago" aria-describedby="pie-description">Gráfica de ventas por método de pago.</canvas>
+              <div id="pie-description" class="sr-only">Distribución de ventas por método de pago. Consulte la leyenda para los valores exactos.</div>
             </div>
             <div id="pie-legend" class="pie-legend">
               {{range .PieSlices}}
-              <div class="legend-item">
-                <span class="legend-left">
-                  <span class="legend-dot" style="background: {{.Color}};"></span>
+                <div class="legend-item">
+                  <span class="legend-left">
+                  <span class="legend-dot"></span>
                   <div>{{.Metodo}}</div>
                 </span>
                 <span class="legend-right">{{.Total}} <small>{{printf "%.0f" .Percent}}%</small></span>
@@ -758,17 +760,22 @@
     const dash = (() => {
       const startInput = document.getElementById("start_date");
       const endInput = document.getElementById("end_date");
+      const dashboardStatus = document.getElementById("dash-status");
       const rangeBadge = document.getElementById("dash-range-badge");
       const downloadBtn = document.getElementById("dash-download");
-	      const pieSvg = document.getElementById("pie-svg");
+	      const pieCanvas = document.getElementById("pie-chart");
+	      const pieDescription = document.getElementById("pie-description");
 	      const pieLegend = document.getElementById("pie-legend");
-	      const timelineSvg = document.getElementById("timeline-svg");
+	      const timelineCanvas = document.getElementById("timeline-chart");
+	      const timelineDescription = document.getElementById("timeline-description");
 	      const timelineMax = document.getElementById("timeline-max");
 	      const timelineDays = document.getElementById("timeline-days");
 	          const salesTableBody = document.getElementById("sales-table-body");
 	      const kpiTotal = document.getElementById("kpi-total");
 	      const kpiSub = document.getElementById("kpi-sub");
 	      const isAdmin = {{if and .CurrentUser (eq .CurrentUser.Role "admin")}}true{{else}}false{{end}};
+	      let timelineChart = null;
+	      let timelineInfo = { points: [], keys: [], keyIndices: new Set(), colors: {} };
 
 	      const moneyFmt = (() => {
 	        try {
@@ -788,174 +795,350 @@
         if (downloadBtn) downloadBtn.href = `/csv/ventas?${new URLSearchParams({ start_date: start, end_date: end }).toString()}`;
       };
 
+      const setDashboardStatus = (message, state = "") => {
+        if (!dashboardStatus) return;
+        dashboardStatus.textContent = message;
+        if (state) dashboardStatus.dataset.state = state;
+        else dashboardStatus.removeAttribute("data-state");
+      };
+
       const clearEl = (el) => {
         if (!el) return;
         while (el.firstChild) el.removeChild(el.firstChild);
       };
 
-      const el = (name, attrs = {}, text = "") => {
-        const node = document.createElementNS("http://www.w3.org/2000/svg", name);
-        Object.entries(attrs).forEach(([k, v]) => node.setAttribute(k, String(v)));
-        if (text) node.textContent = text;
-        return node;
+      const getChartColors = () => {
+        const styles = getComputedStyle(document.documentElement);
+        const read = (name, fallback) => styles.getPropertyValue(name).trim() || fallback;
+        const isDark = document.documentElement.dataset.theme === "dark";
+        return {
+          text: read("--text", "#26221f"),
+          muted: read("--muted", "#6f6a65"),
+          border: read("--border", "#d9d2cb"),
+          card: read("--card", "#ffffff"),
+          line: isDark ? "#ff7a3d" : "#667085",
+          point: isDark ? "rgba(255, 149, 95, 0.62)" : "rgba(102, 112, 133, 0.48)",
+          pointHighlight: isDark ? "rgba(255, 196, 159, 0.9)" : "rgba(52, 64, 84, 0.8)",
+          pointBorder: isDark ? "rgba(24, 27, 31, 0.82)" : "rgba(255, 255, 255, 0.86)",
+          pie: [
+            read("--chart-pie-1", isDark ? "#ff7a3d" : "#667085"),
+            read("--chart-pie-2", isDark ? "#ff955f" : "#7a8191"),
+            read("--chart-pie-3", isDark ? "#ffb07c" : "#98a2b3"),
+            read("--chart-pie-4", isDark ? "#e86b32" : "#b8c0cc"),
+            read("--chart-pie-5", isDark ? "#d95625" : "#cbd5e1"),
+            read("--chart-pie-6", isDark ? "#ffc49f" : "#d0d5dd")
+          ]
+        };
       };
 
-	      const renderDonut = (data) => {
-	        if (!pieSvg) return;
-	        clearEl(pieSvg);
+      const timelineLabelsPlugin = {
+        id: "timelineKeyLabels",
+        afterDatasetsDraw: (chart) => {
+          if (!timelineInfo.keys.length) return;
+          const meta = chart.getDatasetMeta(0);
+          const area = chart.chartArea;
+          const context = chart.ctx;
+          timelineInfo.keys.forEach(({ index, title, value }) => {
+            const point = meta.data[index];
+            if (!point) return;
+            context.save();
+            context.font = "700 12px Inter, Segoe UI, sans-serif";
+            context.fillStyle = timelineInfo.colors.text;
+            context.textBaseline = "middle";
+            let x = point.x + 10;
+            let align = "left";
+            if (x > area.right - 150) {
+              x = point.x - 10;
+              align = "right";
+            }
+            x = Math.max(area.left + 6, Math.min(x, area.right - 6));
+            context.textAlign = align;
+            const y = Math.max(area.top + 12, point.y - 10);
+            context.fillText(`${title}: ${value || fmtMoney(0)}`, x, y);
+            context.restore();
+          });
+        }
+      };
 
-	        const slices = Array.isArray(data.pie_slices) ? data.pie_slices : [];
-	        const total = String(data.pie_total || fmtMoney(0));
-	        const longTotal = total.length >= 14;
+      const paymentInfo = { total: fmtMoney(0), empty: true, colors: {} };
+      const paymentCenterTextPlugin = {
+        id: "paymentCenterText",
+        afterDraw: (chart) => {
+          const area = chart.chartArea;
+          if (!area) return;
+          const context = chart.ctx;
+          const centerX = (area.left + area.right) / 2;
+          const centerY = (area.top + area.bottom) / 2;
+          context.save();
+          context.textAlign = "center";
+          context.textBaseline = "middle";
+          context.fillStyle = paymentInfo.colors.muted || "#5c647c";
+          context.font = "12px Inter, Segoe UI, sans-serif";
+          context.fillText(paymentInfo.empty ? "Sin ventas" : "Total", centerX, centerY - 10);
+          if (!paymentInfo.empty) {
+            context.fillStyle = paymentInfo.colors.text || "#1c1f2a";
+            context.font = "700 14px Inter, Segoe UI, sans-serif";
+            context.fillText(paymentInfo.total, centerX, centerY + 9);
+          }
+          context.restore();
+        }
+      };
 
-	        pieSvg.appendChild(el("circle", { cx: 60, cy: 60, r: 45, fill: "none", stroke: "#eef2ff", "stroke-width": 16 }));
-	        slices.forEach((s) => {
-	          pieSvg.appendChild(el("circle", {
-	            cx: 60,
-            cy: 60,
-            r: 45,
-            fill: "none",
-            stroke: s.color || "#2c6bed",
-            "stroke-width": 16,
-            "stroke-dasharray": `${Number(s.percent || 0).toFixed(2)} ${(Number(s.gap || 0)).toFixed(2)}`,
-            "stroke-dashoffset": `${Number(s.offset || 0).toFixed(2)}`,
-            transform: "rotate(-90 60 60)"
-	          }));
-	        });
-	        pieSvg.appendChild(el("text", { x: 60, y: 58, "text-anchor": "middle", "font-size": 12, fill: "#5c647c" }, "Total"));
-	        const totalAttrs = { x: 60, y: 74, "text-anchor": "middle", "font-size": longTotal ? 12 : 14, "font-weight": 700, fill: "#1c1f2a" };
-	        if (longTotal) {
-	          // Avoid clipping when totals are very large.
-	          totalAttrs.textLength = 92;
-	          totalAttrs.lengthAdjust = "spacingAndGlyphs";
-	        }
-	        pieSvg.appendChild(el("text", totalAttrs, total));
+      let paymentChart = null;
+      const renderDonut = (data) => {
+        if (!pieCanvas) return;
 
-	        if (pieLegend) {
-	          pieLegend.innerHTML = "";
-	          slices.forEach((s) => {
-	            const div = document.createElement("div");
+        const payments = Array.isArray(data.metodos_pago) ? data.metodos_pago : [];
+        const colors = getChartColors();
+        const values = payments.map((payment) => Number(payment.value || 0));
+        const totalValue = values.reduce((sum, value) => sum + value, 0);
+        const total = String(data.pie_total || fmtMoney(totalValue));
+        paymentInfo.total = total;
+        paymentInfo.empty = payments.length === 0 || totalValue <= 0;
+        paymentInfo.colors = colors;
+        if (pieDescription) {
+          pieDescription.textContent = paymentInfo.empty
+            ? "No hay ventas por método de pago en el periodo seleccionado."
+            : `Distribución de ventas por método de pago. Total del periodo: ${total}. Consulte la leyenda para el detalle.`;
+        }
+
+        if (pieLegend) {
+          clearEl(pieLegend);
+          if (payments.length === 0) {
+            const empty = document.createElement("div");
+            empty.className = "chart-note";
+            empty.textContent = "Sin ventas registradas en el periodo.";
+            pieLegend.appendChild(empty);
+          }
+          payments.forEach((payment, index) => {
+            const value = values[index];
+            const percent = totalValue > 0 ? (value / totalValue) * 100 : 0;
+            const color = colors.pie[index % colors.pie.length];
+            const div = document.createElement("div");
             div.className = "legend-item";
-            const dot = document.createElement("span");
-            dot.className = "legend-dot";
-            dot.style.background = s.color || "#2c6bed";
+
             const left = document.createElement("span");
             left.className = "legend-left";
+            const dot = document.createElement("span");
+            dot.className = "legend-dot";
+            dot.style.background = color;
             const label = document.createElement("div");
-            const pct = Math.round(Number(s.percent || 0));
-            label.textContent = `${s.metodo || "-"}`;
+            label.textContent = payment.metodo || "-";
             left.appendChild(dot);
             left.appendChild(label);
 
             const right = document.createElement("span");
             right.className = "legend-right";
-            right.innerHTML = `${s.total || "-" } <small>${pct}%</small>`;
+            const amount = document.createElement("span");
+            amount.textContent = payment.total || fmtMoney(value);
+            const percentage = document.createElement("small");
+            percentage.textContent = `${Math.round(percent)}%`;
+            right.appendChild(amount);
+            right.appendChild(percentage);
 
             div.appendChild(left);
             div.appendChild(right);
             pieLegend.appendChild(div);
           });
         }
+
+        if (typeof Chart === "undefined") return;
+
+        const backgroundColors = payments.map((payment, index) => colors.pie[index % colors.pie.length]);
+        const tooltipCallbacks = {
+          label: (context) => {
+            const value = Number(context.parsed || 0);
+            const percent = totalValue > 0 ? Math.round((value / totalValue) * 100) : 0;
+            return `${context.label}: ${fmtMoney(value)} (${percent}%)`;
+          }
+        };
+        const dataset = {
+          data: values,
+          backgroundColor: backgroundColors,
+          borderColor: colors.card,
+          borderWidth: 2,
+          hoverOffset: 4
+        };
+
+        if (!paymentChart) {
+          paymentChart = new Chart(pieCanvas, {
+            type: "doughnut",
+            data: {
+              labels: payments.map((payment) => payment.metodo || "-"),
+              datasets: [dataset]
+            },
+            options: {
+              responsive: true,
+              maintainAspectRatio: false,
+              animation: false,
+              cutout: "68%",
+              plugins: {
+                legend: { display: false },
+                tooltip: { callbacks: tooltipCallbacks }
+              }
+            },
+            plugins: [paymentCenterTextPlugin]
+          });
+          return;
+        }
+
+        paymentChart.data.labels = payments.map((payment) => payment.metodo || "-");
+        paymentChart.data.datasets[0] = dataset;
+        paymentChart.options.plugins.tooltip.callbacks = tooltipCallbacks;
+        paymentChart.update("none");
       };
 
       const renderTimeline = (data) => {
-        if (!timelineSvg) return;
-        clearEl(timelineSvg);
+	        if (!timelineCanvas) return;
 
-        const timeline = Array.isArray(data.timeline) ? data.timeline : [];
-        const maxV = Number(data.max_timeline || 0);
-        const maxText = String(data.max_timeline_text || fmtMoney(maxV));
+	        const timeline = Array.isArray(data.timeline) ? data.timeline : [];
+	        const maxV = Number(data.max_timeline || 0);
+	        const maxText = String(data.max_timeline_text || fmtMoney(maxV));
+	        const colors = getChartColors();
+	        const labels = timeline.map((point) => point.fecha || "");
 
         if (timelineMax) timelineMax.textContent = `Máximo: ${maxText}`;
         if (timelineDays) timelineDays.textContent = `Días visibles: ${timeline.length}`;
-
-        const W = 1000;
-        const H = 260;
-        const padL = 72, padR = 22, padT = 18, padB = 44;
-        const plotW = W - padL - padR;
-        const plotH = H - padT - padB;
-        const n = timeline.length;
-        const safeMax = Math.max(maxV, 1);
-
-        const xAt = (i) => padL + (n <= 1 ? plotW / 2 : (i / (n - 1)) * plotW);
-        const yAt = (v) => padT + (1 - (v / safeMax)) * plotH;
-
-        // Grid lines (10% opacity).
-        const grid = el("g", { opacity: 0.1 });
-        const ticks = 4;
-        for (let t = 0; t <= ticks; t++) {
-          const v = (safeMax / ticks) * t;
-          const y = yAt(v);
-          grid.appendChild(el("line", { x1: padL, x2: W - padR, y1: y, y2: y, stroke: "#26221f", "stroke-width": 1 }));
-        }
-        timelineSvg.appendChild(grid);
-
-        // Axes.
-        timelineSvg.appendChild(el("line", { x1: padL, x2: padL, y1: padT, y2: H - padB, stroke: "#d9d2cb", "stroke-width": 1 }));
-        timelineSvg.appendChild(el("line", { x1: padL, x2: W - padR, y1: H - padB, y2: H - padB, stroke: "#d9d2cb", "stroke-width": 1 }));
-
-        // Y axis labels (Currency).
-        for (let t = 0; t <= ticks; t++) {
-          const v = (safeMax / ticks) * t;
-          const y = yAt(v);
-          const label = el("text", { x: padL - 10, y: y + 4, "text-anchor": "end", "font-size": 11, fill: "#6f6a65" }, fmtMoney(v));
-          timelineSvg.appendChild(label);
+        if (timelineDescription) {
+          timelineDescription.textContent = timeline.length === 0
+            ? "No hay datos de ventas en el periodo seleccionado."
+            : `Histórico de ventas por día entre ${timeline[0]?.fecha || ""} y ${timeline[timeline.length - 1]?.fecha || ""}. Máximo del periodo: ${maxText}. Consulte el detalle de ventas para los valores exactos.`;
         }
 
-        // X axis labels (Date).
-        const labelsIdx = n <= 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
-        labelsIdx.forEach((i) => {
-          const x = xAt(i);
-          const d = timeline[i]?.fecha || "";
-          timelineSvg.appendChild(el("text", { x, y: H - padB + 22, "text-anchor": "middle", "font-size": 11, fill: "#6f6a65" }, d));
-        });
-        timelineSvg.appendChild(el("text", { x: W - padR, y: H - 10, "text-anchor": "end", "font-size": 11, fill: "#6f6a65" }, "Fecha"));
-        timelineSvg.appendChild(el("text", { x: padL, y: 12, "text-anchor": "start", "font-size": 11, fill: "#6f6a65" }, "Total ($)"));
+	        let maxIdx = 0;
+	        let maxValue = -1;
+	        timeline.forEach((point, index) => {
+	          const value = Number(point.value || 0);
+          if (value > maxValue) {
+	            maxValue = value;
+	            maxIdx = index;
+          }
+	        });
+        const lastIdx = Math.max(0, timeline.length - 1);
+        const keyByIndex = new Map();
+        if (timeline.length > 0) keyByIndex.set(lastIdx, { title: "Venta Total", value: timeline[lastIdx].total });
+        if (timeline.length > 0) keyByIndex.set(maxIdx, { title: "Pico", value: timeline[maxIdx].total });
+        timelineInfo = {
+          points: timeline,
+          keys: Array.from(keyByIndex, ([index, meta]) => ({ index, ...meta })),
+          keyIndices: new Set(keyByIndex.keys()),
+          colors
+        };
 
-        // Line points.
-        const points = timeline.map((p, i) => `${xAt(i).toFixed(1)},${yAt(Number(p.value || 0)).toFixed(1)}`).join(" ");
-        timelineSvg.appendChild(el("polyline", {
-          fill: "none",
-          stroke: "#2c6bed",
-          "stroke-width": 3,
-          "stroke-linecap": "round",
-          "stroke-linejoin": "round",
-          points
-        }));
+        if (typeof Chart === "undefined") return;
 
-        // Dots (subtle).
-        const dots = el("g", { opacity: 0.35 });
-        timeline.forEach((p, i) => {
-          dots.appendChild(el("circle", { cx: xAt(i), cy: yAt(Number(p.value || 0)), r: 3.2, fill: "#2c6bed" }));
-        });
-        timelineSvg.appendChild(dots);
+        const tooltipCallbacks = {
+          title: (items) => timeline[items[0]?.dataIndex]?.fecha || "",
+          label: (context) => `Venta total: ${fmtMoney(context.parsed.y)}`,
+          afterLabel: (context) => `Ventas: ${timeline[context.dataIndex]?.cantidad || 0}`
+        };
+        const dataset = {
+          label: "Ventas",
+          data: timeline.map((point) => Number(point.value || 0)),
+          borderColor: colors.line,
+          backgroundColor: colors.line,
+          borderWidth: 3,
+          pointStyle: "circle",
+          pointRadius: (context) => timelineInfo.keyIndices.has(context.dataIndex) ? 5.5 : 3.2,
+          pointHoverRadius: 7,
+          pointBackgroundColor: (context) => timelineInfo.keyIndices.has(context.dataIndex) ? colors.pointHighlight : colors.point,
+          pointBorderColor: colors.pointBorder,
+          pointBorderWidth: 1,
+          tension: 0,
+          fill: false
+        };
+        const chartOptions = {
+          responsive: true,
+          maintainAspectRatio: false,
+          animation: false,
+          layout: { padding: { top: 20, right: 18, bottom: 4, left: 4 } },
+          interaction: { mode: "index", intersect: false },
+          plugins: {
+            legend: { display: false },
+            tooltip: { callbacks: tooltipCallbacks }
+          },
+          scales: {
+            x: {
+              offset: timeline.length === 1,
+              grid: { display: false },
+              border: { color: colors.border },
+              ticks: {
+                color: colors.muted,
+                maxTicksLimit: 3,
+                callback: (value) => timeline[Number(value)]?.fecha || ""
+              }
+            },
+            y: {
+              beginAtZero: true,
+              suggestedMax: maxV > 0 ? undefined : 1,
+              grid: { color: colors.border },
+              border: { color: colors.border },
+              ticks: {
+                color: colors.muted,
+                callback: (value) => fmtMoney(value)
+              }
+            }
+          }
+        };
 
-        // Labels on key points: last + max.
-        const lastIdx = Math.max(0, n - 1);
-        let maxIdx = 0;
-        let maxVal = -1;
-        timeline.forEach((p, i) => {
-          const v = Number(p.value || 0);
-          if (v > maxVal) {
-            maxVal = v;
-            maxIdx = i;
+        if (!timelineChart) {
+          timelineChart = new Chart(timelineCanvas, {
+            type: "line",
+            data: { labels, datasets: [dataset] },
+            options: chartOptions,
+            plugins: [timelineLabelsPlugin]
+          });
+          return;
+        }
+
+        timelineChart.data.labels = labels;
+        timelineChart.data.datasets[0] = dataset;
+        timelineChart.options.scales.x = chartOptions.scales.x;
+        timelineChart.options.scales.y = chartOptions.scales.y;
+        timelineChart.options.plugins.tooltip.callbacks = tooltipCallbacks;
+        timelineChart.update("none");
+      };
+
+      const refreshChartTheme = () => {
+        const colors = getChartColors();
+        timelineInfo.colors = colors;
+        paymentInfo.colors = colors;
+
+        if (timelineChart) {
+          const dataset = timelineChart.data.datasets[0];
+          dataset.borderColor = colors.line;
+          dataset.backgroundColor = colors.line;
+          dataset.pointStyle = "circle";
+          dataset.pointBackgroundColor = (context) => timelineInfo.keyIndices.has(context.dataIndex) ? colors.pointHighlight : colors.point;
+          dataset.pointBorderColor = colors.pointBorder;
+          timelineChart.options.scales.x.ticks.color = colors.muted;
+          timelineChart.options.scales.x.border.color = colors.border;
+          timelineChart.options.scales.y.ticks.color = colors.muted;
+          timelineChart.options.scales.y.grid.color = colors.border;
+          timelineChart.options.scales.y.border.color = colors.border;
+          timelineChart.update("none");
+        }
+
+        if (paymentChart) {
+          paymentChart.data.datasets[0].borderColor = colors.card;
+          paymentChart.data.datasets[0].backgroundColor = paymentChart.data.labels.map((label, index) => colors.pie[index % colors.pie.length]);
+          paymentChart.update("none");
+        }
+        if (pieLegend) {
+          pieLegend.querySelectorAll(".legend-dot").forEach((dot, index) => {
+            dot.style.background = colors.pie[index % colors.pie.length];
+          });
+        }
+      };
+
+      if (typeof MutationObserver !== "undefined") {
+        const themeObserver = new MutationObserver((mutations) => {
+          if (mutations.some((mutation) => mutation.attributeName === "data-theme")) {
+            refreshChartTheme();
           }
         });
-        const key = new Map();
-        if (n > 0) key.set(lastIdx, { title: "Venta Total", value: timeline[lastIdx].total });
-        if (n > 0) key.set(maxIdx, { title: "Pico", value: timeline[maxIdx].total });
-
-        key.forEach((meta, i) => {
-          const cx = xAt(i);
-          const cy = yAt(Number(timeline[i].value || 0));
-          timelineSvg.appendChild(el("circle", { cx, cy, r: 5.5, fill: "#e85d3c" }));
-          const label = `${meta.title}: ${meta.value || fmtMoney(0)}`;
-          const tx = Math.min(W - padR - 6, Math.max(padL + 6, cx + 10));
-          const ty = Math.max(padT + 12, cy - 10);
-          timelineSvg.appendChild(el("text", { x: tx, y: ty, "font-size": 12, fill: "#26221f", "font-weight": 700 }, label));
-        });
-
-	      };
+        themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
+      }
 
 	      const renderSales = (data) => {
 	        if (!salesTableBody) return;
@@ -995,24 +1178,45 @@
 	      };
 
       let pending = null;
+      let activeController = null;
+      let requestSequence = 0;
       const schedule = () => {
         if (pending) clearTimeout(pending);
+        if (activeController) {
+          activeController.abort();
+          activeController = null;
+        }
+        const sequence = ++requestSequence;
         pending = setTimeout(async () => {
+          pending = null;
           const start = startInput?.value;
           const end = endInput?.value;
           if (!start || !end) return;
+          const controller = new AbortController();
+          activeController = controller;
           const qs = new URLSearchParams({ start_date: start, end_date: end });
           const url = `/dashboard/data?${qs.toString()}`;
+          setDashboardStatus("Actualizando datos…");
           try {
-            const resp = await fetch(url, { headers: { "Accept": "application/json" } });
+            const resp = await fetch(url, {
+              headers: { "Accept": "application/json" },
+              signal: controller.signal
+            });
             const data = await resp.json().catch(() => ({}));
-            if (!resp.ok || !data.ok) return;
+            if (controller.signal.aborted || sequence !== requestSequence) return;
+            if (!resp.ok || !data.ok) {
+              throw new Error(data.error || "No se pudieron cargar los datos del dashboard.");
+            }
             // Keep URL in sync without hard reload.
             const nextUrl = `/dashboard?${qs.toString()}`;
             window.history.replaceState({}, "", nextUrl);
             applyData(data);
-          } catch (_) {
-            // ignore
+            setDashboardStatus("Datos actualizados.");
+          } catch (error) {
+            if (error?.name === "AbortError" || sequence !== requestSequence) return;
+            setDashboardStatus(error?.message || "No se pudieron cargar los datos del dashboard.", "error");
+          } finally {
+            if (activeController === controller) activeController = null;
           }
         }, 250);
       };
