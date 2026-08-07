@@ -2,7 +2,7 @@
 
 ## Propósito
 
-GranEmpresaINV es una aplicación web interna para gestionar inventario, ventas y cambios de productos. Antes de trazar un plan o modificar el proyecto, leer este archivo y verificar el estado real del código: la mayor parte de la aplicación está concentrada en `main.go` y existen diferencias entre la documentación de despliegue y el workflow de CI.
+GranEmpresaINV es una aplicación web interna para gestionar inventario, ventas y cambios de productos. Antes de trazar un plan o modificar el proyecto, leer este archivo y verificar el estado real del código: la mayor parte de la aplicación está concentrada en `main.go`. El contrato de publicación es `.github/workflows/deploy.yml`; `README.md` y `deploy/` documentan el entorno real.
 
 ## Arquitectura
 
@@ -20,7 +20,7 @@ GranEmpresaINV es una aplicación web interna para gestionar inventario, ventas 
 - `main_test.go`: pruebas unitarias de FIFO, conteo de unidades reservadas, stock insuficiente y operaciones de reset.
 - `templates/`: vistas HTML; `templates/partials/header.html` contiene el layout y estilos compartidos.
 - `static/`: favicon, recursos gráficos y dependencias frontend versionadas localmente (`static/vendor/chart.js/`).
-- `deploy/`: servicio systemd, configuración Caddy y script de backup SQLite.
+- `deploy/`: referencias del servicio systemd `stocki`, routing Nginx y script manual de backup SQLite.
 - `.github/workflows/deploy.yml`: compilación y despliegue automatizado.
 - `README.md`: guía de despliegue orientada a un servidor Hetzner.
 - `data.db` y archivos WAL locales: datos de desarrollo ignorados por Git; no son fixtures ni deben modificarse como parte de un cambio de código.
@@ -128,14 +128,15 @@ Las pruebas existentes no cubren todas las rutas HTTP, autenticación, CSV, camb
 
 ## Despliegue
 
-- `deploy/systemd/granempresa.service` espera el binario y las plantillas en `/srv/granempresa/app`, con datos en `/srv/granempresa/data/data.db`.
-- `deploy/Caddyfile` usa `example.com` como placeholder y hace reverse proxy a `127.0.0.1:8080`.
-- `deploy/backup_db.sh` genera copias mediante `VACUUM INTO` y conserva por defecto 14 días (`KEEP_DAYS`).
-- `README.md` documenta el servicio `granempresa`, usuario `granempresa` y arquitectura `linux/amd64`.
-- `.github/workflows/deploy.yml` actualmente compila `linux/arm64` y despliega con nombres/rutas de `stocki` diferentes a los del README y systemd.
-- El workflow reinicia el servicio remoto, pero no ejecuta tests, healthcheck, migraciones, validación de backup ni rollback.
-- Antes de modificar despliegue, unificar o confirmar explícitamente el contrato real del servidor; no asumir que README, systemd y CI describen el mismo entorno.
-- Antes de una publicación, verificar `go build`, arquitectura del servidor, `DB_PATH`, variables `ADMIN_USER`/`ADMIN_PASS`, permisos de la carpeta de datos y estado del servicio.
+- Producción usa `stocki.service`, usuario `AlvaroC`, `WorkingDirectory=/opt/stocki`, binario `/opt/stocki/stocki` y `EnvironmentFile=/opt/stocki/.env`.
+- El servicio escucha en `PORT=8090` y usa `DB_PATH=/opt/stocki/data/data.db`.
+- La arquitectura de producción es Linux ARM64/AArch64.
+- Nginx atiende `stocki.manosalaia.xyz` en 80/443 y hace proxy a `127.0.0.1:8090`; la referencia está en `deploy/nginx/stocki.conf`.
+- `.github/workflows/deploy.yml` compila para ARM64, conecta por SSH al puerto 2222 como `AlvaroC`, sincroniza el binario, `templates/` y `static/` en `/opt/stocki` y reinicia `stocki`.
+- El workflow no copia `.env`, no instala systemd ni Nginx y no ejecuta tests, healthcheck, migraciones, validación de backup ni rollback.
+- `deploy/backup_db.sh` es un backup SQLite manual de referencia; el backup programado existente en producción respalda otra base PostgreSQL y no la SQLite de esta aplicación.
+- Los archivos históricos que describían `/srv/granempresa`, Caddy y el puerto 8080 están en `deploy/legacy/` y no forman parte del contrato activo.
+- Antes de una publicación, verificar `go build`, arquitectura del servidor, `DB_PATH`, variables `ADMIN_USER`/`ADMIN_PASS`, permisos de la carpeta de datos y estado de `stocki.service`.
 
 ## Riesgos conocidos para planificar cambios
 

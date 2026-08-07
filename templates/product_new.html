@@ -233,6 +233,7 @@
     {{end}}
     <div class="card">
       <form method="POST" action="/productos">
+        <input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" />
         <div class="row">
           <div>
             <label for="sku">SKU</label>
@@ -285,9 +286,9 @@
     const precioVenta = document.getElementById("precio_venta");
 
     const parseCOP = (raw) => {
-      const digits = String(raw || "").replace(/[^\d]/g, "");
-      if (!digits) return NaN;
-      return Number(digits);
+      const normalized = String(raw || "").trim().replace(/[$\s]/g, "");
+      if (!/^\d+(?:[.,]\d{3})*$/.test(normalized)) return NaN;
+      return Number(normalized.replace(/[.,]/g, ""));
     };
     const formatCOP = (value) => {
       const n = Math.max(0, Math.round(Number(value || 0)));

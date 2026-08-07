@@ -400,6 +400,7 @@
     </div>
 
     <form action="/cambio" method="POST">
+      <input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" />
       <div class="row">
         <div>
           <label for="producto_id">Sale</label>
@@ -603,7 +604,7 @@
         nextSelectedValue = filteredOptions[0].value;
       }
 
-      incomingExistingSelect.innerHTML = "";
+      incomingExistingSelect.replaceChildren();
 
       if (filteredOptions.length === 0) {
         const emptyOption = document.createElement("option");

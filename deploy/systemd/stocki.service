@@ -1,0 +1,14 @@
+[Unit]
+Description=Stocki inventory service
+After=network.target
+
+[Service]
+Type=simple
+User=AlvaroC
+WorkingDirectory=/opt/stocki
+EnvironmentFile=/opt/stocki/.env
+ExecStart=/opt/stocki/stocki
+Restart=always
+
+[Install]
+WantedBy=multi-user.target

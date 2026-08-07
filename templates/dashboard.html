@@ -1143,28 +1143,46 @@
 	      const renderSales = (data) => {
 	        if (!salesTableBody) return;
 	        const sales = Array.isArray(data.sales) ? data.sales : [];
-	        salesTableBody.innerHTML = "";
+	        salesTableBody.replaceChildren();
 	        sales.forEach((s) => {
 	          const tr = document.createElement("tr");
-	          const cells = [
-	            String(s.id ?? "-"),
-	            String(s.fecha || "-"),
-	            `<span class="activity-tag ${s.tipo === "Uso interno" ? "uso_interno" : "venta"}">${s.tipo || "Venta"}</span>`,
-	            String(s.producto || "-"),
-	            String(s.cantidad ?? "-"),
-	            String(s.total || "-"),
-	            String(s.metodo_pago || "-")
-	          ];
-	          if (isAdmin && s.es_venta) {
-	            cells.push(`<button type="button" class="button secondary" data-sale-delete="${s.id}">Eliminar</button>`);
-	          } else if (isAdmin) {
-	            cells.push(`<span class="chart-note">Registro informativo</span>`);
+	          const addCell = (value) => {
+	            const td = document.createElement("td");
+	            td.textContent = String(value ?? "-");
+	            tr.appendChild(td);
+	          };
+	          addCell(s.id);
+	          addCell(s.fecha || "-");
+
+	          const typeCell = document.createElement("td");
+	          const typeTag = document.createElement("span");
+	          typeTag.className = `activity-tag ${s.tipo === "Uso interno" ? "uso_interno" : "venta"}`;
+	          typeTag.textContent = s.tipo || "Venta";
+	          typeCell.appendChild(typeTag);
+	          tr.appendChild(typeCell);
+
+	          addCell(s.producto || "-");
+	          addCell(s.cantidad);
+	          addCell(s.total || "-");
+	          addCell(s.metodo_pago || "-");
+
+	          if (isAdmin) {
+	            const actionCell = document.createElement("td");
+	            if (s.es_venta) {
+	              const button = document.createElement("button");
+	              button.type = "button";
+	              button.className = "button secondary";
+	              button.dataset.saleDelete = String(s.id);
+	              button.textContent = "Anular";
+	              actionCell.appendChild(button);
+	            } else {
+	              const note = document.createElement("span");
+	              note.className = "chart-note";
+	              note.textContent = "Registro informativo";
+	              actionCell.appendChild(note);
+	            }
+	            tr.appendChild(actionCell);
 	          }
-	          tr.innerHTML = cells.map((c, i) => {
-	            if (isAdmin && i === cells.length - 1) return `<td>${c}</td>`;
-	            if (i === 2) return `<td>${c}</td>`;
-	            return `<td>${c}</td>`;
-	          }).join("");
 	          salesTableBody.appendChild(tr);
 	        });
 	      };
@@ -1229,15 +1247,16 @@
 	          if (!btn) return;
 	          const saleId = String(btn.getAttribute("data-sale-delete") || "").trim();
 	          if (!saleId) return;
-	          if (!window.confirm("¿Eliminar esta venta? Esta acción no se puede deshacer.")) return;
+	          if (!window.confirm("¿Anular esta venta y reponer sus unidades?")) return;
 	          btn.setAttribute("disabled", "disabled");
 	          try {
 	            const resp = await fetch("/dashboard/ventas/delete", {
 	              method: "POST",
-	              headers: {
-	                "Content-Type": "application/x-www-form-urlencoded",
-	                "Accept": "application/json"
-	              },
+                headers: {
+                  "Content-Type": "application/x-www-form-urlencoded",
+                  "Accept": "application/json",
+                  "X-CSRF-Token": window.appCsrfToken()
+                },
 	              body: new URLSearchParams({ venta_id: saleId }).toString()
 	            });
 	            const data = await resp.json().catch(() => ({}));

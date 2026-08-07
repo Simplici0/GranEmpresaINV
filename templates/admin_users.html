@@ -320,6 +320,7 @@
     <section class="card">
       <h2>Crear usuario</h2>
       <form method="POST" action="/admin/users/create">
+        <input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" />
         <div class="row">
           <div>
             <label for="new-username">Usuario</label>
@@ -389,6 +390,7 @@
               <summary>Administrar</summary>
               <div class="inline-form">
                 <form method="POST" action="/admin/users/update">
+                  <input type="hidden" name="csrf_token" value="{{$.CurrentUser.CSRFToken}}" />
                   <input type="hidden" name="id" value="{{.ID}}" />
                   <div class="row">
                     <div>
@@ -426,6 +428,7 @@
 
               <div class="inline-form">
                 <form method="POST" action="/admin/users/password">
+                  <input type="hidden" name="csrf_token" value="{{$.CurrentUser.CSRFToken}}" />
                   <input type="hidden" name="id" value="{{.ID}}" />
                   <div class="row">
                     <div>
@@ -441,6 +444,7 @@
 
               <div class="inline-form">
                 <form method="POST" action="/admin/users/delete" onsubmit="return confirm('¿Eliminar este usuario?');">
+                  <input type="hidden" name="csrf_token" value="{{$.CurrentUser.CSRFToken}}" />
                   <input type="hidden" name="id" value="{{.ID}}" />
                   <div class="actions">
                     <button class="danger" type="submit">Eliminar</button>

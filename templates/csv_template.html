@@ -381,7 +381,7 @@
       <section class="import-panel">
       <div>
         <h2>Agregar productos con CSV</h2>
-        <p>Carga un CSV para crear/actualizar productos y crear unidades según cantidad.</p>
+        <p>Carga un CSV para crear/actualizar productos y crear unidades según cantidad. Los precios se expresan en COP enteros.</p>
       </div>
       <div class="import-actions">
         <button class="secondary" id="download-template">Descargar plantilla CSV</button>
@@ -633,17 +633,22 @@
           errors.push("Cantidad debe ser entero mayor o igual a 0.");
         }
 
+        const parseMoney = (value) => {
+          const normalized = String(value || "").trim().replace(/[$\s]/g, "");
+          if (!/^\d+(?:[.,]\d{3})*$/.test(normalized)) return NaN;
+          return Number(normalized.replace(/[.,]/g, ""));
+        };
         const parseNumber = (value) => Number(String(value).replace(",", "."));
-        const precioBaseNum = parseNumber(precioBase);
-        if (precioBase === "" || Number.isNaN(precioBaseNum) || precioBaseNum < 0) {
+        const precioBaseNum = parseMoney(precioBase);
+        if (precioBase === "" || Number.isNaN(precioBaseNum) || !Number.isInteger(precioBaseNum) || precioBaseNum < 0) {
           errors.push("Precio base inválido.");
         }
-        const precioVentaNum = parseNumber(precioVenta);
-        if (precioVenta === "" || Number.isNaN(precioVentaNum) || precioVentaNum < 0) {
+        const precioVentaNum = parseMoney(precioVenta);
+        if (precioVenta === "" || Number.isNaN(precioVentaNum) || !Number.isInteger(precioVentaNum) || precioVentaNum < 0) {
           errors.push("Precio venta inválido.");
         }
-        const precioConsultoraNum = parseNumber(precioConsultora);
-        if (precioConsultora === "" || Number.isNaN(precioConsultoraNum) || precioConsultoraNum < 0) {
+        const precioConsultoraNum = parseMoney(precioConsultora);
+        if (precioConsultora === "" || Number.isNaN(precioConsultoraNum) || !Number.isInteger(precioConsultoraNum) || precioConsultoraNum < 0) {
           errors.push("Precio consultora inválido.");
         }
 
@@ -690,48 +695,63 @@
 
     const renderPreview = (rows) => {
       const previewRows = rows.slice(0, 10);
-      uploadPreviewBody.innerHTML = "";
+      uploadPreviewBody.replaceChildren();
       if (previewRows.length === 0) {
-        uploadPreviewBody.innerHTML = `
-          <tr>
-            <td colspan="13" style="text-align: center; color: var(--muted);">Sin filas para mostrar.</td>
-          </tr>
-        `;
+        const emptyRow = document.createElement("tr");
+        const emptyCell = document.createElement("td");
+        emptyCell.colSpan = 13;
+        emptyCell.style.textAlign = "center";
+        emptyCell.style.color = "var(--muted)";
+        emptyCell.textContent = "Sin filas para mostrar.";
+        emptyRow.appendChild(emptyCell);
+        uploadPreviewBody.appendChild(emptyRow);
         return;
       }
       previewRows.forEach((row) => {
-        const errorMarkup = row.errors.length
-          ? `<span class="error-tag">Errores: ${row.errors.join(" ")}</span>`
-          : `<span class="success-tag">OK</span>`;
         const tr = document.createElement("tr");
-        tr.innerHTML = `
-          <td>${row.index}</td>
-          <td>${row.sku || "-"}</td>
-          <td>${row.linea || "-"}</td>
-          <td>${row.nombre || "-"}</td>
-          <td>${row.cantidad === "" ? "-" : row.cantidad}</td>
-          <td>${row.precioBase || "-"}</td>
-          <td>${row.precioVenta || "-"}</td>
-          <td>${row.precioConsultora || "-"}</td>
-          <td>${row.descuento || "-"}</td>
-          <td>${row.anotaciones || "-"}</td>
-          <td>${row.fechaCaducidad || "-"}</td>
-          <td>${row.aplicaCaducidad || "-"}</td>
-          <td>${errorMarkup}</td>
-        `;
+        const values = [
+          row.index,
+          row.sku || "-",
+          row.linea || "-",
+          row.nombre || "-",
+          row.cantidad === "" ? "-" : row.cantidad,
+          row.precioBase || "-",
+          row.precioVenta || "-",
+          row.precioConsultora || "-",
+          row.descuento || "-",
+          row.anotaciones || "-",
+          row.fechaCaducidad || "-",
+          row.aplicaCaducidad || "-"
+        ];
+        values.forEach((value) => {
+          const td = document.createElement("td");
+          td.textContent = String(value);
+          tr.appendChild(td);
+        });
+        const statusCell = document.createElement("td");
+        const status = document.createElement("span");
+        status.className = row.errors.length ? "error-tag" : "success-tag";
+        status.textContent = row.errors.length ? `Errores: ${row.errors.join(" ")}` : "OK";
+        statusCell.appendChild(status);
+        tr.appendChild(statusCell);
         uploadPreviewBody.appendChild(tr);
       });
     };
 
     const updateStatus = (rows, errors) => {
       const validCount = rows.filter((row) => row.errors.length === 0).length;
-      uploadStatus.innerHTML = `
-        <span>Preview: ${rows.length} filas</span>
-        <span>Válidas: ${validCount}</span>
-        <span>Errores: ${rows.length - validCount}</span>
-      `;
+      uploadStatus.replaceChildren();
+      [
+        `Preview: ${rows.length} filas`,
+        `Válidas: ${validCount}`,
+        `Errores: ${rows.length - validCount}`
+      ].forEach((text) => {
+        const span = document.createElement("span");
+        span.textContent = text;
+        uploadStatus.appendChild(span);
+      });
 
-      validationErrors.innerHTML = "";
+      validationErrors.replaceChildren();
       if (errors.length) {
         if (validationPill) validationPill.textContent = "Validación pendiente";
         errors.forEach((error) => {
@@ -771,11 +791,15 @@
         const rows = parseCSV(text).filter((row) => row.some((cell) => cell.trim() !== ""));
 
         if (rows.length === 0) {
-          uploadPreviewBody.innerHTML = `
-            <tr>
-              <td colspan="13" style="text-align: center; color: var(--muted);">Sin filas para mostrar.</td>
-            </tr>
-          `;
+          uploadPreviewBody.replaceChildren();
+          const emptyRow = document.createElement("tr");
+          const emptyCell = document.createElement("td");
+          emptyCell.colSpan = 13;
+          emptyCell.style.textAlign = "center";
+          emptyCell.style.color = "var(--muted)";
+          emptyCell.textContent = "Sin filas para mostrar.";
+          emptyRow.appendChild(emptyCell);
+          uploadPreviewBody.appendChild(emptyRow);
           validatedRows = [];
           validationErrorsList = ["El archivo no contiene filas."];
           updateStatus(validatedRows, validationErrorsList);
@@ -803,18 +827,23 @@
         validationErrorsList = [];
         uploadButton.disabled = true;
         if (validateButton) validateButton.disabled = !currentFile;
-        uploadStatus.innerHTML = `
-          <span>Preview: 0 filas</span>
-          <span>Válidas: 0</span>
-          <span>Errores: 0</span>
-        `;
-        uploadPreviewBody.innerHTML = `
-          <tr>
-            <td colspan="13" style="text-align: center; color: var(--muted);">Sin archivo validado.</td>
-          </tr>
-        `;
+        uploadStatus.replaceChildren();
+        ["Preview: 0 filas", "Válidas: 0", "Errores: 0"].forEach((text) => {
+          const span = document.createElement("span");
+          span.textContent = text;
+          uploadStatus.appendChild(span);
+        });
+        uploadPreviewBody.replaceChildren();
+        const emptyRow = document.createElement("tr");
+        const emptyCell = document.createElement("td");
+        emptyCell.colSpan = 13;
+        emptyCell.style.textAlign = "center";
+        emptyCell.style.color = "var(--muted)";
+        emptyCell.textContent = "Sin archivo validado.";
+        emptyRow.appendChild(emptyCell);
+        uploadPreviewBody.appendChild(emptyRow);
         if (validationPill) validationPill.textContent = "Validación pendiente";
-        validationErrors.innerHTML = "";
+        validationErrors.replaceChildren();
         const li = document.createElement("li");
         li.textContent = "Selecciona un archivo y valida para ver la vista previa.";
         validationErrors.appendChild(li);
@@ -843,6 +872,7 @@
         try {
           const response = await fetch("/productos/csv", {
             method: "POST",
+            headers: { "X-CSRF-Token": window.appCsrfToken() },
             body: formData
           });
           let result = {};
@@ -858,19 +888,25 @@
           }
 
           const errorCount = result.failed_rows ? result.failed_rows.length : 0;
-          uploadResult.innerHTML = `
-            <strong>Resumen:</strong>
-            Productos creados: ${result.created_products || 0} ·
-            Productos actualizados: ${result.updated_products || 0} ·
-            Unidades creadas: ${result.created_units || 0} ·
-            Errores: ${errorCount}
-          `;
+          uploadResult.replaceChildren();
+          const summary = document.createElement("strong");
+          summary.textContent = "Resumen: ";
+          uploadResult.appendChild(summary);
+          uploadResult.appendChild(document.createTextNode(
+            `Productos creados: ${result.created_products || 0} · ` +
+            `Productos actualizados: ${result.updated_products || 0} · ` +
+            `Unidades creadas: ${result.created_units || 0} · ` +
+            `Errores: ${errorCount}`
+          ));
 
           if (errorCount > 0) {
-            const errorItems = result.failed_rows
-              .map((row) => `<li>Fila ${row.row} (SKU: ${row.sku || "-"}) → ${row.error}</li>`)
-              .join("");
-            uploadResult.insertAdjacentHTML("beforeend", `<ul>${errorItems}</ul>`);
+            const errorList = document.createElement("ul");
+            result.failed_rows.forEach((row) => {
+              const item = document.createElement("li");
+              item.textContent = `Fila ${row.row} (SKU: ${row.sku || "-"}) → ${row.error}`;
+              errorList.appendChild(item);
+            });
+            uploadResult.appendChild(errorList);
           }
 
           inventoryLink.style.display = "inline-flex";

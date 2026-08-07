@@ -249,6 +249,7 @@
           <span class="danger-badge">Irreversible</span>
         </header>
         <form class="danger-body reset-form" method="POST" action="/admin/settings/reset-users" data-confirm="RESET USUARIOS">
+          <input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" />
           <ul class="impact-list">
             <li>Se cierran todas las sesiones activas.</li>
             <li>Se borran todos los usuarios existentes.</li>
@@ -277,6 +278,7 @@
           <span class="danger-badge">Irreversible</span>
         </header>
         <form class="danger-body reset-form" method="POST" action="/admin/settings/reset-business" data-confirm="RESET INVENTARIO">
+          <input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" />
           <ul class="impact-list">
             <li>Se borran productos, unidades y movimientos.</li>
             <li>Se borran ventas, cambios y retomas.</li>

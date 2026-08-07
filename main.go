@@ -10,15 +10,15 @@ import (
 	"fmt"
 	"html/template"
 	"log"
-	"math"
 	"net/http"
 	"net/url"
 	"os"
+	"os/signal"
 	"path/filepath"
 	"sort"
 	"strconv"
 	"strings"
-	"sync"
+	"syscall"
 	"time"
 
 	_ "modernc.org/sqlite"
@@ -45,7 +45,7 @@ type productOption struct {
 	Name         string
 	Line         string
 	FechaIngreso string
-	SalePrice    float64
+	SalePrice    int64
 	Units        []unitOption
 }
 
@@ -84,7 +84,7 @@ type inventoryProduct struct {
 	FechaIngreso      string
 	MesesEnStock      int
 	AlertaPermanencia bool
-	SalePrice         float64
+	SalePrice         int64
 }
 
 type inventoryCounts struct {
@@ -135,8 +135,7 @@ func upsertProducto(exec sqlExecer, sku, nombre, linea, now string) error {
 	return err
 }
 
-func seedProductosIfMissing(db *sql.DB, defaults []productOption) error {
-	// Backfill unknown products that already exist in inventory units.
+func ensureProductsForUnits(db *sql.DB) error {
 	if _, err := db.Exec(`
 		INSERT OR IGNORE INTO productos (sku, id, nombre, linea, fecha_ingreso)
 		SELECT DISTINCT producto_id, producto_id, producto_id, 'Sin línea', CURRENT_TIMESTAMP
@@ -144,7 +143,10 @@ func seedProductosIfMissing(db *sql.DB, defaults []productOption) error {
 	`); err != nil {
 		return err
 	}
+	return nil
+}
 
+func seedProductosIfMissing(db *sql.DB, defaults []productOption) error {
 	for _, p := range defaults {
 		if _, err := db.Exec(`
 			INSERT OR IGNORE INTO productos (sku, id, nombre, linea, fecha_ingreso)
@@ -153,11 +155,59 @@ func seedProductosIfMissing(db *sql.DB, defaults []productOption) error {
 			return err
 		}
 	}
-	return nil
+	return ensureProductsForUnits(db)
+}
+
+func ensureInventoryIntegrityTriggers(exec sqlExecer) error {
+	_, err := exec.Exec(`
+		CREATE TRIGGER IF NOT EXISTS trg_unidades_producto_insert
+		BEFORE INSERT ON unidades
+		WHEN NOT EXISTS (SELECT 1 FROM productos WHERE sku = NEW.producto_id OR id = NEW.producto_id)
+		BEGIN
+			SELECT RAISE(ABORT, 'producto inexistente');
+		END;
+		CREATE TRIGGER IF NOT EXISTS trg_unidades_producto_update
+		BEFORE UPDATE OF producto_id ON unidades
+		WHEN NOT EXISTS (SELECT 1 FROM productos WHERE sku = NEW.producto_id OR id = NEW.producto_id)
+		BEGIN
+			SELECT RAISE(ABORT, 'producto inexistente');
+		END;
+		CREATE TRIGGER IF NOT EXISTS trg_productos_money_insert
+		BEFORE INSERT ON productos
+		WHEN NEW.precio_base_cop < 0 OR NEW.precio_venta_cop < 0 OR NEW.precio_consultora_cop < 0
+		BEGIN
+			SELECT RAISE(ABORT, 'importe COP inválido');
+		END;
+		CREATE TRIGGER IF NOT EXISTS trg_productos_money_update
+		BEFORE UPDATE OF precio_base_cop, precio_venta_cop, precio_consultora_cop ON productos
+		WHEN NEW.precio_base_cop < 0 OR NEW.precio_venta_cop < 0 OR NEW.precio_consultora_cop < 0
+		BEGIN
+			SELECT RAISE(ABORT, 'importe COP inválido');
+		END;
+		CREATE TRIGGER IF NOT EXISTS trg_ventas_money_insert
+		BEFORE INSERT ON ventas
+		WHEN NEW.precio_unitario_cop < 0 OR NEW.total_cop < 0
+		BEGIN
+			SELECT RAISE(ABORT, 'importe COP inválido');
+		END;
+		CREATE TRIGGER IF NOT EXISTS trg_ventas_money_update
+		BEFORE UPDATE OF precio_unitario_cop, total_cop ON ventas
+		WHEN NEW.precio_unitario_cop < 0 OR NEW.total_cop < 0
+		BEGIN
+			SELECT RAISE(ABORT, 'importe COP inválido');
+		END;
+	`)
+	return err
 }
 
 func loadProductos(db *sql.DB) ([]productOption, error) {
-	rows, err := db.Query(`SELECT sku, nombre, linea, COALESCE(fecha_ingreso, ''), COALESCE(precio_venta, 0) FROM productos ORDER BY sku`)
+	rows, err := db.Query(`
+		SELECT sku, nombre, linea, COALESCE(fecha_ingreso, ''),
+		       CASE WHEN COALESCE(precio_venta_cop, 0) <> 0
+		            THEN precio_venta_cop
+		            ELSE CAST(ROUND(COALESCE(precio_venta, 0)) AS INTEGER)
+		       END
+		FROM productos ORDER BY sku`)
 	if err != nil {
 		return nil, err
 	}
@@ -289,17 +339,17 @@ type estadoCount struct {
 }
 
 type metodoPagoTotal struct {
-	Metodo   string  `json:"metodo"`
-	Cantidad int     `json:"cantidad"`
-	Total    string  `json:"total"`
-	Value    float64 `json:"value"`
+	Metodo   string `json:"metodo"`
+	Cantidad int    `json:"cantidad"`
+	Total    string `json:"total"`
+	Value    int64  `json:"value"`
 }
 
 type timelinePoint struct {
-	Fecha    string  `json:"fecha"`
-	Cantidad int     `json:"cantidad"`
-	Total    string  `json:"total"`
-	Value    float64 `json:"value"`
+	Fecha    string `json:"fecha"`
+	Cantidad int    `json:"cantidad"`
+	Total    string `json:"total"`
+	Value    int64  `json:"value"`
 }
 
 type dashboardSaleDetail struct {
@@ -327,7 +377,7 @@ type dashboardData struct {
 	MetodosPago     []metodoPagoTotal
 	PieSlices       []pieSlice
 	PieTotal        string
-	MaxTimeline     float64
+	MaxTimeline     int64
 	MaxTimelineText string
 	Timeline        []timelinePoint
 	Sales           []dashboardSaleDetail
@@ -349,7 +399,7 @@ type dashboardDataResponse struct {
 	MetodosPago     []metodoPagoTotal     `json:"metodos_pago"`
 	PieSlices       []pieSlice            `json:"pie_slices"`
 	PieTotal        string                `json:"pie_total"`
-	MaxTimeline     float64               `json:"max_timeline"`
+	MaxTimeline     int64                 `json:"max_timeline"`
 	MaxTimelineText string                `json:"max_timeline_text"`
 	Timeline        []timelinePoint       `json:"timeline"`
 	Sales           []dashboardSaleDetail `json:"sales"`
@@ -362,36 +412,36 @@ func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, end
 		RangeEnd:   endStr,
 	}
 
-	var rangeTotal float64
+	var rangeTotal int64
 	var rangeCount int
 	if err := db.QueryRow(`
 		SELECT
-			COALESCE(SUM(precio_final * cantidad), 0),
+			COALESCE(SUM(total_cop), 0),
 			COALESCE(COUNT(*), 0)
 		FROM ventas
-		WHERE date(fecha) BETWEEN ? AND ?`, startStr, endStr).Scan(&rangeTotal, &rangeCount); err != nil {
+		WHERE estado = 'confirmada' AND date(fecha) BETWEEN ? AND ?`, startStr, endStr).Scan(&rangeTotal, &rangeCount); err != nil {
 		return dashboardDataResponse{}, err
 	}
 	resp.RangeTotal = formatCurrency(rangeTotal)
 	resp.RangeCount = rangeCount
 
 	metodoRows, err := db.Query(`
-		SELECT metodo_pago, COUNT(*), SUM(precio_final * cantidad)
+		SELECT metodo_pago, COUNT(*), SUM(total_cop)
 		FROM ventas
-		WHERE date(fecha) BETWEEN ? AND ?
+		WHERE estado = 'confirmada' AND date(fecha) BETWEEN ? AND ?
 		GROUP BY metodo_pago
-		ORDER BY SUM(precio_final * cantidad) DESC`, startStr, endStr)
+		ORDER BY SUM(total_cop) DESC`, startStr, endStr)
 	if err != nil {
 		return dashboardDataResponse{}, err
 	}
 	defer metodoRows.Close()
 
 	metodosPago := []metodoPagoTotal{}
-	totalPago := 0.0
+	totalPago := int64(0)
 	for metodoRows.Next() {
 		var metodo string
 		var cantidad int
-		var total float64
+		var total int64
 		if err := metodoRows.Scan(&metodo, &cantidad, &total); err != nil {
 			return dashboardDataResponse{}, err
 		}
@@ -414,7 +464,7 @@ func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, end
 	for i, metodo := range metodosPago {
 		percent := 0.0
 		if totalPago > 0 {
-			percent = (metodo.Value / totalPago) * 100
+			percent = (float64(metodo.Value) / float64(totalPago)) * 100
 		}
 		color := pieColors[i%len(pieColors)]
 		pieSlices = append(pieSlices, pieSlice{
@@ -427,9 +477,9 @@ func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, end
 	resp.PieSlices = pieSlices
 
 	timeRows, err := db.Query(`
-		SELECT date(fecha) as fecha, COUNT(*), SUM(precio_final * cantidad)
+		SELECT date(fecha) as fecha, COUNT(*), SUM(total_cop)
 		FROM ventas
-		WHERE date(fecha) BETWEEN ? AND ?
+		WHERE estado = 'confirmada' AND date(fecha) BETWEEN ? AND ?
 		GROUP BY date(fecha)
 		ORDER BY date(fecha)`, startStr, endStr)
 	if err != nil {
@@ -441,7 +491,7 @@ func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, end
 	for timeRows.Next() {
 		var fecha string
 		var cantidad int
-		var total float64
+		var total int64
 		if err := timeRows.Scan(&fecha, &cantidad, &total); err != nil {
 			return dashboardDataResponse{}, err
 		}
@@ -457,7 +507,7 @@ func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, end
 	}
 
 	timeline := []timelinePoint{}
-	maxTimeline := 0.0
+	maxTimeline := int64(0)
 	for cursor := startDate; !cursor.After(endDate); cursor = cursor.AddDate(0, 0, 1) {
 		fecha := cursor.Format("2006-01-02")
 		point, ok := timelineByDate[fecha]
@@ -485,11 +535,11 @@ func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, end
 			v.fecha,
 			COALESCE(p.nombre, v.producto_id),
 			v.cantidad,
-			v.precio_final,
+			v.total_cop,
 			v.metodo_pago
 		FROM ventas v
 		LEFT JOIN productos p ON p.sku = v.producto_id
-		WHERE date(v.fecha) BETWEEN ? AND ?
+		WHERE v.estado = 'confirmada' AND date(v.fecha) BETWEEN ? AND ?
 		ORDER BY v.fecha DESC, v.id DESC
 	`, startStr, endStr)
 	if err != nil {
@@ -504,10 +554,10 @@ func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, end
 			fechaRaw   string
 			producto   string
 			cantidad   int
-			precioUnit float64
+			total      int64
 			metodoPago string
 		)
-		if err := saleRows.Scan(&id, &fechaRaw, &producto, &cantidad, &precioUnit, &metodoPago); err != nil {
+		if err := saleRows.Scan(&id, &fechaRaw, &producto, &cantidad, &total, &metodoPago); err != nil {
 			return dashboardDataResponse{}, err
 		}
 		fecha := fechaRaw
@@ -519,7 +569,7 @@ func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, end
 			Fecha:      fecha,
 			Producto:   producto,
 			Cantidad:   cantidad,
-			Total:      formatCurrency(precioUnit * float64(cantidad)),
+			Total:      formatCurrency(total),
 			MetodoPago: metodoPago,
 			Tipo:       "Venta",
 			EsVenta:    true,
@@ -599,10 +649,11 @@ func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, end
 }
 
 type User struct {
-	ID       int
-	Username string
-	Role     string
-	IsActive bool
+	ID        int
+	Username  string
+	Role      string
+	IsActive  bool
+	CSRFToken string
 }
 
 type contextKey string
@@ -616,14 +667,6 @@ func findProduct(products []productOption, id string) (productOption, bool) {
 		}
 	}
 	return productOption{}, false
-}
-
-func buildEntranteIDs(prefix string, qty int) []string {
-	ids := make([]string, 0, qty)
-	for i := 1; i <= qty; i++ {
-		ids = append(ids, prefix+"-"+strconv.Itoa(i))
-	}
-	return ids
 }
 
 func buildSalientesMap(salientes []string) map[string]bool {
@@ -670,6 +713,47 @@ func ensureMovimientosTable(db *sql.DB) error {
 	return err
 }
 
+func ensureAuditEventsTable(exec sqlExecer) error {
+	_, err := exec.Exec(`
+		CREATE TABLE IF NOT EXISTS audit_events (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			event_type TEXT NOT NULL,
+			entity_type TEXT NOT NULL,
+			entity_id TEXT NOT NULL DEFAULT '',
+			username TEXT NOT NULL DEFAULT '',
+			details TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_audit_events_created_at ON audit_events (created_at);
+		CREATE INDEX IF NOT EXISTS idx_audit_events_entity ON audit_events (entity_type, entity_id);
+	`)
+	return err
+}
+
+func logAudit(tx *sql.Tx, eventType, entityType, entityID, details string, user *User, now string) error {
+	username := ""
+	if user != nil {
+		username = user.Username
+	}
+	_, err := tx.Exec(`
+		INSERT INTO audit_events (event_type, entity_type, entity_id, username, details, created_at)
+		VALUES (?, ?, ?, ?, ?, ?)
+	`, eventType, entityType, entityID, username, details, now)
+	return err
+}
+
+func writeAuditEvent(db *sql.DB, eventType, entityType, entityID, details string, user *User) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	if err := logAudit(tx, eventType, entityType, entityID, details, user, time.Now().Format(time.RFC3339)); err != nil {
+		return err
+	}
+	return tx.Commit()
+}
+
 func logMovimientos(tx *sql.Tx, productoID string, unidadIDs []string, tipo, nota string, user *User, now string) error {
 	username := ""
 	if user != nil {
@@ -689,8 +773,148 @@ func logMovimientos(tx *sql.Tx, productoID string, unidadIDs []string, tipo, not
 	return nil
 }
 
+type saleCancellationError string
+
+func (e saleCancellationError) Error() string { return string(e) }
+
+const (
+	errSaleNotFound         saleCancellationError = "venta no encontrada"
+	errSaleAlreadyCancelled saleCancellationError = "venta ya anulada"
+	errSaleWithoutUnits     saleCancellationError = "venta sin unidades vinculadas"
+	errSaleInventoryChanged saleCancellationError = "inventario de venta cambiado"
+)
+
+func cancelSale(tx *sql.Tx, saleID int, user *User, reason string) error {
+	if user == nil {
+		return fmt.Errorf("usuario requerido")
+	}
+	var productID, state string
+	if err := tx.QueryRow(`SELECT producto_id, estado FROM ventas WHERE id = ?`, saleID).Scan(&productID, &state); err != nil {
+		if err == sql.ErrNoRows {
+			return errSaleNotFound
+		}
+		return err
+	}
+	if state != "confirmada" {
+		return errSaleAlreadyCancelled
+	}
+
+	rows, err := tx.Query(`SELECT unidad_id FROM venta_unidades WHERE venta_id = ? ORDER BY unidad_id`, saleID)
+	if err != nil {
+		return err
+	}
+	unitIDs := make([]string, 0)
+	for rows.Next() {
+		var unitID string
+		if err := rows.Scan(&unitID); err != nil {
+			rows.Close()
+			return err
+		}
+		unitIDs = append(unitIDs, unitID)
+	}
+	if err := rows.Err(); err != nil {
+		rows.Close()
+		return err
+	}
+	rows.Close()
+	if len(unitIDs) == 0 {
+		return errSaleWithoutUnits
+	}
+
+	placeholders := make([]string, len(unitIDs))
+	args := make([]any, 0, len(unitIDs)+1)
+	args = append(args, "Disponible")
+	for i, unitID := range unitIDs {
+		placeholders[i] = "?"
+		args = append(args, unitID)
+	}
+	query := fmt.Sprintf(
+		"UPDATE unidades SET estado = ? WHERE id IN (%s) AND estado IN ('Vendida', 'Vendido', 'sold')",
+		strings.Join(placeholders, ","),
+	)
+	result, err := tx.Exec(query, args...)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if int(affected) != len(unitIDs) {
+		return errSaleInventoryChanged
+	}
+
+	now := time.Now().Format(time.RFC3339)
+	if err := logMovimientos(tx, productID, unitIDs, "anulacion_venta", reason, user, now); err != nil {
+		return err
+	}
+	result, err = tx.Exec(`
+		UPDATE ventas
+		SET estado = 'anulada', anulada_en = ?, anulada_por = ?, anulacion_motivo = ?
+		WHERE id = ? AND estado = 'confirmada'
+	`, now, user.Username, reason, saleID)
+	if err != nil {
+		return err
+	}
+	affected, err = result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return errSaleAlreadyCancelled
+	}
+	if err := logAudit(tx, "sale.cancel", "venta", strconv.Itoa(saleID), reason, user, now); err != nil {
+		return err
+	}
+	return nil
+}
+
 func selectAndMarkUnitsSold(tx *sql.Tx, productID string, qty int) ([]string, error) {
 	return selectAndMarkUnitsByStatus(tx, productID, qty, "Vendida")
+}
+
+func selectAndMarkSpecificUnits(tx *sql.Tx, productID string, unitIDs []string, nextStatus string) ([]string, error) {
+	if strings.TrimSpace(productID) == "" || len(unitIDs) == 0 {
+		return nil, fmt.Errorf("unidades inválidas")
+	}
+
+	seen := make(map[string]struct{}, len(unitIDs))
+	for _, id := range unitIDs {
+		if strings.TrimSpace(id) == "" {
+			return nil, fmt.Errorf("unidad inválida")
+		}
+		if _, exists := seen[id]; exists {
+			return nil, fmt.Errorf("unidad repetida")
+		}
+		seen[id] = struct{}{}
+	}
+
+	placeholders := make([]string, len(unitIDs))
+	args := make([]any, 0, len(unitIDs)+2)
+	args = append(args, nextStatus, productID)
+	for i, id := range unitIDs {
+		placeholders[i] = "?"
+		args = append(args, id)
+	}
+	query := fmt.Sprintf(`
+		UPDATE unidades
+		SET estado = ?
+		WHERE producto_id = ?
+		  AND id IN (%s)
+		  AND estado IN ('Disponible', 'available')`, strings.Join(placeholders, ","))
+	result, err := tx.Exec(query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("update unidades seleccionadas: %w", err)
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return nil, fmt.Errorf("rows affected: %w", err)
+	}
+	if int(affected) != len(unitIDs) {
+		return nil, errInsufficientStock
+	}
+
+	return append([]string(nil), unitIDs...), nil
 }
 
 func selectAndMarkUnitsByStatus(tx *sql.Tx, productID string, qty int, nextStatus string) ([]string, error) {
@@ -802,9 +1026,8 @@ func availableCountsByProduct(db *sql.DB) (map[string]int, error) {
 	return out, nil
 }
 
-func formatCurrency(value float64) string {
-	rounded := int64(math.Round(value))
-	return "$" + formatIntDots(rounded)
+func formatCurrency(value int64) string {
+	return "$" + formatIntDots(value)
 }
 
 // formatIntDots formats an integer with '.' as thousands separator (e.g. 1234567 -> "1.234.567").
@@ -852,16 +1075,33 @@ func parseCOPInteger(raw string) (int, error) {
 	if raw == "" {
 		return 0, fmt.Errorf("empty")
 	}
-	digits := strings.Map(func(r rune) rune {
-		if r >= '0' && r <= '9' {
-			return r
-		}
-		return -1
-	}, raw)
-	if digits == "" {
+	clean := strings.ReplaceAll(raw, "$", "")
+	clean = strings.ReplaceAll(clean, " ", "")
+	if clean == "" || strings.HasPrefix(clean, "-") {
 		return 0, fmt.Errorf("invalid")
 	}
-	v, err := strconv.Atoi(digits)
+	clean = strings.TrimPrefix(clean, "+")
+	if clean == "" {
+		return 0, fmt.Errorf("invalid")
+	}
+	parts := strings.FieldsFunc(clean, func(r rune) bool { return r == '.' || r == ',' })
+	if strings.ContainsAny(clean, ".,") {
+		if len(parts) < 2 || len(parts[0]) < 1 || len(parts[0]) > 3 {
+			return 0, fmt.Errorf("invalid")
+		}
+		for i, part := range parts {
+			if i > 0 && len(part) != 3 {
+				return 0, fmt.Errorf("invalid")
+			}
+		}
+		clean = strings.Join(parts, "")
+	}
+	for _, r := range clean {
+		if r < '0' || r > '9' {
+			return 0, fmt.Errorf("invalid")
+		}
+	}
+	v, err := strconv.Atoi(clean)
 	if err != nil {
 		return 0, err
 	}
@@ -944,16 +1184,18 @@ func setSessionCookie(w http.ResponseWriter, token string, expiresAt time.Time, 
 		SameSite: http.SameSiteLaxMode,
 		Secure:   secure,
 		Expires:  expiresAt,
+		MaxAge:   int(time.Until(expiresAt).Seconds()),
 	})
 }
 
-func clearSessionCookie(w http.ResponseWriter) {
+func clearSessionCookie(w http.ResponseWriter, secure bool) {
 	http.SetCookie(w, &http.Cookie{
 		Name:     "session_token",
 		Value:    "",
 		Path:     "/",
 		HttpOnly: true,
 		SameSite: http.SameSiteLaxMode,
+		Secure:   secure,
 		MaxAge:   -1,
 	})
 }
@@ -974,14 +1216,15 @@ func userFromRequest(db *sql.DB, r *http.Request) (*User, error) {
 	var (
 		user       User
 		isActive   int
+		csrfToken  string
 		expiresRaw string
 	)
 	query := `
-		SELECT u.id, u.username, u.role, u.is_active, s.expires_at
+		SELECT u.id, u.username, u.role, u.is_active, s.csrf_token, s.expires_at
 		FROM sessions s
 		JOIN users u ON u.id = s.user_id
 		WHERE s.token = ?`
-	if err := db.QueryRow(query, cookie.Value).Scan(&user.ID, &user.Username, &user.Role, &isActive, &expiresRaw); err != nil {
+	if err := db.QueryRow(query, cookie.Value).Scan(&user.ID, &user.Username, &user.Role, &isActive, &csrfToken, &expiresRaw); err != nil {
 		return nil, err
 	}
 	expiresAt, err := time.Parse(time.RFC3339, expiresRaw)
@@ -997,6 +1240,16 @@ func userFromRequest(db *sql.DB, r *http.Request) (*User, error) {
 		_, _ = db.Exec("DELETE FROM sessions WHERE token = ?", cookie.Value)
 		return nil, sql.ErrNoRows
 	}
+	if csrfToken == "" {
+		csrfToken, err = generateToken()
+		if err != nil {
+			return nil, err
+		}
+		if _, err := db.Exec("UPDATE sessions SET csrf_token = ? WHERE token = ?", csrfToken, cookie.Value); err != nil {
+			return nil, err
+		}
+	}
+	user.CSRFToken = csrfToken
 	return &user, nil
 }
 
@@ -1101,6 +1354,190 @@ func validSQLiteIdentifier(name string) bool {
 	return true
 }
 
+func ensureSQLiteColumnTx(tx *sql.Tx, table, column, definition string) error {
+	if !validSQLiteIdentifier(table) || !validSQLiteIdentifier(column) {
+		return fmt.Errorf("invalid SQLite column target: %s.%s", table, column)
+	}
+	var exists int
+	if err := tx.QueryRow(
+		fmt.Sprintf("SELECT COUNT(*) FROM pragma_table_info('%s') WHERE name = ?", table),
+		column,
+	).Scan(&exists); err != nil {
+		return err
+	}
+	if exists > 0 {
+		return nil
+	}
+	_, err := tx.Exec(fmt.Sprintf("ALTER TABLE %s ADD COLUMN %s %s", table, column, definition))
+	return err
+}
+
+func ensureSchemaMigrations(db *sql.DB) error {
+	_, err := db.Exec(`
+		CREATE TABLE IF NOT EXISTS schema_migrations (
+			version INTEGER PRIMARY KEY,
+			applied_at TEXT NOT NULL
+		)
+	`)
+	return err
+}
+
+func applySchemaMigration(db *sql.DB, version int, migrate func(*sql.Tx) error) error {
+	var applied int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM schema_migrations WHERE version = ?`, version).Scan(&applied); err != nil {
+		return err
+	}
+	if applied > 0 {
+		return nil
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	if err := migrate(tx); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`INSERT INTO schema_migrations (version, applied_at) VALUES (?, ?)`, version, time.Now().Format(time.RFC3339)); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func migrateLegacySchema(tx *sql.Tx) error {
+	if err := ensureSQLiteColumnTx(tx, "productos", "id", "TEXT"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE productos SET id = sku WHERE id IS NULL OR id = ''"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_productos_id_unique ON productos(id)"); err != nil {
+		return err
+	}
+	if err := ensureSQLiteColumnTx(tx, "productos", "fecha_ingreso", "TEXT"); err != nil {
+		return err
+	}
+	if _, err := tx.Exec("UPDATE productos SET fecha_ingreso = CURRENT_TIMESTAMP WHERE fecha_ingreso IS NULL OR fecha_ingreso = ''"); err != nil {
+		return err
+	}
+	if err := ensureSQLiteColumnTx(tx, "ventas", "notas", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	if err := ensureSQLiteColumnTx(tx, "unidades", "caducidad", "TEXT"); err != nil {
+		return err
+	}
+	if err := ensureSQLiteColumnTx(tx, "sessions", "csrf_token", "TEXT NOT NULL DEFAULT ''"); err != nil {
+		return err
+	}
+	return nil
+}
+
+func migrateSalesSchema(tx *sql.Tx) error {
+	for _, column := range []struct {
+		name       string
+		definition string
+	}{
+		{name: "estado", definition: "TEXT NOT NULL DEFAULT 'confirmada'"},
+		{name: "anulada_en", definition: "TEXT"},
+		{name: "anulada_por", definition: "TEXT"},
+		{name: "anulacion_motivo", definition: "TEXT NOT NULL DEFAULT ''"},
+	} {
+		if err := ensureSQLiteColumnTx(tx, "ventas", column.name, column.definition); err != nil {
+			return err
+		}
+	}
+	if _, err := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS venta_unidades (
+			venta_id INTEGER NOT NULL,
+			unidad_id TEXT NOT NULL,
+			PRIMARY KEY (venta_id, unidad_id),
+			UNIQUE (unidad_id),
+			FOREIGN KEY (venta_id) REFERENCES ventas (id) ON DELETE CASCADE,
+			FOREIGN KEY (unidad_id) REFERENCES unidades (id) ON DELETE RESTRICT
+		);
+		CREATE INDEX IF NOT EXISTS idx_venta_unidades_unidad ON venta_unidades (unidad_id);
+	`); err != nil {
+		return err
+	}
+	return nil
+}
+
+func migrateMoneySchema(tx *sql.Tx) error {
+	for _, column := range []struct {
+		name       string
+		definition string
+	}{
+		{name: "precio_base_cop", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{name: "precio_venta_cop", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{name: "precio_consultora_cop", definition: "INTEGER NOT NULL DEFAULT 0"},
+	} {
+		if err := ensureSQLiteColumnTx(tx, "productos", column.name, column.definition); err != nil {
+			return err
+		}
+	}
+	for _, column := range []struct {
+		name       string
+		definition string
+	}{
+		{name: "precio_unitario_cop", definition: "INTEGER NOT NULL DEFAULT 0"},
+		{name: "total_cop", definition: "INTEGER NOT NULL DEFAULT 0"},
+	} {
+		if err := ensureSQLiteColumnTx(tx, "ventas", column.name, column.definition); err != nil {
+			return err
+		}
+	}
+	var invalidPrices int
+	if err := tx.QueryRow(`
+		SELECT
+			(SELECT COUNT(*) FROM productos WHERE COALESCE(precio_base, 0) < 0 OR COALESCE(precio_venta, 0) < 0 OR COALESCE(precio_consultora, 0) < 0) +
+			(SELECT COUNT(*) FROM ventas WHERE COALESCE(precio_final, 0) < 0)
+	`).Scan(&invalidPrices); err != nil {
+		return err
+	}
+	if invalidPrices > 0 {
+		return fmt.Errorf("la base contiene %d importes negativos", invalidPrices)
+	}
+	updates := []string{
+		"UPDATE productos SET precio_base_cop = CAST(ROUND(COALESCE(precio_base, 0)) AS INTEGER) WHERE precio_base_cop = 0 AND COALESCE(precio_base, 0) <> 0",
+		"UPDATE productos SET precio_venta_cop = CAST(ROUND(COALESCE(precio_venta, 0)) AS INTEGER) WHERE precio_venta_cop = 0 AND COALESCE(precio_venta, 0) <> 0",
+		"UPDATE productos SET precio_consultora_cop = CAST(ROUND(COALESCE(precio_consultora, 0)) AS INTEGER) WHERE precio_consultora_cop = 0 AND COALESCE(precio_consultora, 0) <> 0",
+		"UPDATE ventas SET precio_unitario_cop = CAST(ROUND(COALESCE(precio_final, 0)) AS INTEGER) WHERE precio_unitario_cop = 0 AND COALESCE(precio_final, 0) <> 0",
+		"UPDATE ventas SET total_cop = CAST(ROUND(COALESCE(precio_final, 0) * cantidad) AS INTEGER) WHERE total_cop = 0 AND COALESCE(precio_final, 0) <> 0",
+	}
+	for _, query := range updates {
+		if _, err := tx.Exec(query); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func migrateAuditSchema(tx *sql.Tx) error {
+	return ensureAuditEventsTable(tx)
+}
+
+func migrateIntegritySchema(tx *sql.Tx) error {
+	return ensureInventoryIntegrityTriggers(tx)
+}
+
+func demoSeedEnabled(db *sql.DB) bool {
+	raw := strings.ToLower(strings.TrimSpace(os.Getenv("SEED_DEMO")))
+	if raw != "1" && raw != "true" && raw != "yes" && raw != "on" {
+		return false
+	}
+	return !demoSeedDisabled(db)
+}
+
 func ensureAppMetaTable(exec sqlExecer) error {
 	_, err := exec.Exec(`
 		CREATE TABLE IF NOT EXISTS app_meta (
@@ -1124,8 +1561,13 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	if err != nil {
 		return nil, err
 	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
 
 	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		return nil, err
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
 		return nil, err
 	}
 	// Keep FK enforcement disabled during migrations/seeding to avoid startup failures
@@ -1143,6 +1585,9 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 		precio_base REAL NOT NULL DEFAULT 0,
 		precio_venta REAL NOT NULL DEFAULT 0,
 		precio_consultora REAL NOT NULL DEFAULT 0,
+		precio_base_cop INTEGER NOT NULL DEFAULT 0,
+		precio_venta_cop INTEGER NOT NULL DEFAULT 0,
+		precio_consultora_cop INTEGER NOT NULL DEFAULT 0,
 		descuento REAL NOT NULL DEFAULT 0,
 		anotaciones TEXT NOT NULL DEFAULT '',
 		aplica_caducidad INTEGER NOT NULL DEFAULT 0,
@@ -1157,10 +1602,17 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 		precio_final REAL NOT NULL,
 		metodo_pago TEXT NOT NULL,
 		notas TEXT NOT NULL DEFAULT '',
-		fecha TEXT NOT NULL
+		fecha TEXT NOT NULL,
+		precio_unitario_cop INTEGER NOT NULL DEFAULT 0,
+		total_cop INTEGER NOT NULL DEFAULT 0,
+		estado TEXT NOT NULL DEFAULT 'confirmada',
+		anulada_en TEXT,
+		anulada_por TEXT,
+		anulacion_motivo TEXT NOT NULL DEFAULT ''
 	);
 	CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas (fecha);
 	CREATE INDEX IF NOT EXISTS idx_ventas_metodo ON ventas (metodo_pago);
+	CREATE INDEX IF NOT EXISTS idx_ventas_estado_fecha ON ventas (estado, fecha);
 
 	CREATE TABLE IF NOT EXISTS unidades (
 		id TEXT PRIMARY KEY,
@@ -1184,9 +1636,19 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	CREATE TABLE IF NOT EXISTS sessions (
 		token TEXT PRIMARY KEY,
 		user_id INTEGER NOT NULL,
+		csrf_token TEXT NOT NULL DEFAULT '',
 		created_at TEXT NOT NULL,
 		expires_at TEXT NOT NULL,
 		FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+	);
+
+	CREATE TABLE IF NOT EXISTS venta_unidades (
+		venta_id INTEGER NOT NULL,
+		unidad_id TEXT NOT NULL,
+		PRIMARY KEY (venta_id, unidad_id),
+		UNIQUE (unidad_id),
+		FOREIGN KEY (venta_id) REFERENCES ventas (id) ON DELETE CASCADE,
+		FOREIGN KEY (unidad_id) REFERENCES unidades (id) ON DELETE RESTRICT
 	);
 	`
 
@@ -1201,66 +1663,27 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	if err := ensureMovimientosTable(db); err != nil {
 		return nil, err
 	}
-
-	// Legacy DB fix: precio_venta_historial has FK REFERENCES productos(id),
-	// but older productos tables may not have the "id" column.
-	var productosHasID int
-	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('productos') WHERE name = 'id'").Scan(&productosHasID); err != nil {
+	if err := ensureSchemaMigrations(db); err != nil {
 		return nil, err
 	}
-	if productosHasID == 0 {
-		if _, err := db.Exec("ALTER TABLE productos ADD COLUMN id TEXT"); err != nil {
-			return nil, err
-		}
-	}
-	// Backfill id for existing rows and ensure uniqueness so FKs can reference it.
-	if _, err := db.Exec("UPDATE productos SET id = sku WHERE id IS NULL OR id = ''"); err != nil {
+	if err := applySchemaMigration(db, 1, migrateLegacySchema); err != nil {
 		return nil, err
 	}
-	if _, err := db.Exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_productos_id_unique ON productos(id)"); err != nil {
+	if err := applySchemaMigration(db, 2, migrateSalesSchema); err != nil {
 		return nil, err
 	}
-
-	// Ensure fecha_ingreso exists for permanence-based alerts.
-	var productosHasFecha int
-	if err := db.QueryRow("SELECT COUNT(*) FROM pragma_table_info('productos') WHERE name = 'fecha_ingreso'").Scan(&productosHasFecha); err != nil {
+	if err := applySchemaMigration(db, 3, migrateMoneySchema); err != nil {
 		return nil, err
 	}
-	if productosHasFecha == 0 {
-		if _, err := db.Exec("ALTER TABLE productos ADD COLUMN fecha_ingreso TEXT"); err != nil {
-			return nil, err
-		}
-	}
-	// Backfill missing timestamps (use CURRENT_TIMESTAMP so we always have a value).
-	if _, err := db.Exec("UPDATE productos SET fecha_ingreso = CURRENT_TIMESTAMP WHERE fecha_ingreso IS NULL OR fecha_ingreso = ''"); err != nil {
+	if err := applySchemaMigration(db, 4, migrateAuditSchema); err != nil {
 		return nil, err
 	}
-
 	if _, err := db.Exec("PRAGMA foreign_keys=ON"); err != nil {
 		return nil, err
 	}
+	_, _ = db.Exec(`DELETE FROM sessions WHERE expires_at <= ?`, time.Now().Format(time.RFC3339))
 
-	var notasColumn string
-	if err := db.QueryRow("SELECT name FROM pragma_table_info('ventas') WHERE name = 'notas'").Scan(&notasColumn); err != nil && err != sql.ErrNoRows {
-		return nil, err
-	}
-	if notasColumn == "" {
-		if _, err := db.Exec("ALTER TABLE ventas ADD COLUMN notas TEXT NOT NULL DEFAULT ''"); err != nil {
-			return nil, err
-		}
-	}
-
-	var caducidadColumn string
-	if err := db.QueryRow("SELECT name FROM pragma_table_info('unidades') WHERE name = 'caducidad'").Scan(&caducidadColumn); err != nil && err != sql.ErrNoRows {
-		return nil, err
-	}
-	if caducidadColumn == "" {
-		if _, err := db.Exec("ALTER TABLE unidades ADD COLUMN caducidad TEXT"); err != nil {
-			return nil, err
-		}
-	}
-
-	seedDemoData := !demoSeedDisabled(db)
+	seedDemoData := demoSeedEnabled(db)
 	if seedDemoData {
 		var ventasCount int
 		if err := db.QueryRow("SELECT COUNT(*) FROM ventas").Scan(&ventasCount); err != nil {
@@ -1284,6 +1707,9 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 			}
 		}
 	}
+	if err := applySchemaMigration(db, 5, migrateIntegritySchema); err != nil {
+		return nil, err
+	}
 
 	if err := seedAdminUser(db); err != nil {
 		return nil, err
@@ -1297,8 +1723,8 @@ func seedVentas(db *sql.DB, paymentMethods []string) error {
 	if err != nil {
 		return err
 	}
-	stmt, err := tx.Prepare(`INSERT INTO ventas (producto_id, cantidad, precio_final, metodo_pago, notas, fecha)
-		VALUES (?, ?, ?, ?, ?, ?)`)
+	stmt, err := tx.Prepare(`INSERT INTO ventas (producto_id, cantidad, precio_final, metodo_pago, notas, fecha, precio_unitario_cop, total_cop)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?)`)
 	if err != nil {
 		if rollbackErr := tx.Rollback(); rollbackErr != nil {
 			return fmt.Errorf("prepare ventas: %w (rollback: %v)", err, rollbackErr)
@@ -1315,9 +1741,9 @@ func seedVentas(db *sql.DB, paymentMethods []string) error {
 		for j := 0; j < entries; j++ {
 			productoID := products[(i+j)%len(products)]
 			cantidad := (j % 3) + 1
-			precio := float64(18000 + (i * 1200) + (j * 800))
+			precio := int64(18000 + (i * 1200) + (j * 800))
 			metodo := paymentMethods[(i+j)%len(paymentMethods)]
-			if _, err := stmt.Exec(productoID, cantidad, precio, metodo, "Venta seed", date); err != nil {
+			if _, err := stmt.Exec(productoID, cantidad, float64(precio), metodo, "Venta seed", date, precio, precio*int64(cantidad)); err != nil {
 				if rollbackErr := tx.Rollback(); rollbackErr != nil {
 					return fmt.Errorf("insert ventas: %w (rollback: %v)", err, rollbackErr)
 				}
@@ -1530,7 +1956,6 @@ func resetBusinessData(db *sql.DB) error {
 		"credit_sales",
 		"customer_events",
 		"customers",
-		"audit_events",
 		"cambios",
 		"retomas",
 		"movimientos",
@@ -1627,6 +2052,7 @@ func main() {
 		log.Fatalf("Error al abrir SQLite: %v", err)
 	}
 	defer db.Close()
+	loginLimiter := newLoginRateLimiter()
 
 	// Diagnostics to confirm which DB is being used at runtime (helps debug login issues).
 	if wd, err := os.Getwd(); err == nil {
@@ -1651,7 +2077,6 @@ func main() {
 		}
 	}
 
-	var productsMu sync.RWMutex
 	defaultProducts := []productOption{
 		{
 			ID:   "P-001",
@@ -1669,13 +2094,14 @@ func main() {
 			Line: "Pediatría",
 		},
 	}
-	if !demoSeedDisabled(db) {
+	if demoSeedEnabled(db) {
 		if err := seedProductosIfMissing(db, defaultProducts); err != nil {
 			log.Fatalf("Error al seed de productos: %v", err)
 		}
+	} else if err := ensureProductsForUnits(db); err != nil {
+		log.Fatalf("Error al alinear productos con unidades: %v", err)
 	}
-	products, err := loadProductos(db)
-	if err != nil {
+	if _, err := loadProductos(db); err != nil {
 		log.Fatalf("Error al cargar productos: %v", err)
 	}
 
@@ -1773,6 +2199,13 @@ func main() {
 	})
 
 	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		ctx, cancel := context.WithTimeout(r.Context(), 2*time.Second)
+		defer cancel()
+		var one int
+		if err := db.QueryRowContext(ctx, "SELECT 1").Scan(&one); err != nil || one != 1 {
+			http.Error(w, "database unavailable", http.StatusServiceUnavailable)
+			return
+		}
 		w.WriteHeader(http.StatusOK)
 		_, _ = w.Write([]byte("ok"))
 	})
@@ -1804,6 +2237,24 @@ func main() {
 
 		username := strings.TrimSpace(r.FormValue("username"))
 		password := r.FormValue("password")
+		rateKey := loginRateLimitKey(r, username)
+		if allowed, retryAfter := loginLimiter.allow(rateKey); !allowed {
+			seconds := int(retryAfter.Seconds())
+			if seconds < 1 {
+				seconds = 1
+			}
+			w.Header().Set("Retry-After", strconv.Itoa(seconds))
+			data := loginPageData{
+				Title:    "Iniciar sesión",
+				Error:    "Demasiados intentos. Intenta de nuevo más tarde.",
+				Username: username,
+			}
+			w.WriteHeader(http.StatusTooManyRequests)
+			if err := tmpl.ExecuteTemplate(w, "login.html", data); err != nil {
+				http.Error(w, "Error al renderizar login", http.StatusInternalServerError)
+			}
+			return
+		}
 
 		var (
 			user     User
@@ -1816,6 +2267,7 @@ func main() {
 					WHERE username = ?
 				`, username).Scan(&user.ID, &user.Username, &hash, &user.Role, &isActive)
 		if err != nil || isActive != 1 {
+			loginLimiter.recordFailure(rateKey)
 			if err != nil {
 				log.Printf("login: lookup failed username=%q err=%v", username, err)
 			} else {
@@ -1834,6 +2286,7 @@ func main() {
 		}
 
 		if err := bcrypt.CompareHashAndPassword([]byte(hash), []byte(password)); err != nil {
+			loginLimiter.recordFailure(rateKey)
 			log.Printf("login: password mismatch username=%q", username)
 			data := loginPageData{
 				Title:    "Iniciar sesión",
@@ -1852,29 +2305,35 @@ func main() {
 			http.Error(w, "No se pudo generar sesión", http.StatusInternalServerError)
 			return
 		}
+		csrfToken, err := generateToken()
+		if err != nil {
+			http.Error(w, "No se pudo generar protección CSRF", http.StatusInternalServerError)
+			return
+		}
 		expiresAt := time.Now().Add(24 * time.Hour)
 		_, err = db.Exec(`
-			INSERT INTO sessions (token, user_id, created_at, expires_at)
-			VALUES (?, ?, ?, ?)
-		`, token, user.ID, time.Now().Format(time.RFC3339), expiresAt.Format(time.RFC3339))
+			INSERT INTO sessions (token, user_id, csrf_token, created_at, expires_at)
+			VALUES (?, ?, ?, ?, ?)
+		`, token, user.ID, csrfToken, time.Now().Format(time.RFC3339), expiresAt.Format(time.RFC3339))
 		if err != nil {
 			http.Error(w, "No se pudo guardar la sesión", http.StatusInternalServerError)
 			return
 		}
 
-		setSessionCookie(w, token, expiresAt, r.TLS != nil)
+		loginLimiter.recordSuccess(rateKey)
+		setSessionCookie(w, token, expiresAt, sessionCookieSecure())
 		http.Redirect(w, r, "/inventario", http.StatusSeeOther)
 	})
 
 	mux.HandleFunc("/logout", func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPost && r.Method != http.MethodGet {
+		if r.Method != http.MethodPost {
 			http.Error(w, "Método no permitido", http.StatusMethodNotAllowed)
 			return
 		}
 		if cookie, err := r.Cookie("session_token"); err == nil {
 			_, _ = db.Exec("DELETE FROM sessions WHERE token = ?", cookie.Value)
 		}
-		clearSessionCookie(w)
+		clearSessionCookie(w, sessionCookieSecure())
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 	})
 
@@ -1975,6 +2434,10 @@ func main() {
 			redirectWithMessage(w, r, "/admin/users", "", "Contraseña obligatoria.")
 			return
 		}
+		if len(password) < 8 {
+			redirectWithMessage(w, r, "/admin/users", "", "La contraseña debe tener al menos 8 caracteres.")
+			return
+		}
 		if role != "admin" && role != "empleado" {
 			redirectWithMessage(w, r, "/admin/users", "", "Rol inválido.")
 			return
@@ -2056,6 +2519,9 @@ func main() {
 			log.Printf("admin/users/create: insert failed username=%q err=%v", username, err)
 			redirectWithMessage(w, r, "/admin/users", "", userCreateErrorText(err))
 			return
+		}
+		if err := writeAuditEvent(db, "user.create", "user", username, "role="+role, userFromContext(r)); err != nil {
+			log.Printf("admin/users/create: audit failed username=%q err=%v", username, err)
 		}
 
 		redirectWithMessage(w, r, "/admin/users", "Usuario creado.", "")
@@ -2156,6 +2622,9 @@ func main() {
 		if willBeActive == 0 {
 			_, _ = db.Exec(`DELETE FROM sessions WHERE user_id = ?`, userID)
 		}
+		if err := writeAuditEvent(db, "user.update", "user", strconv.Itoa(userID), "role="+role, userFromContext(r)); err != nil {
+			log.Printf("admin/users/update: audit failed user_id=%d err=%v", userID, err)
+		}
 
 		redirectWithMessage(w, r, "/admin/users", "Usuario actualizado.", "")
 	}))
@@ -2181,6 +2650,10 @@ func main() {
 			redirectWithMessage(w, r, "/admin/users", "", "Contraseña obligatoria.")
 			return
 		}
+		if len(password) < 8 {
+			redirectWithMessage(w, r, "/admin/users", "", "La contraseña debe tener al menos 8 caracteres.")
+			return
+		}
 
 		hashed, err := bcrypt.GenerateFromPassword([]byte(password), bcrypt.DefaultCost)
 		if err != nil {
@@ -2200,6 +2673,9 @@ func main() {
 			return
 		}
 		_, _ = db.Exec(`DELETE FROM sessions WHERE user_id = ?`, userID)
+		if err := writeAuditEvent(db, "user.password_change", "user", strconv.Itoa(userID), "", userFromContext(r)); err != nil {
+			log.Printf("admin/users/password: audit failed user_id=%d err=%v", userID, err)
+		}
 		redirectWithMessage(w, r, "/admin/users", "Contraseña actualizada (sesiones cerradas).", "")
 	}))
 
@@ -2246,6 +2722,9 @@ func main() {
 			redirectWithMessage(w, r, "/admin/users", "", "No se pudo eliminar el usuario.")
 			return
 		}
+		if err := writeAuditEvent(db, "user.delete", "user", strconv.Itoa(userID), "", current); err != nil {
+			log.Printf("admin/users/delete: audit failed user_id=%d err=%v", userID, err)
+		}
 
 		redirectWithMessage(w, r, "/admin/users", "Usuario eliminado.", "")
 	}))
@@ -2280,7 +2759,10 @@ func main() {
 			redirectWithMessage(w, r, "/admin/settings", "", "No se pudo ejecutar el reset de usuarios: "+err.Error())
 			return
 		}
-		clearSessionCookie(w)
+		if err := writeAuditEvent(db, "admin.reset_users", "system", "", "", userFromContext(r)); err != nil {
+			log.Printf("admin/settings/reset-users: audit failed: %v", err)
+		}
+		clearSessionCookie(w, sessionCookieSecure())
 		http.Redirect(w, r, "/login", http.StatusSeeOther)
 	}))
 
@@ -2301,17 +2783,18 @@ func main() {
 			redirectWithMessage(w, r, "/admin/settings", "", "No se pudo ejecutar el reset de inventario: "+err.Error())
 			return
 		}
-		productsMu.Lock()
-		products = []productOption{}
-		productsMu.Unlock()
+		if err := writeAuditEvent(db, "admin.reset_business", "system", "", "", userFromContext(r)); err != nil {
+			log.Printf("admin/settings/reset-business: audit failed: %v", err)
+		}
 		redirectWithMessage(w, r, "/admin/settings", "Inventario, ventas, cambios, retomas y movimientos fueron eliminados.", "")
 	}))
 
 	mux.HandleFunc("/productos/new", adminOnly(func(w http.ResponseWriter, r *http.Request) {
-		productsMu.RLock()
-		productsSnapshot := make([]productOption, len(products))
-		copy(productsSnapshot, products)
-		productsMu.RUnlock()
+		productsSnapshot, err := loadProductos(db)
+		if err != nil {
+			http.Error(w, "No se pudo cargar el catálogo", http.StatusInternalServerError)
+			return
+		}
 		nextSKU, err := generateNextProductSKU(db)
 		if err != nil {
 			http.Error(w, "No se pudo generar el SKU", http.StatusInternalServerError)
@@ -2383,10 +2866,11 @@ func main() {
 		}
 
 		if len(errors) > 0 {
-			productsMu.RLock()
-			productsSnapshot := make([]productOption, len(products))
-			copy(productsSnapshot, products)
-			productsMu.RUnlock()
+			productsSnapshot, snapshotErr := loadProductos(db)
+			if snapshotErr != nil {
+				http.Error(w, "No se pudo cargar el catálogo", http.StatusInternalServerError)
+				return
+			}
 			nextSKU, skuErr := generateNextProductSKU(db)
 			if skuErr != nil {
 				http.Error(w, "No se pudo generar el SKU", http.StatusInternalServerError)
@@ -2430,7 +2914,7 @@ func main() {
 			http.Error(w, "No se pudo guardar el producto", http.StatusInternalServerError)
 			return
 		}
-		if _, err := tx.Exec(`UPDATE productos SET precio_venta = ? WHERE sku = ?`, float64(precioVenta), sku); err != nil {
+		if _, err := tx.Exec(`UPDATE productos SET precio_venta = ?, precio_venta_cop = ? WHERE sku = ?`, float64(precioVenta), precioVenta, sku); err != nil {
 			http.Error(w, "No se pudo guardar el precio del producto", http.StatusInternalServerError)
 			return
 		}
@@ -2450,34 +2934,15 @@ func main() {
 				return
 			}
 		}
+		if err := logAudit(tx, "product.create", "producto", sku, fmt.Sprintf("cantidad=%d", cantidad), userFromContext(r), now); err != nil {
+			http.Error(w, "No se pudo registrar auditoría del producto", http.StatusInternalServerError)
+			return
+		}
 
 		if err := tx.Commit(); err != nil {
 			http.Error(w, "No se pudo confirmar la transacción", http.StatusInternalServerError)
 			return
 		}
-
-		// Update in-memory catalog (used by inventario/cambio screens).
-		productsMu.Lock()
-		found := false
-		for idx := range products {
-			if products[idx].ID == sku {
-				products[idx].Name = nombre
-				products[idx].Line = linea
-				products[idx].SalePrice = float64(precioVenta)
-				found = true
-				break
-			}
-		}
-		if !found {
-			products = append(products, productOption{
-				ID:           sku,
-				Name:         nombre,
-				Line:         linea,
-				FechaIngreso: time.Now().Format("2006-01-02"),
-				SalePrice:    float64(precioVenta),
-			})
-		}
-		productsMu.Unlock()
 
 		redirectWithMessage(w, r, "/productos/new", "Producto agregado correctamente.", "")
 	}))
@@ -2595,7 +3060,7 @@ func main() {
 		}
 		currentUser := userFromContext(r)
 		if currentUser == nil || currentUser.Role != "admin" {
-			writeJSONError(http.StatusForbidden, "Solo administrador puede eliminar ventas.")
+			writeJSONError(http.StatusForbidden, "Solo administrador puede anular ventas.")
 			return
 		}
 		if err := r.ParseForm(); err != nil {
@@ -2608,18 +3073,34 @@ func main() {
 			writeJSONError(http.StatusBadRequest, "ID de venta inválido.")
 			return
 		}
-		res, err := db.Exec(`DELETE FROM ventas WHERE id = ?`, ventaID)
+		motivo := strings.TrimSpace(r.FormValue("motivo"))
+		tx, err := db.Begin()
 		if err != nil {
-			writeJSONError(http.StatusInternalServerError, "No se pudo eliminar la venta.")
+			writeJSONError(http.StatusInternalServerError, "No se pudo iniciar la anulación.")
 			return
 		}
-		affected, err := res.RowsAffected()
-		if err != nil || affected == 0 {
-			writeJSONError(http.StatusNotFound, "La venta no existe o ya fue eliminada.")
+		defer tx.Rollback()
+		if err := cancelSale(tx, ventaID, currentUser, motivo); err != nil {
+			switch err {
+			case errSaleNotFound:
+				writeJSONError(http.StatusNotFound, "La venta no existe.")
+			case errSaleAlreadyCancelled:
+				writeJSONError(http.StatusBadRequest, "La venta ya fue anulada.")
+			case errSaleWithoutUnits:
+				writeJSONError(http.StatusConflict, "La venta no tiene unidades vinculadas y no puede anularse automáticamente.")
+			case errSaleInventoryChanged:
+				writeJSONError(http.StatusConflict, "El inventario cambió y la venta no pudo anularse de forma segura.")
+			default:
+				writeJSONError(http.StatusInternalServerError, "No se pudo completar la anulación.")
+			}
+			return
+		}
+		if err := tx.Commit(); err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo confirmar la anulación.")
 			return
 		}
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "venta_id": ventaID})
+		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "venta_id": ventaID, "mensaje": "Venta anulada y unidades repuestas."})
 	})
 
 	mux.HandleFunc("/csv/ventas", func(w http.ResponseWriter, r *http.Request) {
@@ -2641,12 +3122,13 @@ func main() {
 				v.producto_id,
 				COALESCE(p.nombre, ''),
 				v.cantidad,
-				v.precio_final,
+				v.precio_unitario_cop,
+				v.total_cop,
 				v.metodo_pago,
 				v.notas
 			FROM ventas v
 			LEFT JOIN productos p ON p.sku = v.producto_id
-			WHERE date(v.fecha) BETWEEN ? AND ?
+			WHERE v.estado = 'confirmada' AND date(v.fecha) BETWEEN ? AND ?
 			ORDER BY v.fecha DESC, v.id DESC
 		`, startStr, endStr)
 		if err != nil {
@@ -2670,11 +3152,12 @@ func main() {
 				sku        string
 				nombre     string
 				cantidad   int
-				precioUnit float64
+				precioUnit int64
+				total      int64
 				metodo     string
 				notas      string
 			)
-			if err := rows.Scan(&id, &fechaRaw, &sku, &nombre, &cantidad, &precioUnit, &metodo, &notas); err != nil {
+			if err := rows.Scan(&id, &fechaRaw, &sku, &nombre, &cantidad, &precioUnit, &total, &metodo, &notas); err != nil {
 				http.Error(w, "Error al leer ventas.", http.StatusInternalServerError)
 				return
 			}
@@ -2682,15 +3165,14 @@ func main() {
 			if len(fechaRaw) >= 10 {
 				fecha = fechaRaw[:10]
 			}
-			total := precioUnit * float64(cantidad)
 			_ = cw.Write([]string{
 				strconv.Itoa(id),
 				fecha,
 				sku,
 				nombre,
 				strconv.Itoa(cantidad),
-				fmt.Sprintf("%.2f", precioUnit),
-				fmt.Sprintf("%.2f", total),
+				strconv.FormatInt(precioUnit, 10),
+				strconv.FormatInt(total, 10),
 				metodo,
 				notas,
 			})
@@ -2706,15 +3188,8 @@ func main() {
 		flash := r.URL.Query().Get("mensaje")
 		productsSnapshot, err := loadProductos(db)
 		if err != nil {
-			productsMu.RLock()
-			productsSnapshot = make([]productOption, len(products))
-			copy(productsSnapshot, products)
-			productsMu.RUnlock()
-		} else {
-			productsMu.Lock()
-			products = make([]productOption, len(productsSnapshot))
-			copy(products, productsSnapshot)
-			productsMu.Unlock()
+			http.Error(w, "Error al consultar productos", http.StatusInternalServerError)
+			return
 		}
 
 		inventoryProducts := make([]inventoryProduct, 0, len(productsSnapshot))
@@ -3080,14 +3555,14 @@ func main() {
 			writeJSONError(http.StatusBadRequest, "La línea del producto es obligatoria.")
 			return
 		}
-		newPrice := 0.0
+		newPrice := int64(0)
 		if priceValue != "" {
 			parsed, err := parseCOPInteger(priceValue)
 			if err != nil || parsed < 0 {
 				writeJSONError(http.StatusBadRequest, "Precio de venta inválido.")
 				return
 			}
-			newPrice = float64(parsed)
+			newPrice = int64(parsed)
 		}
 
 		tx, err := db.Begin()
@@ -3196,10 +3671,14 @@ func main() {
 			}
 		}
 		if _, err := tx.Exec(
-			`UPDATE productos SET nombre = ?, linea = ?, precio_venta = ? WHERE sku = ?`,
-			nameValue, lineValue, newPrice, productID,
+			`UPDATE productos SET nombre = ?, linea = ?, precio_venta = ?, precio_venta_cop = ? WHERE sku = ?`,
+			nameValue, lineValue, float64(newPrice), newPrice, productID,
 		); err != nil {
 			writeJSONError(http.StatusInternalServerError, "No se pudo actualizar el producto.")
+			return
+		}
+		if err := logAudit(tx, "product.stock_update", "producto", productID, fmt.Sprintf("stock=%d precio_venta_cop=%d", target, newPrice), currentUser, now); err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo registrar auditoría del ajuste.")
 			return
 		}
 
@@ -3207,16 +3686,6 @@ func main() {
 			writeJSONError(http.StatusInternalServerError, "No se pudo confirmar la transacción.")
 			return
 		}
-		productsMu.Lock()
-		for idx := range products {
-			if products[idx].ID == productID {
-				products[idx].Name = nameValue
-				products[idx].Line = lineValue
-				products[idx].SalePrice = newPrice
-				break
-			}
-		}
-		productsMu.Unlock()
 		message := "Producto actualizado correctamente."
 		if delta != 0 {
 			message = "Producto y stock actualizados correctamente."
@@ -3337,22 +3806,15 @@ func main() {
 			writeJSONError(http.StatusBadRequest, "No se pudo confirmar la eliminación del producto.")
 			return
 		}
+		if err := logAudit(tx, "product.delete", "producto", productID, "", currentUser, time.Now().Format(time.RFC3339)); err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudo registrar auditoría de la eliminación.")
+			return
+		}
 
 		if err := tx.Commit(); err != nil {
 			writeJSONError(http.StatusInternalServerError, "No se pudo confirmar la transacción.")
 			return
 		}
-
-		productsMu.Lock()
-		filtered := make([]productOption, 0, len(products))
-		for _, p := range products {
-			if p.ID == productID {
-				continue
-			}
-			filtered = append(filtered, p)
-		}
-		products = filtered
-		productsMu.Unlock()
 
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{
@@ -3416,8 +3878,8 @@ func main() {
 			return
 		}
 
-		var precioVenta float64
-		err := db.QueryRow(`SELECT COALESCE(precio_venta, 0) FROM productos WHERE sku = ?`, sku).Scan(&precioVenta)
+		var precioVenta int64
+		err := db.QueryRow(`SELECT COALESCE(precio_venta_cop, 0) FROM productos WHERE sku = ?`, sku).Scan(&precioVenta)
 		if err != nil {
 			if err == sql.ErrNoRows {
 				precioVenta = 0
@@ -3435,10 +3897,15 @@ func main() {
 	mux.HandleFunc("/venta/new", func(w http.ResponseWriter, r *http.Request) {
 		currentUser := userFromContext(r)
 
-		productsMu.RLock()
-		productsSnapshot := make([]productOption, len(products))
-		copy(productsSnapshot, products)
-		productsMu.RUnlock()
+		productsSnapshot, err := loadProductos(db)
+		if err != nil {
+			http.Error(w, "Error al consultar productos", http.StatusInternalServerError)
+			return
+		}
+		if len(productsSnapshot) == 0 {
+			http.Error(w, "No hay productos en el catálogo.", http.StatusConflict)
+			return
+		}
 
 		productID := r.URL.Query().Get("producto_id")
 		if productID == "" && len(productsSnapshot) > 0 {
@@ -3485,10 +3952,15 @@ func main() {
 
 	mux.HandleFunc("/cambio/new", func(w http.ResponseWriter, r *http.Request) {
 		currentUser := userFromContext(r)
-		productsMu.RLock()
-		productsSnapshot := make([]productOption, len(products))
-		copy(productsSnapshot, products)
-		productsMu.RUnlock()
+		productsSnapshot, err := loadProductos(db)
+		if err != nil {
+			http.Error(w, "Error al consultar productos", http.StatusInternalServerError)
+			return
+		}
+		if len(productsSnapshot) == 0 {
+			http.Error(w, "No hay productos en el catálogo.", http.StatusConflict)
+			return
+		}
 
 		productID := r.URL.Query().Get("producto_id")
 		if productID == "" {
@@ -3555,10 +4027,23 @@ func main() {
 			return
 		}
 
-		productsMu.RLock()
-		productsSnapshot := make([]productOption, len(products))
-		copy(productsSnapshot, products)
-		productsMu.RUnlock()
+		productsSnapshot, err := loadProductos(db)
+		if err != nil {
+			if wantsJSON {
+				writeJSONError(http.StatusInternalServerError, "Error al consultar productos.", nil)
+				return
+			}
+			http.Error(w, "Error al consultar productos", http.StatusInternalServerError)
+			return
+		}
+		if len(productsSnapshot) == 0 {
+			if wantsJSON {
+				writeJSONError(http.StatusConflict, "No hay productos en el catálogo.", nil)
+				return
+			}
+			http.Error(w, "No hay productos en el catálogo.", http.StatusConflict)
+			return
+		}
 
 		stockByProd, err := availableCountsByProduct(db)
 		if err != nil {
@@ -3598,23 +4083,25 @@ func main() {
 		}
 		if productID == "" {
 			errors["producto_id"] = "Selecciona un producto válido."
+		} else if !ok {
+			errors["producto_id"] = "Selecciona un producto válido."
 		}
-		precioParsed := 0.0
+		precioParsed := int64(0)
 		precioOk := false
 		if strings.TrimSpace(precioValue) != "" {
-			if parsed, err := strconv.ParseFloat(strings.TrimSpace(precioValue), 64); err == nil && parsed > 0 {
-				precioParsed = parsed
+			if parsed, err := parseCOPInteger(precioValue); err == nil && parsed > 0 {
+				precioParsed = int64(parsed)
 				precioOk = true
 			} else {
 				errors["precio_final_venta"] = "El precio debe ser un número mayor a 0."
 			}
 		}
 
-		valorFinalParsed := 0.0
+		valorFinalParsed := int64(0)
 		valorFinalOk := false
 		if strings.TrimSpace(valorVentaFinalValue) != "" {
-			if parsed, err := strconv.ParseFloat(strings.TrimSpace(valorVentaFinalValue), 64); err == nil && parsed > 0 {
-				valorFinalParsed = parsed
+			if parsed, err := parseCOPInteger(valorVentaFinalValue); err == nil && parsed > 0 {
+				valorFinalParsed = int64(parsed)
 				valorFinalOk = true
 			} else {
 				errors["valor_venta_final"] = "El valor final debe ser un número mayor a 0."
@@ -3680,10 +4167,12 @@ func main() {
 		}
 
 		precioFinal := precioParsed
+		totalVenta := precioFinal * int64(cantidad)
 		precioFinalText := precioValue
 		if valorFinalOk && cantidad > 0 {
-			precioFinal = valorFinalParsed / float64(cantidad)
-			precioFinalText = fmt.Sprintf("%.2f", precioFinal)
+			totalVenta = valorFinalParsed
+			precioFinal = totalVenta / int64(cantidad)
+			precioFinalText = strconv.FormatInt(precioFinal, 10)
 		}
 		tx, err := db.Begin()
 		if err != nil {
@@ -3745,11 +4234,12 @@ func main() {
 			return
 		}
 
-		if _, err := tx.Exec(
-			`INSERT INTO ventas (producto_id, cantidad, precio_final, metodo_pago, notas, fecha)
-			VALUES (?, ?, ?, ?, ?, ?)`,
-			productID, cantidad, precioFinal, metodoPago, notas, now,
-		); err != nil {
+		result, err := tx.Exec(
+			`INSERT INTO ventas (producto_id, cantidad, precio_final, metodo_pago, notas, fecha, precio_unitario_cop, total_cop)
+			VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
+			productID, cantidad, float64(precioFinal), metodoPago, notas, now, precioFinal, totalVenta,
+		)
+		if err != nil {
 			if rollbackErr := tx.Rollback(); rollbackErr != nil {
 				log.Printf("rollback venta insert: %v", rollbackErr)
 			}
@@ -3759,6 +4249,31 @@ func main() {
 			}
 			http.Error(w, "Error al registrar la venta", http.StatusInternalServerError)
 			return
+		}
+		saleID, err := result.LastInsertId()
+		if err != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				log.Printf("rollback venta id: %v", rollbackErr)
+			}
+			if wantsJSON {
+				writeJSONError(http.StatusInternalServerError, "Error al vincular la venta.", nil)
+				return
+			}
+			http.Error(w, "Error al vincular la venta", http.StatusInternalServerError)
+			return
+		}
+		for _, unitID := range soldUnitIDs {
+			if _, err := tx.Exec(`INSERT INTO venta_unidades (venta_id, unidad_id) VALUES (?, ?)`, saleID, unitID); err != nil {
+				if rollbackErr := tx.Rollback(); rollbackErr != nil {
+					log.Printf("rollback venta unidades: %v", rollbackErr)
+				}
+				if wantsJSON {
+					writeJSONError(http.StatusInternalServerError, "Error al vincular unidades de la venta.", nil)
+					return
+				}
+				http.Error(w, "Error al vincular unidades de la venta", http.StatusInternalServerError)
+				return
+			}
 		}
 
 		if err := tx.Commit(); err != nil {
@@ -3812,10 +4327,23 @@ func main() {
 			})
 		}
 
-		productsMu.RLock()
-		productsSnapshot := make([]productOption, len(products))
-		copy(productsSnapshot, products)
-		productsMu.RUnlock()
+		productsSnapshot, err := loadProductos(db)
+		if err != nil {
+			if wantsJSON {
+				writeJSONError(http.StatusInternalServerError, "Error al consultar productos.", nil)
+				return
+			}
+			http.Error(w, "Error al consultar productos", http.StatusInternalServerError)
+			return
+		}
+		if len(productsSnapshot) == 0 {
+			if wantsJSON {
+				writeJSONError(http.StatusConflict, "No hay productos en el catálogo.", nil)
+				return
+			}
+			http.Error(w, "No hay productos en el catálogo.", http.StatusConflict)
+			return
+		}
 
 		if r.Method != http.MethodPost {
 			if wantsJSON {
@@ -3907,6 +4435,8 @@ func main() {
 		if incomingMode == "existing" {
 			if incomingExistingID == "" {
 				errors["incoming_existing_id"] = "Selecciona el producto entrante."
+			} else if _, exists := findProduct(productsSnapshot, incomingExistingID); !exists {
+				errors["incoming_existing_id"] = "El producto entrante no es válido."
 			}
 			if incomingExistingQty <= 0 {
 				errors["incoming_existing_qty"] = "Ingresa una cantidad válida para la entrada."
@@ -3914,6 +4444,8 @@ func main() {
 		} else if incomingMode == "new" {
 			if incomingNewSKU == "" {
 				errors["incoming_new_sku"] = "Ingresa el SKU del producto nuevo."
+			} else if _, exists := findProduct(productsSnapshot, incomingNewSKU); exists {
+				errors["incoming_new_sku"] = "El SKU ya existe; selecciona el producto existente."
 			}
 			if incomingNewName == "" {
 				errors["incoming_new_name"] = "Ingresa el nombre del producto nuevo."
@@ -3971,8 +4503,7 @@ func main() {
 			return
 		}
 
-		outgoingQty := len(salientes)
-		salientesMarcadas, err := selectAndMarkUnitsByStatus(tx, productID, outgoingQty, "Cambio")
+		salientesMarcadas, err := selectAndMarkSpecificUnits(tx, productID, salientes, "Cambio")
 		if err != nil {
 			if rollbackErr := tx.Rollback(); rollbackErr != nil {
 				log.Printf("rollback cambio: %v", rollbackErr)
@@ -4031,22 +4562,33 @@ func main() {
 			return
 		}
 
-		entrantes := []string{}
-		if incomingMode == "existing" {
-			entrantes = buildEntranteIDs("ENT-"+incomingExistingID, incomingExistingQty)
-		} else {
-			entrantes = buildEntranteIDs("ENT-"+incomingNewSKU, incomingNewQty)
-		}
+		entrantes := make([]string, 0)
 
 		incomingProductID := incomingExistingID
 		incomingQty := incomingExistingQty
 		if incomingMode == "new" {
 			incomingProductID = incomingNewSKU
 			incomingQty = incomingNewQty
+			incomingLine := strings.TrimSpace(incomingNewLine)
+			if incomingLine == "" {
+				incomingLine = "Sin línea"
+			}
+			if err := upsertProducto(tx, incomingProductID, incomingNewName, incomingLine, now); err != nil {
+				if rollbackErr := tx.Rollback(); rollbackErr != nil {
+					log.Printf("rollback cambio producto entrante: %v", rollbackErr)
+				}
+				if wantsJSON {
+					writeJSONError(http.StatusInternalServerError, "Error al registrar el producto entrante.", nil)
+					return
+				}
+				http.Error(w, "Error al registrar el producto entrante", http.StatusInternalServerError)
+				return
+			}
 		}
 
+		baseIncomingID := time.Now().UnixNano()
 		for i := 0; i < incomingQty; i++ {
-			unitID := fmt.Sprintf("U-%d-%d", time.Now().UnixNano(), i+1)
+			unitID := fmt.Sprintf("U-%s-%d-%d", incomingProductID, baseIncomingID, i+1)
 			if _, err := tx.Exec(
 				`INSERT INTO unidades (id, producto_id, estado, creado_en, caducidad)
 				VALUES (?, ?, ?, ?, ?)`,
@@ -4062,6 +4604,29 @@ func main() {
 				http.Error(w, "Error al registrar unidades entrantes", http.StatusInternalServerError)
 				return
 			}
+			entrantes = append(entrantes, unitID)
+		}
+		if err := logMovimientos(tx, incomingProductID, entrantes, "cambio_entrada", notaMovimiento, currentUser, now); err != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				log.Printf("rollback cambio entrada log: %v", rollbackErr)
+			}
+			if wantsJSON {
+				writeJSONError(http.StatusInternalServerError, "Error al registrar movimiento de entrada.", nil)
+				return
+			}
+			http.Error(w, "Error al registrar movimiento de entrada", http.StatusInternalServerError)
+			return
+		}
+		if err := logAudit(tx, "inventory.change", "producto", productID, fmt.Sprintf("salientes=%d entrantes=%d", len(salientesMarcadas), len(entrantes)), currentUser, now); err != nil {
+			if rollbackErr := tx.Rollback(); rollbackErr != nil {
+				log.Printf("rollback cambio audit: %v", rollbackErr)
+			}
+			if wantsJSON {
+				writeJSONError(http.StatusInternalServerError, "Error al registrar auditoría del cambio.", nil)
+				return
+			}
+			http.Error(w, "Error al registrar auditoría del cambio", http.StatusInternalServerError)
+			return
 		}
 
 		if err := tx.Commit(); err != nil {
@@ -4072,7 +4637,6 @@ func main() {
 			http.Error(w, "Error al confirmar el cambio", http.StatusInternalServerError)
 			return
 		}
-
 		if wantsJSON {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{
@@ -4149,6 +4713,8 @@ func main() {
 			return
 		}
 
+		const maxCSVUploadBytes = 32 << 20
+		r.Body = http.MaxBytesReader(w, r.Body, maxCSVUploadBytes)
 		if err := r.ParseMultipartForm(32 << 20); err != nil {
 			writeJSONError(http.StatusBadRequest, "No se pudo leer el archivo.")
 			return
@@ -4170,6 +4736,22 @@ func main() {
 		if len(records) < 2 {
 			writeJSONError(http.StatusBadRequest, "El CSV no contiene filas para procesar.")
 			return
+		}
+		if len(records) > 10001 {
+			writeJSONError(http.StatusRequestEntityTooLarge, "El CSV supera el máximo de 10.000 filas.")
+			return
+		}
+		for _, row := range records {
+			if len(row) > 32 {
+				writeJSONError(http.StatusBadRequest, "El CSV contiene demasiadas columnas.")
+				return
+			}
+			for _, cell := range row {
+				if len(cell) > 4096 {
+					writeJSONError(http.StatusBadRequest, "El CSV contiene una celda demasiado larga.")
+					return
+				}
+			}
 		}
 
 		header := make([]string, len(records[0]))
@@ -4199,13 +4781,9 @@ func main() {
 			return strings.TrimSpace(row[pos])
 		}
 
-		parseCSVFloat := func(value string) (float64, error) {
-			value = strings.TrimSpace(value)
-			if value == "" {
-				return 0, fmt.Errorf("empty")
-			}
-			value = strings.ReplaceAll(value, ",", ".")
-			return strconv.ParseFloat(value, 64)
+		parseCSVMoney := func(value string) (int64, error) {
+			parsed, err := parseCOPInteger(value)
+			return int64(parsed), err
 		}
 
 		parseCSVInt := func(value string) (int, error) {
@@ -4261,16 +4839,18 @@ func main() {
 			}
 
 			// Validate numeric columns.
-			if _, err := parseCSVFloat(get(row, "precio_base")); err != nil {
+			precioBase, err := parseCSVMoney(get(row, "precio_base"))
+			if err != nil {
 				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Precio base inválido."})
 				continue
 			}
-			precioVenta, err := parseCSVFloat(get(row, "precio_venta"))
+			precioVenta, err := parseCSVMoney(get(row, "precio_venta"))
 			if err != nil {
 				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Precio venta inválido."})
 				continue
 			}
-			if _, err := parseCSVFloat(get(row, "precio_consultora")); err != nil {
+			precioConsultora, err := parseCSVMoney(get(row, "precio_consultora"))
+			if err != nil {
 				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Precio consultora inválido."})
 				continue
 			}
@@ -4301,6 +4881,13 @@ func main() {
 				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Error al preparar la fila."})
 				continue
 			}
+			var existingProductCount int
+			if err := tx.QueryRow(`SELECT COUNT(*) FROM productos WHERE sku = ?`, sku).Scan(&existingProductCount); err != nil {
+				_, _ = tx.Exec("ROLLBACK TO csv_row")
+				_, _ = tx.Exec("RELEASE csv_row")
+				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Error al comprobar producto."})
+				continue
+			}
 
 			// Persist catalog.
 			if err := upsertProducto(tx, sku, nombre, linea, now); err != nil {
@@ -4309,42 +4896,23 @@ func main() {
 				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Error al guardar producto."})
 				continue
 			}
-			if _, err := tx.Exec(`UPDATE productos SET precio_venta = ? WHERE sku = ?`, precioVenta, sku); err != nil {
+			if _, err := tx.Exec(`
+				UPDATE productos
+				SET precio_base = ?, precio_venta = ?, precio_consultora = ?,
+				    precio_base_cop = ?, precio_venta_cop = ?, precio_consultora_cop = ?
+				WHERE sku = ?`,
+				float64(precioBase), float64(precioVenta), float64(precioConsultora),
+				precioBase, precioVenta, precioConsultora, sku); err != nil {
 				_, _ = tx.Exec("ROLLBACK TO csv_row")
 				_, _ = tx.Exec("RELEASE csv_row")
 				resp.FailedRows = append(resp.FailedRows, csvFailedRow{Row: rowIndex, SKU: sku, Error: "Error al guardar precio de venta."})
 				continue
 			}
 
-			// Update in-memory catalog (used by inventario/cambio screens).
-			productsMu.Lock()
-			found := false
-			for idx := range products {
-				if products[idx].ID == sku {
-					products[idx].Name = nombre
-					products[idx].Line = linea
-					products[idx].SalePrice = precioVenta
-					found = true
-					break
-				}
-			}
-			if !found {
-				products = append(products, productOption{
-					ID:           sku,
-					Name:         nombre,
-					Line:         linea,
-					FechaIngreso: time.Now().Format("2006-01-02"),
-					SalePrice:    precioVenta,
-				})
-				resp.CreatedProducts++
-			} else {
-				resp.UpdatedProducts++
-			}
-			productsMu.Unlock()
-
 			// Insert units into DB (inventory source of truth).
 			baseID := time.Now().UnixNano()
 			rowFailed := false
+			rowCreatedUnits := 0
 			for j := 0; j < cantidad; j++ {
 				unitID := fmt.Sprintf("U-%s-%d", sku, baseID+int64(j))
 				var caducidad any = nil
@@ -4361,13 +4929,19 @@ func main() {
 					rowFailed = true
 					break
 				}
-				resp.CreatedUnits++
+				rowCreatedUnits++
 			}
 
 			if rowFailed {
 				continue
 			}
 			_, _ = tx.Exec("RELEASE csv_row")
+			if existingProductCount == 1 {
+				resp.UpdatedProducts++
+			} else {
+				resp.CreatedProducts++
+			}
+			resp.CreatedUnits += rowCreatedUnits
 		}
 
 		if err := tx.Commit(); err != nil {
@@ -4385,7 +4959,25 @@ func main() {
 
 	addr := ":" + port
 	log.Printf("Servidor activo en http://localhost:%s/inventario", port)
-	if err := http.ListenAndServe(addr, authMiddleware(db, mux)); err != nil {
+	server := &http.Server{
+		Addr:              addr,
+		Handler:           requestLoggingMiddleware(securityHeadersMiddleware(requestLimitsMiddleware(authMiddleware(db, csrfMiddleware(mux))))),
+		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       30 * time.Second,
+		WriteTimeout:      30 * time.Second,
+		IdleTimeout:       60 * time.Second,
+	}
+	shutdownContext, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	defer stop()
+	go func() {
+		<-shutdownContext.Done()
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		if err := server.Shutdown(ctx); err != nil {
+			log.Printf("Error al cerrar servidor: %v", err)
+		}
+	}()
+	if err := server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		log.Fatal(err)
 	}
 }

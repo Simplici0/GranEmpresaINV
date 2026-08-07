@@ -1868,6 +1868,7 @@
       </div>
       <div class="modal-body">
         <form id="action-form" class="modal-grid">
+          <input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" />
           <div id="action-error" class="modal-error" hidden></div>
           <div class="modal-row">
             <div>
@@ -1921,6 +1922,7 @@
       </div>
       <div class="modal-body">
         <form id="sale-form" class="modal-grid">
+          <input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" />
           <div id="sale-error" class="modal-error" hidden></div>
 
           <div class="modal-row">
@@ -1980,6 +1982,7 @@
       </div>
       <div class="modal-body">
         <form id="swap-form" class="modal-grid">
+          <input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" />
           <div id="swap-error" class="modal-error" hidden></div>
           <input id="swap-product-id" name="producto_id" type="hidden" />
 
@@ -2083,6 +2086,7 @@
       </div>
       <div class="modal-body">
         <form id="internal-use-form" class="modal-grid">
+          <input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" />
           <div id="internal-use-error" class="modal-error" hidden></div>
           <input id="internal-use-product-id" name="producto_id" type="hidden" />
 
@@ -2135,7 +2139,7 @@
         ingreso: "{{js .FechaIngreso}}",
         ageMonths: {{.MesesEnStock}},
         ageAlert: {{if .AlertaPermanencia}}true{{else}}false{{end}},
-        salePrice: {{printf "%.0f" .SalePrice}},
+        salePrice: {{.SalePrice}},
         statusClass: "{{js .EstadoClass}}",
         statusLabel: "{{js .EstadoLabel}}",
         available: {{.Disponible}},
@@ -2180,6 +2184,7 @@
     const exportChangesButton = document.getElementById("export-changes");
     let currentPage = 1;
     let currentFilteredItems = [];
+    const canEditProduct = {{if and .CurrentUser (eq .CurrentUser.Role "admin")}}true{{else}}false{{end}};
 
     const showToast = (message) => {
       if (!toast || !message) return;
@@ -2209,7 +2214,11 @@
       const lines = Array.from(new Set(products.map((product) => normalizeLine(product.line)))).sort((a, b) =>
         a.localeCompare(b, "es", { sensitivity: "base" })
       );
-      lineFilter.innerHTML = '<option value="all">Todas</option>';
+      lineFilter.replaceChildren();
+      const allOption = document.createElement("option");
+      allOption.value = "all";
+      allOption.textContent = "Todas";
+      lineFilter.appendChild(allOption);
       lines.forEach((line) => {
         const option = document.createElement("option");
         option.value = line;
@@ -2248,46 +2257,49 @@
         (product) => product.ageAlert || product.units.some((unit) => isExpiringSoon(unit.expires))
       ).length;
 
-      summary.innerHTML = `
-        <div class="summary-card">
-          <div class="summary-icon" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path d="M4 8.5 12 4l8 4.5v7L12 20l-8-4.5v-7Z" stroke-linejoin="round" />
-              <path d="m4.5 9 7.5 4 7.5-4M12 13v7" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </div>
-          <div class="summary-copy">
-            <h3>Productos</h3>
-            <span>${totalProducts}</span>
-            <div class="summary-caption">Total en catálogo</div>
-          </div>
-        </div>
-        <div class="summary-card">
-          <div class="summary-icon units" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path d="m8 13 5-8 7 4-5 8-7-4Z" stroke-linejoin="round" />
-              <path d="m5 16 7 4 3-5M13 9h.01" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </div>
-          <div class="summary-copy">
-            <h3>Unidades</h3>
-            <span>${totalUnits}</span>
-            <div class="summary-caption">Unidades disponibles</div>
-          </div>
-        </div>
-        <div class="summary-card">
-          <div class="summary-icon expiring" aria-hidden="true">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor">
-              <path d="M7 3v3M17 3v3M4 9h16M6 5h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z" stroke-linecap="round" stroke-linejoin="round" />
-            </svg>
-          </div>
-          <div class="summary-copy">
-            <h3>Por caducar</h3>
-            <span>${expiringProducts}</span>
-            <div class="summary-caption">Próximos 45 días</div>
-          </div>
-        </div>
-      `;
+      summary.replaceChildren();
+      const addSummaryCard = (title, value, caption, modifier, pathData) => {
+        const card = document.createElement("div");
+        card.className = "summary-card";
+        const icon = document.createElement("div");
+        icon.className = `summary-icon${modifier ? ` ${modifier}` : ""}`;
+        icon.setAttribute("aria-hidden", "true");
+        const svg = document.createElementNS("http://www.w3.org/2000/svg", "svg");
+        svg.setAttribute("viewBox", "0 0 24 24");
+        svg.setAttribute("fill", "none");
+        svg.setAttribute("stroke", "currentColor");
+        pathData.forEach(({ d, linecap, linejoin }) => {
+          const path = document.createElementNS("http://www.w3.org/2000/svg", "path");
+          path.setAttribute("d", d);
+          if (linecap) path.setAttribute("stroke-linecap", linecap);
+          if (linejoin) path.setAttribute("stroke-linejoin", linejoin);
+          svg.appendChild(path);
+        });
+        icon.appendChild(svg);
+        const copy = document.createElement("div");
+        copy.className = "summary-copy";
+        const heading = document.createElement("h3");
+        heading.textContent = title;
+        const amount = document.createElement("span");
+        amount.textContent = String(value);
+        const note = document.createElement("div");
+        note.className = "summary-caption";
+        note.textContent = caption;
+        copy.append(heading, amount, note);
+        card.append(icon, copy);
+        summary.appendChild(card);
+      };
+      addSummaryCard("Productos", totalProducts, "Total en catálogo", "", [
+        { d: "M4 8.5 12 4l8 4.5v7L12 20l-8-4.5v-7Z", linejoin: "round" },
+        { d: "m4.5 9 7.5 4 7.5-4M12 13v7", linecap: "round", linejoin: "round" }
+      ]);
+      addSummaryCard("Unidades", totalUnits, "Unidades disponibles", "units", [
+        { d: "m8 13 5-8 7 4-5 8-7-4Z", linejoin: "round" },
+        { d: "m5 16 7 4 3-5M13 9h.01", linecap: "round", linejoin: "round" }
+      ]);
+      addSummaryCard("Por caducar", expiringProducts, "Próximos 45 días", "expiring", [
+        { d: "M7 3v3M17 3v3M4 9h16M6 5h12a2 2 0 0 1 2 2v11a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2Z", linecap: "round", linejoin: "round" }
+      ]);
     };
 
     const isExpiringSoon = (dateString) => {
@@ -2365,7 +2377,7 @@
           ? "Mostrando 0 productos"
           : `Mostrando ${start} a ${end} de ${totalItems} productos`;
 
-      paginationControls.innerHTML = "";
+      paginationControls.replaceChildren();
       const makeButton = (label, page, options = {}) => {
         const button = document.createElement("button");
         button.type = "button";
@@ -2406,7 +2418,7 @@
         console.warn("Tabla de productos no disponible: falta #productTable.");
         return;
       }
-      productTable.innerHTML = "";
+      productTable.replaceChildren();
       const pageSize = getPageSize();
       const totalPages = Math.max(1, Math.ceil(items.length / pageSize));
       currentPage = Math.min(Math.max(1, currentPage), totalPages);
@@ -2414,7 +2426,11 @@
 
       if (pageItems.length === 0) {
         const emptyRow = document.createElement("tr");
-        emptyRow.innerHTML = `<td colspan="6" class="fifo-note">No hay productos que coincidan con los filtros.</td>`;
+        const emptyCell = document.createElement("td");
+        emptyCell.colSpan = 6;
+        emptyCell.className = "fifo-note";
+        emptyCell.textContent = "No hay productos que coincidan con los filtros.";
+        emptyRow.appendChild(emptyCell);
         productTable.appendChild(emptyRow);
         renderPagination(items.length, pageSize, 0);
         return;
@@ -2422,85 +2438,150 @@
 
       pageItems.forEach((product) => {
         const row = document.createElement("tr");
-        row.innerHTML = `
-          <td>
-            <div class="product-name" data-product="${product.id}">
-              ${product.name}
-              ${product.ageAlert ? `<span class="age-pill" title="En stock ${product.ageMonths} meses (fecha ingreso: ${product.ingreso || '-'})">+6 meses</span>` : ``}
-            </div>
-            <div class="fifo-note">SKU ${product.id} · ${product.available} disponibles · ${product.reserved} reservadas</div>
-          </td>
-          <td>${normalizeLine(product.line)}</td>
-          <td><span class="status ${product.statusClass}">${statusLabel(product.statusLabel)}</span></td>
-          <td>
-            <strong>${product.available}</strong>
-            <span class="fifo-note">disponibles</span>
-            ${product.reserved > 0 ? `<span class="stock-reserved">${product.reserved} reservadas</span>` : ``}
-          </td>
-          <td>
-            <div class="actions">
-              <input type="number" min="1" max="${Math.max(product.available, 1)}" value="1" data-qty="${product.id}" />
-              <button class="primary" data-action="sell" data-product="${product.id}">Vender</button>
-              <button class="secondary" data-action="swap" data-product="${product.id}">Cambio</button>
-            </div>
-          </td>
-          <td>
-            <div class="menu">
-              <button class="ghost" data-menu="${product.id}">⋮</button>
-              <div class="menu-panel" id="menu-${product.id}">
-                <button type="button" data-menu-action="reserve" data-product="${product.id}">Reservar unidades</button>
-                <button type="button" data-menu-action="damage" data-product="${product.id}">Registrar daño</button>
-                <button type="button" data-menu-action="internal_use" data-product="${product.id}">Uso interno</button>
-                {{if and .CurrentUser (eq .CurrentUser.Role "admin")}}
-                <button type="button" data-menu-action="edit_product" data-product="${product.id}">Editar producto</button>
-                {{end}}
-                <button type="button" data-menu-action="history" data-product="${product.id}">Ver historial</button>
-              </div>
-            </div>
-          </td>
-        `;
+        const textCell = (value, className = "") => {
+          const cell = document.createElement("td");
+          if (className) cell.className = className;
+          cell.textContent = String(value ?? "-");
+          return cell;
+        };
+        const setProductData = (element) => {
+          element.dataset.product = String(product.id);
+          return element;
+        };
+
+        const productCell = document.createElement("td");
+        const productName = setProductData(document.createElement("div"));
+        productName.className = "product-name";
+        productName.textContent = String(product.name || "-");
+        if (product.ageAlert) {
+          const agePill = document.createElement("span");
+          agePill.className = "age-pill";
+          agePill.title = `En stock ${product.ageMonths} meses (fecha ingreso: ${product.ingreso || "-"})`;
+          agePill.textContent = "+6 meses";
+          productName.appendChild(agePill);
+        }
+        const productNote = document.createElement("div");
+        productNote.className = "fifo-note";
+        productNote.textContent = `SKU ${product.id} · ${product.available} disponibles · ${product.reserved} reservadas`;
+        productCell.append(productName, productNote);
+        row.appendChild(productCell);
+
+        row.appendChild(textCell(normalizeLine(product.line)));
+        const statusCell = document.createElement("td");
+        const status = document.createElement("span");
+        status.className = `status ${String(product.statusClass || "")}`;
+        status.textContent = statusLabel(product.statusLabel);
+        statusCell.appendChild(status);
+        row.appendChild(statusCell);
+
+        const availableCell = document.createElement("td");
+        const available = document.createElement("strong");
+        available.textContent = String(product.available ?? 0);
+        const availableNote = document.createElement("span");
+        availableNote.className = "fifo-note";
+        availableNote.textContent = "disponibles";
+        availableCell.append(available, availableNote);
+        if (product.reserved > 0) {
+          const reserved = document.createElement("span");
+          reserved.className = "stock-reserved";
+          reserved.textContent = `${product.reserved} reservadas`;
+          availableCell.appendChild(reserved);
+        }
+        row.appendChild(availableCell);
+
+        const actionCell = document.createElement("td");
+        const actions = document.createElement("div");
+        actions.className = "actions";
+        const quantity = document.createElement("input");
+        quantity.type = "number";
+        quantity.min = "1";
+        quantity.max = String(Math.max(product.available, 1));
+        quantity.value = "1";
+        quantity.dataset.qty = String(product.id);
+        const sellButton = setProductData(document.createElement("button"));
+        sellButton.className = "primary";
+        sellButton.dataset.action = "sell";
+        sellButton.textContent = "Vender";
+        const swapButton = setProductData(document.createElement("button"));
+        swapButton.className = "secondary";
+        swapButton.dataset.action = "swap";
+        swapButton.textContent = "Cambio";
+        actions.append(quantity, sellButton, swapButton);
+        actionCell.appendChild(actions);
+        row.appendChild(actionCell);
+
+        const menuCell = document.createElement("td");
+        const menu = document.createElement("div");
+        menu.className = "menu";
+        const menuToggle = setProductData(document.createElement("button"));
+        menuToggle.className = "ghost";
+        menuToggle.dataset.menu = String(product.id);
+        menuToggle.textContent = "⋮";
+        const menuPanel = document.createElement("div");
+        menuPanel.className = "menu-panel";
+        menuPanel.id = `menu-${product.id}`;
+        const addMenuButton = (action, label) => {
+          const button = setProductData(document.createElement("button"));
+          button.type = "button";
+          button.dataset.menuAction = action;
+          button.textContent = label;
+          menuPanel.appendChild(button);
+        };
+        addMenuButton("reserve", "Reservar unidades");
+        addMenuButton("damage", "Registrar daño");
+        addMenuButton("internal_use", "Uso interno");
+        if (canEditProduct) addMenuButton("edit_product", "Editar producto");
+        addMenuButton("history", "Ver historial");
+        menu.append(menuToggle, menuPanel);
+        menuCell.appendChild(menu);
+        row.appendChild(menuCell);
 
         productTable.appendChild(row);
 
         const unitsRow = document.createElement("tr");
-        unitsRow.innerHTML = `
-          <td colspan="6" class="units-panel" id="units-${product.id}" style="display: none;">
-            <div class="units-header">
-              <h4>Unidades</h4>
-              <span class="fifo-note">Selección FIFO</span>
-            </div>
-            <table class="units-table" aria-label="Unidades del producto">
-              <thead>
-                <tr>
-                  <th>ID</th>
-                  <th>Ingreso</th>
-                  <th>Caduca</th>
-                  <th>Ubicación</th>
-                  <th>Estado</th>
-                  <th>FIFO</th>
-                </tr>
-              </thead>
-              <tbody>
-                ${product.units
-                  .map((unit, index) => {
-                    const fifoOrder = unit.fifo || (unit.statusClass === "available" ? index + 1 : "-");
-                    return `
-                      <tr>
-                        <td>${unit.id}</td>
-                        <td>${formatOptionalDate(unit.created)}</td>
-                        <td>${formatOptionalDate(unit.expires)}</td>
-                        <td>-</td>
-                        <td>${statusLabel(unit.statusLabel)}</td>
-                        <td><span class="unit-tag">${fifoOrder}</span></td>
-                      </tr>
-                    `;
-                  })
-                  .join("")}
-              </tbody>
-            </table>
-          </td>
-        </tr>
-        `;
+        const unitsCell = document.createElement("td");
+        unitsCell.colSpan = 6;
+        unitsCell.className = "units-panel";
+        unitsCell.id = `units-${product.id}`;
+        unitsCell.style.display = "none";
+        const unitsHeader = document.createElement("div");
+        unitsHeader.className = "units-header";
+        const unitsTitle = document.createElement("h4");
+        unitsTitle.textContent = "Unidades";
+        const fifoNote = document.createElement("span");
+        fifoNote.className = "fifo-note";
+        fifoNote.textContent = "Selección FIFO";
+        unitsHeader.append(unitsTitle, fifoNote);
+        const unitsTable = document.createElement("table");
+        unitsTable.className = "units-table";
+        unitsTable.setAttribute("aria-label", "Unidades del producto");
+        const unitsHead = document.createElement("thead");
+        const unitsHeadRow = document.createElement("tr");
+        ["ID", "Ingreso", "Caduca", "Ubicación", "Estado", "FIFO"].forEach((label) => {
+          const th = document.createElement("th");
+          th.textContent = label;
+          unitsHeadRow.appendChild(th);
+        });
+        unitsHead.appendChild(unitsHeadRow);
+        const unitsBody = document.createElement("tbody");
+        (Array.isArray(product.units) ? product.units : []).forEach((unit, index) => {
+          const unitRow = document.createElement("tr");
+          unitRow.appendChild(textCell(unit.id));
+          unitRow.appendChild(textCell(formatOptionalDate(unit.created)));
+          unitRow.appendChild(textCell(formatOptionalDate(unit.expires)));
+          unitRow.appendChild(textCell("-"));
+          unitRow.appendChild(textCell(statusLabel(unit.statusLabel)));
+          const fifoCell = document.createElement("td");
+          const fifoTag = document.createElement("span");
+          fifoTag.className = "unit-tag";
+          fifoTag.textContent = String(unit.fifo || (unit.statusClass === "available" ? index + 1 : "-"));
+          fifoCell.appendChild(fifoTag);
+          unitRow.appendChild(fifoCell);
+          unitsBody.appendChild(unitRow);
+        });
+        unitsTable.append(unitsHead, unitsBody);
+        unitsCell.append(unitsHeader, unitsTable);
+        unitsRow.appendChild(unitsCell);
 
         productTable.appendChild(unitsRow);
       });
@@ -2557,9 +2638,9 @@
       return n.toLocaleString("es-CO");
     };
     const parseCOP = (raw) => {
-      const digits = String(raw || "").replace(/[^\d]/g, "");
-      if (!digits) return NaN;
-      return Number(digits);
+      const normalized = String(raw || "").trim().replace(/[$\s]/g, "");
+      if (!/^\d+(?:[.,]\d{3})*$/.test(normalized)) return NaN;
+      return Number(normalized.replace(/[.,]/g, ""));
     };
 
     const saleModal = document.getElementById("sale-modal");
@@ -2933,7 +3014,7 @@
         nextSelected = filtered[0].value;
       }
 
-      swapExistingSelect.innerHTML = "";
+      swapExistingSelect.replaceChildren();
       if (filtered.length === 0) {
         const option = document.createElement("option");
         option.value = "";
@@ -2968,7 +3049,7 @@
 
     const populateSwapUnits = (product, defaultQty) => {
       if (!swapUnitList || !swapUnitsHint) return;
-      swapUnitList.innerHTML = "";
+      swapUnitList.replaceChildren();
       if (swapUnitDropdown) swapUnitDropdown.open = false;
       const availableUnits = (product?.units || []).filter((unit) => unit.statusClass === "available");
       swapUnitsHint.textContent = `${availableUnits.length} disponibles`;
@@ -3064,7 +3145,7 @@
         historyEmpty.textContent = "Sin movimientos registrados.";
       }
       if (historyTableWrap) historyTableWrap.hidden = true;
-      if (historyTbody) historyTbody.innerHTML = "";
+      if (historyTbody) historyTbody.replaceChildren();
 
       try {
         const resp = await fetch(`/productos/historial?${new URLSearchParams({ producto_id: product.id }).toString()}`);
@@ -3185,7 +3266,10 @@
           }
           const resp = await fetch(actionContext.endpoint, {
             method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+              "X-CSRF-Token": window.appCsrfToken()
+            },
             body
           });
           const data = await resp.json().catch(() => ({}));
@@ -3217,7 +3301,10 @@
           if (note) body.set("nota", note);
           const resp = await fetch("/inventario/producto/eliminar", {
             method: "POST",
-            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            headers: {
+              "Content-Type": "application/x-www-form-urlencoded",
+              "X-CSRF-Token": window.appCsrfToken()
+            },
             body
           });
           const data = await resp.json().catch(() => ({}));
@@ -3279,7 +3366,8 @@
             headers: {
               "Content-Type": "application/x-www-form-urlencoded",
               "Accept": "application/json",
-              "X-Requested-With": "XMLHttpRequest"
+              "X-Requested-With": "XMLHttpRequest",
+              "X-CSRF-Token": window.appCsrfToken()
             },
             body
           });
@@ -3339,7 +3427,8 @@
             headers: {
               "Content-Type": "application/x-www-form-urlencoded",
               "Accept": "application/json",
-              "X-Requested-With": "XMLHttpRequest"
+              "X-Requested-With": "XMLHttpRequest",
+              "X-CSRF-Token": window.appCsrfToken()
             },
             body
           });
@@ -3396,7 +3485,8 @@
             headers: {
               "Content-Type": "application/x-www-form-urlencoded",
               "Accept": "application/json",
-              "X-Requested-With": "XMLHttpRequest"
+              "X-Requested-With": "XMLHttpRequest",
+              "X-CSRF-Token": window.appCsrfToken()
             },
             body
           });

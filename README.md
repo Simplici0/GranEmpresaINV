@@ -1,141 +1,191 @@
-# GranEmpresaINV - Deploy en Hetzner
+# GranEmpresaINV - Despliegue en producción
 
-Esta guía cubre el despliegue en un VPS de Hetzner con Linux (Ubuntu/Debian), usando:
-- Binario Go (linux/amd64)
-- systemd como servicio
-- Caddy como reverse proxy con HTTPS (Let's Encrypt)
-- Backup diario de SQLite con rotación
+Esta guía describe el entorno real de producción verificado el 2026-08-07.
+El nombre del artefacto y del servicio en producción es `stocki`, aunque el
+módulo Go del proyecto se llama `GranEmpresaINV`.
 
-## 1) Requisitos en el servidor
+## Contrato de producción
 
-Instala dependencias básicas:
+| Área | Valor real |
+| --- | --- |
+| Servicio systemd | `stocki.service` |
+| Usuario del servicio | `AlvaroC` |
+| Ruta de la aplicación | `/opt/stocki` |
+| Binario | `/opt/stocki/stocki` |
+| Arquitectura | Linux ARM64/AArch64 |
+| Puerto interno | `8090` |
+| Reverse proxy | Nginx |
+| Dominio | `stocki.manosalaia.xyz` |
+| Base de datos | `/opt/stocki/data/data.db` |
+| Configuración privada | `/opt/stocki/.env` |
+| SSH | `AlvaroC@<servidor>`, puerto `2222` |
 
-```bash
-sudo apt update
-sudo apt install -y caddy sqlite3
+El workflow de GitHub Actions es el mecanismo de publicación. Los archivos
+de `deploy/` son referencias de la infraestructura; el workflow no los copia
+ni los instala automáticamente.
+
+## Aplicación
+
+La aplicación es un binario Go monolítico con plantillas server-side. Las
+plantillas y los archivos estáticos se cargan mediante rutas relativas, por lo
+que el proceso debe ejecutarse con:
+
+```text
+WorkingDirectory=/opt/stocki
 ```
 
-> Si compilas en el servidor, también instala Go (`golang-go`) o usa el instalador oficial de Go.
+La aplicación usa SQLite en modo WAL. En producción pueden existir junto a la
+base los archivos `data.db-wal` y `data.db-shm`.
 
-## 2) Abrir puertos en Hetzner
+## Compilación
 
-En el firewall de Hetzner (y/o `ufw` si lo usas), permite:
-- 22/tcp (SSH)
-- 80/tcp (HTTP) y 443/tcp (HTTPS) para Caddy
-
-Ejemplo con UFW:
+La arquitectura de producción es ARM64. El binario debe compilarse así:
 
 ```bash
-sudo ufw allow 22/tcp
-sudo ufw allow 80/tcp
-sudo ufw allow 443/tcp
-sudo ufw enable
+GOOS=linux GOARCH=arm64 go build -o stocki .
 ```
 
-## 3) Crear usuario y estructura de carpetas
+El workflow usa la versión de Go indicada por `go.mod` y ejecuta ese mismo
+build para cada publicación desde `main` o mediante ejecución manual.
 
-```bash
-sudo useradd --system --create-home --home-dir /srv/granempresa --shell /usr/sbin/nologin granempresa
-sudo install -d -o granempresa -g granempresa /srv/granempresa/app /srv/granempresa/data /srv/granempresa/backups /srv/granempresa/scripts
-```
+## Servicio systemd
 
-## 4) Construir el binario (linux/amd64)
-
-### Opción A: compilar en el servidor
-
-```bash
-cd /srv/granempresa
-sudo -u granempresa git clone <TU_REPO> src
-cd /srv/granempresa/src
-GOOS=linux GOARCH=amd64 go build -o /srv/granempresa/app/granempresa .
-```
-
-Copia las plantillas:
-
-```bash
-sudo -u granempresa rsync -a /srv/granempresa/src/templates /srv/granempresa/app/
-sudo -u granempresa rsync -a /srv/granempresa/src/static /srv/granempresa/app/
-```
-
-### Opción B: compilar localmente y subir
-
-```bash
-GOOS=linux GOARCH=amd64 go build -o granempresa .
-rsync -av granempresa templates static granempresa@<IP>:/srv/granempresa/app/
-```
-
-## 5) Configurar systemd
-
-Copia los unit files:
-
-```bash
-sudo cp deploy/systemd/granempresa.service /etc/systemd/system/granempresa.service
-sudo cp deploy/systemd/granempresa-backup.service /etc/systemd/system/granempresa-backup.service
-sudo cp deploy/systemd/granempresa-backup.timer /etc/systemd/system/granempresa-backup.timer
-sudo cp deploy/backup_db.sh /srv/granempresa/scripts/backup_db.sh
-sudo chown granempresa:granempresa /srv/granempresa/scripts/backup_db.sh
-sudo chmod +x /srv/granempresa/scripts/backup_db.sh
-```
-
-Recarga systemd y habilita servicios:
-
-```bash
-sudo systemctl daemon-reload
-sudo systemctl enable --now granempresa.service
-sudo systemctl enable --now granempresa-backup.timer
-```
-
-Verifica estado:
-
-```bash
-sudo systemctl status granempresa.service
-sudo systemctl list-timers | grep granempresa-backup
-```
-
-## 6) Configurar Caddy (HTTPS automático)
-
-Edita `/etc/caddy/Caddyfile` y usa el contenido de `deploy/Caddyfile`:
-
-```bash
-sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
-sudo sed -i 's/example.com/TU_DOMINIO/g' /etc/caddy/Caddyfile
-sudo systemctl reload caddy
-```
-
-> Asegúrate de que el DNS de `TU_DOMINIO` apunte al VPS antes de reiniciar Caddy.
-
-## 7) Base de datos y backups
-
-- La app usa `DB_PATH` (por defecto `data.db`). El servicio la apunta a `/srv/granempresa/data/data.db`.
-- El backup diario se ejecuta con `VACUUM INTO` y genera archivos timestamped en `/srv/granempresa/backups`.
-- Se conserva la cantidad de días definida por `KEEP_DAYS` (por defecto 14) y se rota automáticamente.
-
-## 7.1) Usuario administrador inicial
-
-Al iniciar la aplicación se crea un usuario administrador si no existe, leyendo las variables de entorno:
-
-```bash
-ADMIN_USER=admin
-ADMIN_PASS=SuperSecreto123
-```
-
-Ejemplo en systemd (editar `/etc/systemd/system/granempresa.service`):
+La unidad activa en el servidor es `/etc/systemd/system/stocki.service`.
+La versión de referencia está en `deploy/systemd/stocki.service`:
 
 ```ini
-Environment=ADMIN_USER=admin
-Environment=ADMIN_PASS=SuperSecreto123
+[Unit]
+Description=Stocki inventory service
+After=network.target
+
+[Service]
+Type=simple
+User=AlvaroC
+WorkingDirectory=/opt/stocki
+EnvironmentFile=/opt/stocki/.env
+ExecStart=/opt/stocki/stocki
+Restart=always
+
+[Install]
+WantedBy=multi-user.target
 ```
 
-> Si ya existe un usuario con ese `username`, no se vuelve a crear.
+El workflow no instala ni reemplaza esta unidad. Debe existir previamente en
+el servidor. Después de copiar el binario y los recursos, el workflow ejecuta
+`sudo systemctl restart stocki`.
 
-### Ejecutar backup manual
+## Variables privadas
+
+`/opt/stocki/.env` pertenece a `root:root` y tiene permisos `0600`. No debe
+versionarse ni copiarse mediante el workflow.
+
+Su contenido operativo incluye:
+
+```ini
+PORT=8090
+DB_PATH=/opt/stocki/data/data.db
+ADMIN_USER=admin
+ADMIN_PASS=<secreto>
+```
+
+El código crea el usuario definido por `ADMIN_USER` con rol administrador si
+las dos variables existen y ese usuario aún no está en la base. Si el usuario
+ya existe, no lo recrea.
+
+## Nginx
+
+Nginx recibe el tráfico público en los puertos 80 y 443 y lo reenvía al
+backend Go en `127.0.0.1:8090`. El dominio configurado es:
+
+```text
+stocki.manosalaia.xyz
+```
+
+La referencia de routing está en `deploy/nginx/stocki.conf`. El archivo del
+repositorio es documental y no incluye las rutas privadas de certificados TLS;
+la configuración completa y los certificados permanecen en el servidor.
+
+El comportamiento verificado es:
 
 ```bash
-sudo -u granempresa DB_PATH=/srv/granempresa/data/data.db BACKUP_DIR=/srv/granempresa/backups /srv/granempresa/scripts/backup_db.sh
+curl -sS http://127.0.0.1:8090/health
+curl -k -sS https://stocki.manosalaia.xyz/health
 ```
 
-## 8) Ajustes útiles
+Ambos deben responder `ok`. HTTP público redirige a HTTPS.
 
-- Cambiar el puerto interno: edita `Environment=PORT=8080` en `/etc/systemd/system/granempresa.service`.
-- Cambiar la ruta de DB: edita `Environment=DB_PATH=/ruta/nueva.db`.
-- Ver logs: `journalctl -u granempresa.service -f`
+## Despliegue automatizado
+
+`.github/workflows/deploy.yml` es el flujo real de producción:
+
+1. Obtiene el código de `main`.
+2. Configura la versión de Go de `go.mod`.
+3. Compila `stocki` para `linux/arm64`.
+4. Se conecta a `37.27.222.238` por SSH en el puerto `2222` como `AlvaroC`.
+5. Copia el binario, `templates/` y `static/` a un directorio temporal.
+6. Instala el binario en `/opt/stocki/`.
+7. Sincroniza `templates/` y `static/` con `--delete`.
+8. Reinicia `stocki.service`.
+
+El workflow no modifica `.env`, la base de datos, la unidad systemd ni Nginx.
+Esos elementos deben estar configurados y persistir previamente en el VPS.
+
+El workflow actualmente no ejecuta tests, healthcheck, migraciones, validación
+de la base, validación del backup ni rollback automático.
+
+## Base de datos
+
+La aplicación usa:
+
+```text
+DB_PATH=/opt/stocki/data/data.db
+```
+
+La integridad verificada el 2026-08-07 fue `ok` mediante SQLite en modo
+solo lectura. Antes de realizar pruebas destructivas, usar siempre una ruta
+`DB_PATH` temporal y no la base de producción.
+
+## Backup
+
+El timer activo en producción se llama `stockiapp-backup.timer`, pero su
+servicio ejecuta `pg_dump` sobre una base PostgreSQL de otro proyecto. **No
+respalda actualmente `/opt/stocki/data/data.db`.**
+
+`deploy/backup_db.sh` es una referencia manual para un futuro backup SQLite;
+no está instalado ni ejecutado por el workflow actual. La configuración de
+backup de producción se debe tratar como un trabajo separado.
+
+## SSH y puertos
+
+La configuración verificada del servidor usa:
+
+```text
+Port 2222
+AllowUsers AlvaroC
+PermitRootLogin no
+```
+
+Los puertos públicos de la aplicación son 80 y 443. El backend escucha en
+8090 y no debe confundirse con el puerto SSH 2222.
+
+## Verificación después de un deploy
+
+En el servidor:
+
+```bash
+sudo systemctl status stocki.service
+sudo journalctl -u stocki.service -n 100 --no-pager
+curl -sS http://127.0.0.1:8090/health
+curl -k -sS https://stocki.manosalaia.xyz/health
+```
+
+El binario debe ser ARM64 y el servicio debe conservar su `WorkingDirectory`,
+`EnvironmentFile` y `DB_PATH` de producción.
+
+## Estado del código publicado
+
+Durante la auditoría del 2026-08-07, el binario de producción provenía del
+commit `53ef9ad9cc8a053ee9aeecbe1dd699ce1338ea84`, mientras que el checkout
+revisado del repositorio estaba en `058f63988911ca401f0d5419bc6058c6664690c2`.
+Antes de reemplazar el binario, confirmar que los cambios que existen en
+producción ya estén recuperados o integrados en el repositorio.
