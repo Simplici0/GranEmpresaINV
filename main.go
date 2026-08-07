@@ -1457,6 +1457,7 @@ func migrateSalesSchema(tx *sql.Tx) error {
 		}
 	}
 	if _, err := tx.Exec(`
+		CREATE INDEX IF NOT EXISTS idx_ventas_estado_fecha ON ventas (estado, fecha);
 		CREATE TABLE IF NOT EXISTS venta_unidades (
 			venta_id INTEGER NOT NULL,
 			unidad_id TEXT NOT NULL,
@@ -1612,7 +1613,6 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	);
 	CREATE INDEX IF NOT EXISTS idx_ventas_fecha ON ventas (fecha);
 	CREATE INDEX IF NOT EXISTS idx_ventas_metodo ON ventas (metodo_pago);
-	CREATE INDEX IF NOT EXISTS idx_ventas_estado_fecha ON ventas (estado, fecha);
 
 	CREATE TABLE IF NOT EXISTS unidades (
 		id TEXT PRIMARY KEY,
