@@ -348,6 +348,7 @@ type metodoPagoTotal struct {
 type timelinePoint struct {
 	Fecha    string `json:"fecha"`
 	Cantidad int    `json:"cantidad"`
+	Cambios  int    `json:"cambios"`
 	Total    string `json:"total"`
 	Value    int64  `json:"value"`
 }
@@ -361,6 +362,20 @@ type dashboardSaleDetail struct {
 	MetodoPago string `json:"metodo_pago"`
 	Tipo       string `json:"tipo"`
 	EsVenta    bool   `json:"es_venta"`
+}
+
+type dashboardChange struct {
+	ID               int64  `json:"id"`
+	Fecha            string `json:"fecha"`
+	Persona          string `json:"persona"`
+	SalienteSKU      string `json:"saliente_sku"`
+	SalienteProducto string `json:"saliente_producto"`
+	SalienteCantidad int    `json:"saliente_cantidad"`
+	EntranteSKU      string `json:"entrante_sku"`
+	EntranteProducto string `json:"entrante_producto"`
+	EntranteCantidad int    `json:"entrante_cantidad"`
+	Motivo           string `json:"motivo"`
+	Usuario          string `json:"usuario"`
 }
 
 type pieSlice struct {
@@ -386,15 +401,18 @@ type dashboardData struct {
 	RangeEnd        string
 	RangeTotal      string
 	RangeCount      int
+	ChangeCount     int
+	Changes         []dashboardChange
 }
 
 type dashboardDataResponse struct {
 	Ok bool `json:"ok"`
 
-	RangeStart string `json:"range_start"`
-	RangeEnd   string `json:"range_end"`
-	RangeTotal string `json:"range_total"`
-	RangeCount int    `json:"range_count"`
+	RangeStart  string `json:"range_start"`
+	RangeEnd    string `json:"range_end"`
+	RangeTotal  string `json:"range_total"`
+	RangeCount  int    `json:"range_count"`
+	ChangeCount int    `json:"change_count"`
 
 	MetodosPago     []metodoPagoTotal     `json:"metodos_pago"`
 	PieSlices       []pieSlice            `json:"pie_slices"`
@@ -403,9 +421,10 @@ type dashboardDataResponse struct {
 	MaxTimelineText string                `json:"max_timeline_text"`
 	Timeline        []timelinePoint       `json:"timeline"`
 	Sales           []dashboardSaleDetail `json:"sales"`
+	Changes         []dashboardChange     `json:"changes"`
 }
 
-func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, endDate time.Time) (dashboardDataResponse, error) {
+func buildDashboardData(db *sql.DB, startStr, endStr string, startDate, endDate time.Time) (dashboardDataResponse, error) {
 	resp := dashboardDataResponse{
 		Ok:         true,
 		RangeStart: startStr,
@@ -424,6 +443,15 @@ func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, end
 	}
 	resp.RangeTotal = formatCurrency(rangeTotal)
 	resp.RangeCount = rangeCount
+
+	var changeCount int
+	if err := db.QueryRow(`
+		SELECT COUNT(*)
+		FROM cambio_operaciones
+		WHERE date(fecha) BETWEEN ? AND ?`, startStr, endStr).Scan(&changeCount); err != nil {
+		return dashboardDataResponse{}, err
+	}
+	resp.ChangeCount = changeCount
 
 	metodoRows, err := db.Query(`
 		SELECT metodo_pago, COUNT(*), SUM(total_cop)
@@ -506,6 +534,30 @@ func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, end
 		return dashboardDataResponse{}, err
 	}
 
+	changeRows, err := db.Query(`
+		SELECT date(fecha), COUNT(*)
+		FROM cambio_operaciones
+		WHERE date(fecha) BETWEEN ? AND ?
+		GROUP BY date(fecha)
+		ORDER BY date(fecha)`, startStr, endStr)
+	if err != nil {
+		return dashboardDataResponse{}, err
+	}
+	defer changeRows.Close()
+
+	changesByDate := make(map[string]int)
+	for changeRows.Next() {
+		var fecha string
+		var count int
+		if err := changeRows.Scan(&fecha, &count); err != nil {
+			return dashboardDataResponse{}, err
+		}
+		changesByDate[fecha] = count
+	}
+	if err := changeRows.Err(); err != nil {
+		return dashboardDataResponse{}, err
+	}
+
 	timeline := []timelinePoint{}
 	maxTimeline := int64(0)
 	for cursor := startDate; !cursor.After(endDate); cursor = cursor.AddDate(0, 0, 1) {
@@ -515,9 +567,12 @@ func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, end
 			point = timelinePoint{
 				Fecha:    fecha,
 				Cantidad: 0,
+				Cambios:  changesByDate[fecha],
 				Total:    formatCurrency(0),
 				Value:    0,
 			}
+		} else {
+			point.Cambios = changesByDate[fecha]
 		}
 		timeline = append(timeline, point)
 		if point.Value > maxTimeline {
@@ -636,6 +691,59 @@ func buildDashboardSalesData(db *sql.DB, startStr, endStr string, startDate, end
 	if err := internalRows.Err(); err != nil {
 		return dashboardDataResponse{}, err
 	}
+
+	detailRows, err := db.Query(`
+		SELECT
+			id,
+			fecha,
+			persona_cambio,
+			saliente_producto_id,
+			saliente_producto_nombre,
+			saliente_cantidad,
+			entrante_producto_id,
+			entrante_producto_nombre,
+			entrante_cantidad,
+			notas,
+			usuario
+		FROM cambio_operaciones
+		WHERE date(fecha) BETWEEN ? AND ?
+		ORDER BY fecha DESC, id DESC
+		LIMIT 200
+	`, startStr, endStr)
+	if err != nil {
+		return dashboardDataResponse{}, err
+	}
+	defer detailRows.Close()
+
+	changes := make([]dashboardChange, 0, 32)
+	for detailRows.Next() {
+		var change dashboardChange
+		var fechaRaw string
+		if err := detailRows.Scan(
+			&change.ID,
+			&fechaRaw,
+			&change.Persona,
+			&change.SalienteSKU,
+			&change.SalienteProducto,
+			&change.SalienteCantidad,
+			&change.EntranteSKU,
+			&change.EntranteProducto,
+			&change.EntranteCantidad,
+			&change.Motivo,
+			&change.Usuario,
+		); err != nil {
+			return dashboardDataResponse{}, err
+		}
+		change.Fecha = fechaRaw
+		if len(fechaRaw) >= 10 {
+			change.Fecha = fechaRaw[:10]
+		}
+		changes = append(changes, change)
+	}
+	if err := detailRows.Err(); err != nil {
+		return dashboardDataResponse{}, err
+	}
+	resp.Changes = changes
 
 	sort.SliceStable(sales, func(i, j int) bool {
 		if sales[i].Fecha != sales[j].Fecha {
@@ -873,48 +981,186 @@ func selectAndMarkUnitsSold(tx *sql.Tx, productID string, qty int) ([]string, er
 	return selectAndMarkUnitsByStatus(tx, productID, qty, "Vendida")
 }
 
-func selectAndMarkSpecificUnits(tx *sql.Tx, productID string, unitIDs []string, nextStatus string) ([]string, error) {
-	if strings.TrimSpace(productID) == "" || len(unitIDs) == 0 {
+func deleteSpecificAvailableUnits(tx *sql.Tx, productID string, unitIDs []string) ([]string, error) {
+	productID = strings.TrimSpace(productID)
+	if productID == "" || len(unitIDs) == 0 {
 		return nil, fmt.Errorf("unidades inválidas")
 	}
 
 	seen := make(map[string]struct{}, len(unitIDs))
+	normalizedIDs := make([]string, 0, len(unitIDs))
 	for _, id := range unitIDs {
-		if strings.TrimSpace(id) == "" {
+		normalizedID := strings.TrimSpace(id)
+		if normalizedID == "" {
 			return nil, fmt.Errorf("unidad inválida")
 		}
-		if _, exists := seen[id]; exists {
+		if _, exists := seen[normalizedID]; exists {
 			return nil, fmt.Errorf("unidad repetida")
 		}
-		seen[id] = struct{}{}
+		seen[normalizedID] = struct{}{}
+		normalizedIDs = append(normalizedIDs, normalizedID)
 	}
 
-	placeholders := make([]string, len(unitIDs))
-	args := make([]any, 0, len(unitIDs)+2)
-	args = append(args, nextStatus, productID)
-	for i, id := range unitIDs {
+	placeholders := make([]string, len(normalizedIDs))
+	args := make([]any, 0, len(normalizedIDs)+1)
+	args = append(args, productID)
+	for i, id := range normalizedIDs {
 		placeholders[i] = "?"
 		args = append(args, id)
 	}
 	query := fmt.Sprintf(`
-		UPDATE unidades
-		SET estado = ?
+		DELETE FROM unidades
 		WHERE producto_id = ?
 		  AND id IN (%s)
 		  AND estado IN ('Disponible', 'available')`, strings.Join(placeholders, ","))
 	result, err := tx.Exec(query, args...)
 	if err != nil {
-		return nil, fmt.Errorf("update unidades seleccionadas: %w", err)
+		return nil, fmt.Errorf("eliminar unidades seleccionadas: %w", err)
 	}
 	affected, err := result.RowsAffected()
 	if err != nil {
 		return nil, fmt.Errorf("rows affected: %w", err)
 	}
-	if int(affected) != len(unitIDs) {
+	if int(affected) != len(normalizedIDs) {
 		return nil, errInsufficientStock
 	}
 
-	return append([]string(nil), unitIDs...), nil
+	return normalizedIDs, nil
+}
+
+type cambioInventoryInput struct {
+	ProductID         string
+	OutgoingName      string
+	OutgoingUnitIDs   []string
+	IncomingProductID string
+	IncomingNew       bool
+	IncomingName      string
+	IncomingLine      string
+	IncomingQuantity  int
+	PersonaCambio     string
+	Notas             string
+	MovementNote      string
+	User              *User
+	Now               string
+}
+
+type cambioInventoryResult struct {
+	OutgoingUnitIDs []string
+	IncomingUnitIDs []string
+	OperationID     int64
+}
+
+func applyCambioInventory(tx *sql.Tx, input cambioInventoryInput) (cambioInventoryResult, error) {
+	productID := strings.TrimSpace(input.ProductID)
+	incomingProductID := strings.TrimSpace(input.IncomingProductID)
+	if productID == "" || incomingProductID == "" || input.IncomingQuantity <= 0 {
+		return cambioInventoryResult{}, fmt.Errorf("datos de inventario del cambio inválidos")
+	}
+	if input.IncomingNew && strings.TrimSpace(input.IncomingName) == "" {
+		return cambioInventoryResult{}, fmt.Errorf("nombre del producto entrante requerido")
+	}
+
+	if !input.IncomingNew {
+		var productCount int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM productos WHERE sku = ?`, incomingProductID).Scan(&productCount); err != nil {
+			return cambioInventoryResult{}, fmt.Errorf("consultar producto entrante: %w", err)
+		}
+		if productCount != 1 {
+			return cambioInventoryResult{}, fmt.Errorf("producto entrante inexistente")
+		}
+	}
+
+	outgoingName := strings.TrimSpace(input.OutgoingName)
+	if outgoingName == "" {
+		if err := tx.QueryRow(`SELECT nombre FROM productos WHERE sku = ?`, productID).Scan(&outgoingName); err != nil {
+			return cambioInventoryResult{}, fmt.Errorf("consultar producto saliente: %w", err)
+		}
+	}
+	incomingName := strings.TrimSpace(input.IncomingName)
+	if !input.IncomingNew && incomingName == "" {
+		if err := tx.QueryRow(`SELECT nombre FROM productos WHERE sku = ?`, incomingProductID).Scan(&incomingName); err != nil {
+			return cambioInventoryResult{}, fmt.Errorf("consultar nombre entrante: %w", err)
+		}
+	}
+
+	now := strings.TrimSpace(input.Now)
+	if now == "" {
+		now = time.Now().Format(time.RFC3339)
+	}
+
+	outgoingUnitIDs, err := deleteSpecificAvailableUnits(tx, productID, input.OutgoingUnitIDs)
+	if err != nil {
+		return cambioInventoryResult{}, err
+	}
+	if err := logMovimientos(tx, productID, outgoingUnitIDs, "cambio_salida", input.MovementNote, input.User, now); err != nil {
+		return cambioInventoryResult{}, fmt.Errorf("registrar salida del cambio: %w", err)
+	}
+
+	if input.IncomingNew {
+		line := strings.TrimSpace(input.IncomingLine)
+		if line == "" {
+			line = "Sin línea"
+		}
+		if err := upsertProducto(tx, incomingProductID, incomingName, line, now); err != nil {
+			return cambioInventoryResult{}, fmt.Errorf("registrar producto entrante: %w", err)
+		}
+	}
+
+	incomingUnitIDs := make([]string, 0, input.IncomingQuantity)
+	baseID := time.Now().UnixNano()
+	for i := 0; i < input.IncomingQuantity; i++ {
+		unitID := fmt.Sprintf("U-%s-%d-%d", incomingProductID, baseID, i+1)
+		if _, err := tx.Exec(
+			`INSERT INTO unidades (id, producto_id, estado, creado_en, caducidad)
+			VALUES (?, ?, 'Disponible', ?, NULL)`,
+			unitID, incomingProductID, now,
+		); err != nil {
+			return cambioInventoryResult{}, fmt.Errorf("registrar unidad entrante: %w", err)
+		}
+		incomingUnitIDs = append(incomingUnitIDs, unitID)
+	}
+	if err := logMovimientos(tx, incomingProductID, incomingUnitIDs, "cambio_entrada", input.MovementNote, input.User, now); err != nil {
+		return cambioInventoryResult{}, fmt.Errorf("registrar entrada del cambio: %w", err)
+	}
+	if err := logAudit(tx, "inventory.change", "producto", productID, fmt.Sprintf("salientes=%d entrantes=%d producto_entrante=%s", len(outgoingUnitIDs), len(incomingUnitIDs), incomingProductID), input.User, now); err != nil {
+		return cambioInventoryResult{}, fmt.Errorf("registrar auditoría del cambio: %w", err)
+	}
+	username := ""
+	if input.User != nil {
+		username = input.User.Username
+	}
+	operation, err := tx.Exec(`
+		INSERT INTO cambio_operaciones (
+			fecha, persona_cambio, notas,
+			saliente_producto_id, saliente_producto_nombre, saliente_cantidad,
+			entrante_producto_id, entrante_producto_nombre, entrante_cantidad,
+			usuario
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+		now,
+		strings.TrimSpace(input.PersonaCambio),
+		strings.TrimSpace(input.Notas),
+		productID,
+		outgoingName,
+		len(outgoingUnitIDs),
+		incomingProductID,
+		incomingName,
+		len(incomingUnitIDs),
+		username,
+	)
+	if err != nil {
+		return cambioInventoryResult{}, fmt.Errorf("registrar operación del cambio: %w", err)
+	}
+	operationID, err := operation.LastInsertId()
+	if err != nil {
+		return cambioInventoryResult{}, fmt.Errorf("obtener operación del cambio: %w", err)
+	}
+
+	return cambioInventoryResult{
+		OutgoingUnitIDs: outgoingUnitIDs,
+		IncomingUnitIDs: incomingUnitIDs,
+		OperationID:     operationID,
+	}, nil
 }
 
 func selectAndMarkUnitsByStatus(tx *sql.Tx, productID string, qty int, nextStatus string) ([]string, error) {
@@ -1531,6 +1777,26 @@ func migrateIntegritySchema(tx *sql.Tx) error {
 	return ensureInventoryIntegrityTriggers(tx)
 }
 
+func migrateCambioOperationsSchema(tx *sql.Tx) error {
+	_, err := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS cambio_operaciones (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			fecha TEXT NOT NULL,
+			persona_cambio TEXT NOT NULL DEFAULT '',
+			notas TEXT NOT NULL DEFAULT '',
+			saliente_producto_id TEXT NOT NULL,
+			saliente_producto_nombre TEXT NOT NULL DEFAULT '',
+			saliente_cantidad INTEGER NOT NULL CHECK (saliente_cantidad > 0),
+			entrante_producto_id TEXT NOT NULL,
+			entrante_producto_nombre TEXT NOT NULL DEFAULT '',
+			entrante_cantidad INTEGER NOT NULL CHECK (entrante_cantidad > 0),
+			usuario TEXT NOT NULL DEFAULT ''
+		);
+		CREATE INDEX IF NOT EXISTS idx_cambio_operaciones_fecha ON cambio_operaciones (fecha);
+	`)
+	return err
+}
+
 func demoSeedEnabled(db *sql.DB) bool {
 	raw := strings.ToLower(strings.TrimSpace(os.Getenv("SEED_DEMO")))
 	if raw != "1" && raw != "true" && raw != "yes" && raw != "on" {
@@ -1708,6 +1974,9 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 		}
 	}
 	if err := applySchemaMigration(db, 5, migrateIntegritySchema); err != nil {
+		return nil, err
+	}
+	if err := applySchemaMigration(db, 6, migrateCambioOperationsSchema); err != nil {
 		return nil, err
 	}
 
@@ -1957,6 +2226,7 @@ func resetBusinessData(db *sql.DB) error {
 		"customer_events",
 		"customers",
 		"cambios",
+		"cambio_operaciones",
 		"retomas",
 		"movimientos",
 		"ventas",
@@ -2996,7 +3266,7 @@ func main() {
 		startStr := startDate.Format("2006-01-02")
 		endStr := endDate.Format("2006-01-02")
 
-		salesData, err := buildDashboardSalesData(db, startStr, endStr, startDate, endDate)
+		dashboardResponse, err := buildDashboardData(db, startStr, endStr, startDate, endDate)
 		if err != nil {
 			http.Error(w, "Error al consultar ventas", http.StatusInternalServerError)
 			return
@@ -3006,18 +3276,20 @@ func main() {
 			Title:           "Resumen de negocio",
 			Subtitle:        "",
 			EstadoConteos:   estadoConteos,
-			MetodosPago:     salesData.MetodosPago,
-			PieSlices:       salesData.PieSlices,
-			PieTotal:        salesData.PieTotal,
-			MaxTimeline:     salesData.MaxTimeline,
-			MaxTimelineText: salesData.MaxTimelineText,
-			Timeline:        salesData.Timeline,
-			Sales:           salesData.Sales,
+			MetodosPago:     dashboardResponse.MetodosPago,
+			PieSlices:       dashboardResponse.PieSlices,
+			PieTotal:        dashboardResponse.PieTotal,
+			MaxTimeline:     dashboardResponse.MaxTimeline,
+			MaxTimelineText: dashboardResponse.MaxTimelineText,
+			Timeline:        dashboardResponse.Timeline,
+			Sales:           dashboardResponse.Sales,
 			CurrentUser:     currentUser,
 			RangeStart:      startStr,
 			RangeEnd:        endStr,
-			RangeTotal:      salesData.RangeTotal,
-			RangeCount:      salesData.RangeCount,
+			RangeTotal:      dashboardResponse.RangeTotal,
+			RangeCount:      dashboardResponse.RangeCount,
+			ChangeCount:     dashboardResponse.ChangeCount,
+			Changes:         dashboardResponse.Changes,
 		}
 
 		if err := tmpl.ExecuteTemplate(w, "dashboard.html", data); err != nil {
@@ -3037,7 +3309,7 @@ func main() {
 		startStr := startDate.Format("2006-01-02")
 		endStr := endDate.Format("2006-01-02")
 
-		data, err := buildDashboardSalesData(db, startStr, endStr, startDate, endDate)
+		data, err := buildDashboardData(db, startStr, endStr, startDate, endDate)
 		if err != nil {
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusInternalServerError)
@@ -4503,7 +4775,37 @@ func main() {
 			return
 		}
 
-		salientesMarcadas, err := selectAndMarkSpecificUnits(tx, productID, salientes, "Cambio")
+		now := time.Now().Format(time.RFC3339)
+		notaMovimiento := strings.TrimSpace(fmt.Sprintf("%s %s", personaCambio, notas))
+		incomingProductID := incomingExistingID
+		incomingQuantity := incomingExistingQty
+		incomingNew := false
+		if incomingMode == "new" {
+			incomingProductID = incomingNewSKU
+			incomingQuantity = incomingNewQty
+			incomingNew = true
+		}
+		incomingProductName := incomingNewName
+		if !incomingNew {
+			if incomingProduct, exists := findProduct(productsSnapshot, incomingProductID); exists {
+				incomingProductName = incomingProduct.Name
+			}
+		}
+		result, err := applyCambioInventory(tx, cambioInventoryInput{
+			ProductID:         productID,
+			OutgoingName:      selectedProduct.Name,
+			OutgoingUnitIDs:   salientes,
+			IncomingProductID: incomingProductID,
+			IncomingNew:       incomingNew,
+			IncomingName:      incomingProductName,
+			IncomingLine:      incomingNewLine,
+			IncomingQuantity:  incomingQuantity,
+			PersonaCambio:     personaCambio,
+			Notas:             notas,
+			MovementNote:      notaMovimiento,
+			User:              currentUser,
+			Now:               now,
+		})
 		if err != nil {
 			if rollbackErr := tx.Rollback(); rollbackErr != nil {
 				log.Printf("rollback cambio: %v", rollbackErr)
@@ -4541,91 +4843,10 @@ func main() {
 				return
 			}
 			if wantsJSON {
-				writeJSONError(http.StatusInternalServerError, "Error al actualizar unidades salientes.", nil)
+				writeJSONError(http.StatusInternalServerError, "No se pudo actualizar el inventario del cambio.", nil)
 				return
 			}
-			http.Error(w, "Error al actualizar unidades salientes", http.StatusInternalServerError)
-			return
-		}
-
-		now := time.Now().Format(time.RFC3339)
-		notaMovimiento := strings.TrimSpace(fmt.Sprintf("%s %s", personaCambio, notas))
-		if err := logMovimientos(tx, productID, salientesMarcadas, "cambio_salida", notaMovimiento, currentUser, now); err != nil {
-			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				log.Printf("rollback cambio log: %v", rollbackErr)
-			}
-			if wantsJSON {
-				writeJSONError(http.StatusInternalServerError, "Error al registrar movimiento del cambio.", nil)
-				return
-			}
-			http.Error(w, "Error al registrar movimiento del cambio", http.StatusInternalServerError)
-			return
-		}
-
-		entrantes := make([]string, 0)
-
-		incomingProductID := incomingExistingID
-		incomingQty := incomingExistingQty
-		if incomingMode == "new" {
-			incomingProductID = incomingNewSKU
-			incomingQty = incomingNewQty
-			incomingLine := strings.TrimSpace(incomingNewLine)
-			if incomingLine == "" {
-				incomingLine = "Sin línea"
-			}
-			if err := upsertProducto(tx, incomingProductID, incomingNewName, incomingLine, now); err != nil {
-				if rollbackErr := tx.Rollback(); rollbackErr != nil {
-					log.Printf("rollback cambio producto entrante: %v", rollbackErr)
-				}
-				if wantsJSON {
-					writeJSONError(http.StatusInternalServerError, "Error al registrar el producto entrante.", nil)
-					return
-				}
-				http.Error(w, "Error al registrar el producto entrante", http.StatusInternalServerError)
-				return
-			}
-		}
-
-		baseIncomingID := time.Now().UnixNano()
-		for i := 0; i < incomingQty; i++ {
-			unitID := fmt.Sprintf("U-%s-%d-%d", incomingProductID, baseIncomingID, i+1)
-			if _, err := tx.Exec(
-				`INSERT INTO unidades (id, producto_id, estado, creado_en, caducidad)
-				VALUES (?, ?, ?, ?, ?)`,
-				unitID, incomingProductID, "Disponible", now, nil,
-			); err != nil {
-				if rollbackErr := tx.Rollback(); rollbackErr != nil {
-					log.Printf("rollback cambio insert: %v", rollbackErr)
-				}
-				if wantsJSON {
-					writeJSONError(http.StatusInternalServerError, "Error al registrar unidades entrantes.", nil)
-					return
-				}
-				http.Error(w, "Error al registrar unidades entrantes", http.StatusInternalServerError)
-				return
-			}
-			entrantes = append(entrantes, unitID)
-		}
-		if err := logMovimientos(tx, incomingProductID, entrantes, "cambio_entrada", notaMovimiento, currentUser, now); err != nil {
-			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				log.Printf("rollback cambio entrada log: %v", rollbackErr)
-			}
-			if wantsJSON {
-				writeJSONError(http.StatusInternalServerError, "Error al registrar movimiento de entrada.", nil)
-				return
-			}
-			http.Error(w, "Error al registrar movimiento de entrada", http.StatusInternalServerError)
-			return
-		}
-		if err := logAudit(tx, "inventory.change", "producto", productID, fmt.Sprintf("salientes=%d entrantes=%d", len(salientesMarcadas), len(entrantes)), currentUser, now); err != nil {
-			if rollbackErr := tx.Rollback(); rollbackErr != nil {
-				log.Printf("rollback cambio audit: %v", rollbackErr)
-			}
-			if wantsJSON {
-				writeJSONError(http.StatusInternalServerError, "Error al registrar auditoría del cambio.", nil)
-				return
-			}
-			http.Error(w, "Error al registrar auditoría del cambio", http.StatusInternalServerError)
+			http.Error(w, "No se pudo actualizar el inventario del cambio", http.StatusInternalServerError)
 			return
 		}
 
@@ -4637,6 +4858,8 @@ func main() {
 			http.Error(w, "Error al confirmar el cambio", http.StatusInternalServerError)
 			return
 		}
+		salientesMarcadas := result.OutgoingUnitIDs
+		entrantes := result.IncomingUnitIDs
 		if wantsJSON {
 			w.Header().Set("Content-Type", "application/json")
 			_ = json.NewEncoder(w).Encode(map[string]any{

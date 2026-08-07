@@ -25,9 +25,11 @@
       --chart-pie-1: #667085;
       --chart-pie-2: #7a8191;
       --chart-pie-3: #98a2b3;
-      --chart-pie-4: #b8c0cc;
-      --chart-pie-5: #cbd5e1;
-      --chart-pie-6: #d0d5dd;
+       --chart-pie-4: #b8c0cc;
+       --chart-pie-5: #cbd5e1;
+       --chart-pie-6: #d0d5dd;
+       --chart-sales: #667085;
+       --chart-change: #e85d3c;
     }
 
     html[data-theme="dark"] {
@@ -35,8 +37,10 @@
       --chart-pie-2: #ff955f;
       --chart-pie-3: #ffb07c;
       --chart-pie-4: #e86b32;
-      --chart-pie-5: #d95625;
-      --chart-pie-6: #ffc49f;
+       --chart-pie-5: #d95625;
+       --chart-pie-6: #ffc49f;
+       --chart-sales: #ff955f;
+       --chart-change: #ffcf70;
     }
 
     * {
@@ -558,6 +562,59 @@
       height: 100% !important;
     }
 
+    .line-chart-legend {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 800;
+    }
+
+    .line-chart-legend span {
+      display: inline-flex;
+      align-items: center;
+      gap: 7px;
+    }
+
+    .line-chart-legend i {
+      width: 22px;
+      height: 3px;
+      border-radius: 999px;
+      display: inline-block;
+    }
+
+    .line-chart-legend .sales-key {
+      background: var(--chart-sales);
+    }
+
+    .line-chart-legend .change-key {
+      background: var(--chart-change);
+    }
+
+    .change-table-wrap {
+      overflow-x: auto;
+    }
+
+    .change-table {
+      min-width: 760px;
+    }
+
+    .change-product {
+      display: grid;
+      gap: 3px;
+      min-width: 150px;
+    }
+
+    .change-product strong {
+      font-size: 13px;
+    }
+
+    .change-product small {
+      color: var(--muted);
+      font-size: 11px;
+    }
+
     .timeline-grid {
       display: grid;
       gap: 8px;
@@ -628,7 +685,7 @@
   <main class="page-content">
     <div class="dashboard-toolbar">
       <span id="dash-status" class="dashboard-status chart-note" role="status" aria-live="polite"></span>
-      <span id="dash-range-badge" class="range-pill">{{.RangeStart}} → {{.RangeEnd}} · {{.RangeCount}} ventas</span>
+      <span id="dash-range-badge" class="range-pill">{{.RangeStart}} → {{.RangeEnd}} · {{.RangeCount}} ventas · {{.ChangeCount}} cambios</span>
       <a id="dash-download" class="button" href="/csv/ventas?start_date={{.RangeStart}}&end_date={{.RangeEnd}}" title="Descargar ventas del periodo">Descargar ventas</a>
       <details class="range-picker" id="dash-range">
         <summary>Fechas</summary>
@@ -655,8 +712,8 @@
     <article class="card span-full">
       <div class="card-head">
         <div>
-          <h2>Línea de tiempo (ventas por día)</h2>
-          <div class="chart-note">Fecha (X) y total ($) (Y). Valores actualizados por rango.</div>
+          <h2>Resumen general</h2>
+          <div class="chart-note">Ventas en pesos y número de cambios por día. Valores actualizados por rango.</div>
         </div>
         <div class="kpi">
           <div class="kpi-label">Venta total</div>
@@ -666,9 +723,13 @@
       </div>
 
       <div class="line-chart">
-        <canvas id="timeline-chart" role="img" aria-label="Ventas por día" aria-describedby="timeline-description">Gráfica de ventas por día.</canvas>
+        <canvas id="timeline-chart" role="img" aria-label="Ventas y cambios por día" aria-describedby="timeline-description">Gráfica de ventas y cambios por día.</canvas>
       </div>
-      <div id="timeline-description" class="sr-only">Histórico de ventas por día. Consulte el detalle de ventas para los valores exactos.</div>
+      <div class="line-chart-legend" aria-label="Leyenda del resumen general">
+        <span><i class="sales-key"></i>Ventas (COP)</span>
+        <span><i class="change-key"></i>Cambios (operaciones)</span>
+      </div>
+      <div id="timeline-description" class="sr-only">Histórico de ventas y cambios por día. Consulte las tablas para los valores exactos.</div>
       <div class="timeline-grid">
         <div id="timeline-max">Máximo: {{.MaxTimelineText}}</div>
         <div id="timeline-days">Días visibles: {{len .Timeline}}</div>
@@ -753,6 +814,47 @@
         </section>
       </div>
     </article>
+
+    <article class="card span-full">
+      <div class="card-head">
+        <div>
+          <h2>Resumen de cambios</h2>
+          <div class="chart-note">Operaciones registradas en el periodo seleccionado.</div>
+        </div>
+        <div class="kpi">
+          <div class="kpi-label">Cambios</div>
+          <div id="changes-kpi" class="kpi-value">{{.ChangeCount}}</div>
+          <div class="kpi-sub">Operaciones completas</div>
+        </div>
+      </div>
+      <div id="changes-empty" class="chart-note" {{if .Changes}}hidden{{end}}>No hay cambios en este periodo.</div>
+      <div id="changes-table-wrap" class="change-table-wrap" {{if not .Changes}}hidden{{end}}>
+        <table class="change-table">
+          <thead>
+            <tr>
+              <th>Fecha</th>
+              <th>Persona</th>
+              <th>Sale</th>
+              <th>Entra</th>
+              <th>Motivo</th>
+              <th>Usuario</th>
+            </tr>
+          </thead>
+          <tbody id="changes-table-body">
+            {{range .Changes}}
+            <tr>
+              <td>{{.Fecha}}</td>
+              <td>{{.Persona}}</td>
+              <td><div class="change-product"><strong>{{.SalienteProducto}}</strong><small>{{.SalienteSKU}} · {{.SalienteCantidad}} unidades</small></div></td>
+              <td><div class="change-product"><strong>{{.EntranteProducto}}</strong><small>{{.EntranteSKU}} · {{.EntranteCantidad}} unidades</small></div></td>
+              <td>{{if .Motivo}}{{.Motivo}}{{else}}-{{end}}</td>
+              <td>{{if .Usuario}}{{.Usuario}}{{else}}-{{end}}</td>
+            </tr>
+            {{end}}
+          </tbody>
+        </table>
+      </div>
+    </article>
     </section>
   </main>
 
@@ -771,6 +873,10 @@
 	      const timelineMax = document.getElementById("timeline-max");
 	      const timelineDays = document.getElementById("timeline-days");
 	          const salesTableBody = document.getElementById("sales-table-body");
+	      const changesTableBody = document.getElementById("changes-table-body");
+	      const changesTableWrap = document.getElementById("changes-table-wrap");
+	      const changesEmpty = document.getElementById("changes-empty");
+	      const changesKpi = document.getElementById("changes-kpi");
 	      const kpiTotal = document.getElementById("kpi-total");
 	      const kpiSub = document.getElementById("kpi-sub");
 	      const isAdmin = {{if and .CurrentUser (eq .CurrentUser.Role "admin")}}true{{else}}false{{end}};
@@ -786,10 +892,11 @@
 	      })();
 	      const fmtMoney = (value) => `$${moneyFmt.format(Math.round(Number(value || 0)))}`;
 
-      const setRangeBadge = (start, end, count, totalText) => {
-        if (!rangeBadge) return;
+      const setRangeBadge = (start, end, count, totalText, changeCount) => {
+         if (!rangeBadge) return;
         const suffix = Number.isFinite(count) ? ` · ${count} ventas` : "";
-        rangeBadge.textContent = `${start} → ${end}${suffix}`;
+        const changesSuffix = Number.isFinite(changeCount) ? ` · ${changeCount} cambios` : "";
+        rangeBadge.textContent = `${start} → ${end}${suffix}${changesSuffix}`;
         if (kpiSub) kpiSub.textContent = `${start} → ${end}${suffix}`;
         if (kpiTotal && totalText) kpiTotal.textContent = totalText;
         if (downloadBtn) downloadBtn.href = `/csv/ventas?${new URLSearchParams({ start_date: start, end_date: end }).toString()}`;
@@ -816,9 +923,12 @@
           muted: read("--muted", "#6f6a65"),
           border: read("--border", "#d9d2cb"),
           card: read("--card", "#ffffff"),
-          line: isDark ? "#ff7a3d" : "#667085",
+          line: read("--chart-sales", isDark ? "#ff955f" : "#667085"),
+          changeLine: read("--chart-change", isDark ? "#ffcf70" : "#e85d3c"),
           point: isDark ? "rgba(255, 149, 95, 0.62)" : "rgba(102, 112, 133, 0.48)",
           pointHighlight: isDark ? "rgba(255, 196, 159, 0.9)" : "rgba(52, 64, 84, 0.8)",
+          changePoint: isDark ? "rgba(255, 207, 112, 0.62)" : "rgba(232, 93, 60, 0.48)",
+          changePointHighlight: isDark ? "rgba(255, 228, 161, 0.9)" : "rgba(207, 69, 40, 0.8)",
           pointBorder: isDark ? "rgba(24, 27, 31, 0.82)" : "rgba(255, 255, 255, 0.86)",
           pie: [
             read("--chart-pie-1", isDark ? "#ff7a3d" : "#667085"),
@@ -989,35 +1099,35 @@
       };
 
       const renderTimeline = (data) => {
-	        if (!timelineCanvas) return;
+        if (!timelineCanvas) return;
 
-	        const timeline = Array.isArray(data.timeline) ? data.timeline : [];
-	        const maxV = Number(data.max_timeline || 0);
-	        const maxText = String(data.max_timeline_text || fmtMoney(maxV));
-	        const colors = getChartColors();
-	        const labels = timeline.map((point) => point.fecha || "");
+        const timeline = Array.isArray(data.timeline) ? data.timeline : [];
+        const maxV = Number(data.max_timeline || 0);
+        const maxText = String(data.max_timeline_text || fmtMoney(maxV));
+        const colors = getChartColors();
+        const labels = timeline.map((point) => point.fecha || "");
 
-        if (timelineMax) timelineMax.textContent = `Máximo: ${maxText}`;
+        if (timelineMax) timelineMax.textContent = `Máximo ventas: ${maxText}`;
         if (timelineDays) timelineDays.textContent = `Días visibles: ${timeline.length}`;
         if (timelineDescription) {
           timelineDescription.textContent = timeline.length === 0
-            ? "No hay datos de ventas en el periodo seleccionado."
-            : `Histórico de ventas por día entre ${timeline[0]?.fecha || ""} y ${timeline[timeline.length - 1]?.fecha || ""}. Máximo del periodo: ${maxText}. Consulte el detalle de ventas para los valores exactos.`;
+            ? "No hay datos de ventas o cambios en el periodo seleccionado."
+            : `Histórico de ventas y cambios por día entre ${timeline[0]?.fecha || ""} y ${timeline[timeline.length - 1]?.fecha || ""}. Máximo de ventas: ${maxText}. Consulte las tablas para los valores exactos.`;
         }
 
-	        let maxIdx = 0;
-	        let maxValue = -1;
-	        timeline.forEach((point, index) => {
-	          const value = Number(point.value || 0);
+        let maxIdx = 0;
+        let maxValue = -1;
+        timeline.forEach((point, index) => {
+          const value = Number(point.value || 0);
           if (value > maxValue) {
-	            maxValue = value;
-	            maxIdx = index;
+            maxValue = value;
+            maxIdx = index;
           }
-	        });
+        });
         const lastIdx = Math.max(0, timeline.length - 1);
         const keyByIndex = new Map();
         if (timeline.length > 0) keyByIndex.set(lastIdx, { title: "Venta Total", value: timeline[lastIdx].total });
-        if (timeline.length > 0) keyByIndex.set(maxIdx, { title: "Pico", value: timeline[maxIdx].total });
+        if (timeline.length > 0) keyByIndex.set(maxIdx, { title: "Pico ventas", value: timeline[maxIdx].total });
         timelineInfo = {
           points: timeline,
           keys: Array.from(keyByIndex, ([index, meta]) => ({ index, ...meta })),
@@ -1029,11 +1139,16 @@
 
         const tooltipCallbacks = {
           title: (items) => timeline[items[0]?.dataIndex]?.fecha || "",
-          label: (context) => `Venta total: ${fmtMoney(context.parsed.y)}`,
-          afterLabel: (context) => `Ventas: ${timeline[context.dataIndex]?.cantidad || 0}`
+          label: (context) => context.dataset.yAxisID === "changes"
+            ? `Cambios: ${Math.round(Number(context.parsed.y || 0))}`
+            : `Ventas: ${fmtMoney(context.parsed.y)}`,
+          afterLabel: (context) => context.dataset.yAxisID === "changes"
+            ? "Operaciones registradas"
+            : `Ventas: ${timeline[context.dataIndex]?.cantidad || 0}`
         };
-        const dataset = {
+        const salesDataset = {
           label: "Ventas",
+          yAxisID: "sales",
           data: timeline.map((point) => Number(point.value || 0)),
           borderColor: colors.line,
           backgroundColor: colors.line,
@@ -1045,6 +1160,22 @@
           pointBorderColor: colors.pointBorder,
           pointBorderWidth: 1,
           tension: 0,
+          fill: false
+        };
+        const changesDataset = {
+          label: "Cambios",
+          yAxisID: "changes",
+          data: timeline.map((point) => Number(point.cambios || 0)),
+          borderColor: colors.changeLine,
+          backgroundColor: colors.changeLine,
+          borderWidth: 2,
+          pointStyle: "rectRounded",
+          pointRadius: 3.5,
+          pointHoverRadius: 6,
+          pointBackgroundColor: colors.changePoint,
+          pointBorderColor: colors.pointBorder,
+          pointBorderWidth: 1,
+          tension: 0.15,
           fill: false
         };
         const chartOptions = {
@@ -1068,7 +1199,8 @@
                 callback: (value) => timeline[Number(value)]?.fecha || ""
               }
             },
-            y: {
+            sales: {
+              position: "left",
               beginAtZero: true,
               suggestedMax: maxV > 0 ? undefined : 1,
               grid: { color: colors.border },
@@ -1077,6 +1209,17 @@
                 color: colors.muted,
                 callback: (value) => fmtMoney(value)
               }
+            },
+            changes: {
+              position: "right",
+              beginAtZero: true,
+              grid: { drawOnChartArea: false },
+              border: { color: colors.border },
+              ticks: {
+                color: colors.muted,
+                precision: 0,
+                callback: (value) => String(Math.round(Number(value || 0)))
+              }
             }
           }
         };
@@ -1084,7 +1227,7 @@
         if (!timelineChart) {
           timelineChart = new Chart(timelineCanvas, {
             type: "line",
-            data: { labels, datasets: [dataset] },
+            data: { labels, datasets: [salesDataset, changesDataset] },
             options: chartOptions,
             plugins: [timelineLabelsPlugin]
           });
@@ -1092,9 +1235,11 @@
         }
 
         timelineChart.data.labels = labels;
-        timelineChart.data.datasets[0] = dataset;
+        timelineChart.data.datasets[0] = salesDataset;
+        timelineChart.data.datasets[1] = changesDataset;
         timelineChart.options.scales.x = chartOptions.scales.x;
-        timelineChart.options.scales.y = chartOptions.scales.y;
+        timelineChart.options.scales.sales = chartOptions.scales.sales;
+        timelineChart.options.scales.changes = chartOptions.scales.changes;
         timelineChart.options.plugins.tooltip.callbacks = tooltipCallbacks;
         timelineChart.update("none");
       };
@@ -1111,11 +1256,20 @@
           dataset.pointStyle = "circle";
           dataset.pointBackgroundColor = (context) => timelineInfo.keyIndices.has(context.dataIndex) ? colors.pointHighlight : colors.point;
           dataset.pointBorderColor = colors.pointBorder;
+          timelineChart.options.scales.sales.ticks.color = colors.muted;
+          timelineChart.options.scales.sales.grid.color = colors.border;
+          timelineChart.options.scales.sales.border.color = colors.border;
+          timelineChart.options.scales.changes.ticks.color = colors.muted;
+          timelineChart.options.scales.changes.border.color = colors.border;
           timelineChart.options.scales.x.ticks.color = colors.muted;
           timelineChart.options.scales.x.border.color = colors.border;
-          timelineChart.options.scales.y.ticks.color = colors.muted;
-          timelineChart.options.scales.y.grid.color = colors.border;
-          timelineChart.options.scales.y.border.color = colors.border;
+          const changesDataset = timelineChart.data.datasets[1];
+          if (changesDataset) {
+            changesDataset.borderColor = colors.changeLine;
+            changesDataset.backgroundColor = colors.changeLine;
+            changesDataset.pointBackgroundColor = colors.changePoint;
+            changesDataset.pointBorderColor = colors.pointBorder;
+          }
           timelineChart.update("none");
         }
 
@@ -1140,7 +1294,7 @@
         themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ["data-theme"] });
       }
 
-	      const renderSales = (data) => {
+      const renderSales = (data) => {
 	        if (!salesTableBody) return;
 	        const sales = Array.isArray(data.sales) ? data.sales : [];
 	        salesTableBody.replaceChildren();
@@ -1183,17 +1337,56 @@
 	            }
 	            tr.appendChild(actionCell);
 	          }
-	          salesTableBody.appendChild(tr);
-	        });
-	      };
+          salesTableBody.appendChild(tr);
+        });
+      };
 
-	      const applyData = (data) => {
-	        if (!data || !data.ok) return;
-	        setRangeBadge(data.range_start, data.range_end, data.range_count, data.range_total);
-	        renderDonut(data);
-	        renderTimeline(data);
-	        renderSales(data);
-	      };
+      const renderChanges = (data) => {
+        const changes = Array.isArray(data.changes) ? data.changes : [];
+        if (changesKpi) changesKpi.textContent = String(Number(data.change_count || 0));
+        if (!changesTableBody) return;
+        changesTableBody.replaceChildren();
+        if (changesEmpty) changesEmpty.hidden = changes.length > 0;
+        if (changesTableWrap) changesTableWrap.hidden = changes.length === 0;
+
+        const appendProductCell = (row, name, sku, quantity) => {
+          const cell = document.createElement("td");
+          const product = document.createElement("div");
+          product.className = "change-product";
+          const title = document.createElement("strong");
+          title.textContent = String(name || sku || "-");
+          const detail = document.createElement("small");
+          detail.textContent = `${sku || "-"} · ${Number(quantity || 0)} unidades`;
+          product.append(title, detail);
+          cell.appendChild(product);
+          row.appendChild(cell);
+        };
+
+        changes.forEach((change) => {
+          const row = document.createElement("tr");
+          const addCell = (value) => {
+            const cell = document.createElement("td");
+            cell.textContent = String(value || "-");
+            row.appendChild(cell);
+          };
+          addCell(change.fecha);
+          addCell(change.persona);
+          appendProductCell(row, change.saliente_producto, change.saliente_sku, change.saliente_cantidad);
+          appendProductCell(row, change.entrante_producto, change.entrante_sku, change.entrante_cantidad);
+          addCell(change.motivo);
+          addCell(change.usuario);
+          changesTableBody.appendChild(row);
+        });
+      };
+
+      const applyData = (data) => {
+        if (!data || !data.ok) return;
+        setRangeBadge(data.range_start, data.range_end, data.range_count, data.range_total, data.change_count);
+        renderDonut(data);
+        renderTimeline(data);
+        renderSales(data);
+        renderChanges(data);
+      };
 
       let pending = null;
       let activeController = null;

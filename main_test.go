@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -30,6 +31,68 @@ func setupTestDB(t *testing.T) *sql.DB {
 		t.Fatalf("create schema: %v", err)
 	}
 	return db
+}
+
+func setupCambioInventoryDB(t *testing.T) *sql.DB {
+	t.Helper()
+	t.Setenv("SEED_DEMO", "")
+	t.Setenv("ADMIN_USER", "")
+	t.Setenv("ADMIN_PASS", "")
+	db, err := initDB(filepath.Join(t.TempDir(), "data.db"), []string{"Efectivo"})
+	if err != nil {
+		t.Fatalf("initDB: %v", err)
+	}
+	t.Cleanup(func() { db.Close() })
+	return db
+}
+
+func seedCambioProduct(t *testing.T, db *sql.DB, sku string, quantity int) {
+	t.Helper()
+	if _, err := db.Exec(`
+		INSERT INTO productos (sku, id, linea, nombre)
+		VALUES (?, ?, 'Cambios', ?)
+	`, sku, sku, "Producto "+sku); err != nil {
+		t.Fatalf("insert cambio product %s: %v", sku, err)
+	}
+	for i := 1; i <= quantity; i++ {
+		unitID := fmt.Sprintf("U-%s-%02d", sku, i)
+		if _, err := db.Exec(`
+			INSERT INTO unidades (id, producto_id, estado, creado_en)
+			VALUES (?, ?, 'Disponible', ?)
+		`, unitID, sku, time.Date(2026, time.August, i, 12, 0, 0, 0, time.UTC).Format(time.RFC3339)); err != nil {
+			t.Fatalf("insert cambio unit %s: %v", unitID, err)
+		}
+	}
+}
+
+func availableCambioCount(t *testing.T, db *sql.DB, sku string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`
+		SELECT COUNT(*) FROM unidades
+		WHERE producto_id = ? AND estado IN ('Disponible', 'available')
+	`, sku).Scan(&count); err != nil {
+		t.Fatalf("count available units for %s: %v", sku, err)
+	}
+	return count
+}
+
+func totalCambioCount(t *testing.T, db *sql.DB, sku string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM unidades WHERE producto_id = ?`, sku).Scan(&count); err != nil {
+		t.Fatalf("count units for %s: %v", sku, err)
+	}
+	return count
+}
+
+func movementCambioCount(t *testing.T, db *sql.DB, movementType, sku string) int {
+	t.Helper()
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM movimientos WHERE tipo = ? AND producto_id = ?`, movementType, sku).Scan(&count); err != nil {
+		t.Fatalf("count movements %s/%s: %v", movementType, sku, err)
+	}
+	return count
 }
 
 func TestCountInventoryUnitsIncludesReservedUnits(t *testing.T) {
@@ -133,7 +196,7 @@ func TestSelectAndMarkUnitsSoldInsufficient(t *testing.T) {
 	}
 }
 
-func TestSelectAndMarkSpecificUnitsPreservesSelection(t *testing.T) {
+func TestDeleteSpecificAvailableUnitsPreservesSelection(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
@@ -151,10 +214,10 @@ func TestSelectAndMarkSpecificUnitsPreservesSelection(t *testing.T) {
 	if err != nil {
 		t.Fatalf("begin tx: %v", err)
 	}
-	ids, err := selectAndMarkSpecificUnits(tx, "P-003", []string{"U-022", "U-020"}, "Cambio")
+	ids, err := deleteSpecificAvailableUnits(tx, "P-003", []string{"U-022", "U-020"})
 	if err != nil {
 		_ = tx.Rollback()
-		t.Fatalf("selectAndMarkSpecificUnits: %v", err)
+		t.Fatalf("deleteSpecificAvailableUnits: %v", err)
 	}
 	if err := tx.Commit(); err != nil {
 		t.Fatalf("commit: %v", err)
@@ -164,14 +227,225 @@ func TestSelectAndMarkSpecificUnitsPreservesSelection(t *testing.T) {
 	}
 
 	var selected, available int
-	if err := db.QueryRow(`SELECT COUNT(*) FROM unidades WHERE producto_id = 'P-003' AND estado = 'Cambio'`).Scan(&selected); err != nil {
-		t.Fatalf("count selected: %v", err)
+	if err := db.QueryRow(`SELECT COUNT(*) FROM unidades WHERE producto_id = 'P-003' AND id IN ('U-022', 'U-020')`).Scan(&selected); err != nil {
+		t.Fatalf("count deleted: %v", err)
 	}
 	if err := db.QueryRow(`SELECT COUNT(*) FROM unidades WHERE producto_id = 'P-003' AND estado = 'Disponible'`).Scan(&available); err != nil {
 		t.Fatalf("count available: %v", err)
 	}
-	if selected != 2 || available != 1 {
-		t.Fatalf("unexpected states selected=%d available=%d", selected, available)
+	if selected != 0 || available != 1 {
+		t.Fatalf("unexpected units deleted=%d available=%d", selected, available)
+	}
+}
+
+func TestApplyCambioInventoryUpdatesOutgoingAndIncomingCounts(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	seedCambioProduct(t, db, "P-CAMBIO-A", 5)
+	seedCambioProduct(t, db, "P-CAMBIO-B", 4)
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin cambio: %v", err)
+	}
+	result, err := applyCambioInventory(tx, cambioInventoryInput{
+		ProductID:         "P-CAMBIO-A",
+		OutgoingUnitIDs:   []string{"U-P-CAMBIO-A-01", "U-P-CAMBIO-A-02"},
+		IncomingProductID: "P-CAMBIO-B",
+		IncomingQuantity:  3,
+		PersonaCambio:     "Cliente test",
+		Notas:             "Producto incorrecto",
+		MovementNote:      "cliente de prueba",
+		User:              &User{Username: "tester", Role: "admin"},
+		Now:               "2026-08-07T12:00:00Z",
+	})
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("applyCambioInventory: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit cambio: %v", err)
+	}
+
+	if len(result.OutgoingUnitIDs) != 2 || len(result.IncomingUnitIDs) != 3 {
+		t.Fatalf("unexpected cambio result: %+v", result)
+	}
+	if availableCambioCount(t, db, "P-CAMBIO-A") != 3 || totalCambioCount(t, db, "P-CAMBIO-A") != 3 {
+		t.Fatalf("outgoing product quantity was not reduced")
+	}
+	if availableCambioCount(t, db, "P-CAMBIO-B") != 7 || totalCambioCount(t, db, "P-CAMBIO-B") != 7 {
+		t.Fatalf("incoming product quantity was not increased")
+	}
+	if movementCambioCount(t, db, "cambio_salida", "P-CAMBIO-A") != 2 {
+		t.Fatalf("expected two outgoing movements")
+	}
+	if movementCambioCount(t, db, "cambio_entrada", "P-CAMBIO-B") != 3 {
+		t.Fatalf("expected three incoming movements")
+	}
+	var persona, notes, outgoingName, incomingName string
+	var outgoingQuantity, incomingQuantity int
+	if err := db.QueryRow(`
+		SELECT persona_cambio, notas, saliente_producto_nombre, saliente_cantidad,
+		       entrante_producto_nombre, entrante_cantidad
+		FROM cambio_operaciones
+		WHERE saliente_producto_id = 'P-CAMBIO-A'
+	`).Scan(&persona, &notes, &outgoingName, &outgoingQuantity, &incomingName, &incomingQuantity); err != nil {
+		t.Fatalf("query structured cambio: %v", err)
+	}
+	if persona != "Cliente test" || notes != "Producto incorrecto" || outgoingName != "Producto P-CAMBIO-A" || outgoingQuantity != 2 || incomingName != "Producto P-CAMBIO-B" || incomingQuantity != 3 {
+		t.Fatalf("unexpected structured cambio: persona=%q notes=%q outgoing=%q/%d incoming=%q/%d", persona, notes, outgoingName, outgoingQuantity, incomingName, incomingQuantity)
+	}
+}
+
+func TestApplyCambioInventoryCreatesNewIncomingProduct(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	seedCambioProduct(t, db, "P-CAMBIO-OUT", 2)
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin cambio: %v", err)
+	}
+	_, err = applyCambioInventory(tx, cambioInventoryInput{
+		ProductID:         "P-CAMBIO-OUT",
+		OutgoingUnitIDs:   []string{"U-P-CAMBIO-OUT-01"},
+		IncomingProductID: "P-CAMBIO-NEW",
+		IncomingNew:       true,
+		IncomingName:      "Producto recibido",
+		IncomingLine:      "Cambios",
+		IncomingQuantity:  2,
+		MovementNote:      "producto nuevo",
+		Now:               "2026-08-07T12:00:00Z",
+	})
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("applyCambioInventory new product: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit cambio new product: %v", err)
+	}
+
+	var productCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM productos WHERE sku = 'P-CAMBIO-NEW'`).Scan(&productCount); err != nil {
+		t.Fatalf("count new product: %v", err)
+	}
+	if productCount != 1 || availableCambioCount(t, db, "P-CAMBIO-NEW") != 2 {
+		t.Fatalf("new incoming product was not created with its units")
+	}
+	if availableCambioCount(t, db, "P-CAMBIO-OUT") != 1 {
+		t.Fatalf("outgoing product quantity was not reduced")
+	}
+}
+
+func TestApplyCambioInventorySameProductUsesNetQuantity(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	seedCambioProduct(t, db, "P-CAMBIO-NET", 4)
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin cambio: %v", err)
+	}
+	_, err = applyCambioInventory(tx, cambioInventoryInput{
+		ProductID:         "P-CAMBIO-NET",
+		OutgoingUnitIDs:   []string{"U-P-CAMBIO-NET-01", "U-P-CAMBIO-NET-02"},
+		IncomingProductID: "P-CAMBIO-NET",
+		IncomingQuantity:  1,
+		MovementNote:      "mismo producto",
+		Now:               "2026-08-07T12:00:00Z",
+	})
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("applyCambioInventory same product: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit same product cambio: %v", err)
+	}
+	if availableCambioCount(t, db, "P-CAMBIO-NET") != 3 || totalCambioCount(t, db, "P-CAMBIO-NET") != 3 {
+		t.Fatalf("same-product cambio did not apply net quantity")
+	}
+}
+
+func TestApplyCambioInventoryRollsBackOutgoingWhenIncomingFails(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	seedCambioProduct(t, db, "P-CAMBIO-ROLLBACK", 2)
+	if _, err := db.Exec(`
+		CREATE TRIGGER fail_cambio_incoming
+		BEFORE INSERT ON unidades
+		WHEN NEW.producto_id = 'P-CAMBIO-BLOCKED'
+		BEGIN
+			SELECT RAISE(ABORT, 'entrada bloqueada');
+		END;
+	`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin cambio: %v", err)
+	}
+	_, err = applyCambioInventory(tx, cambioInventoryInput{
+		ProductID:         "P-CAMBIO-ROLLBACK",
+		OutgoingUnitIDs:   []string{"U-P-CAMBIO-ROLLBACK-01"},
+		IncomingProductID: "P-CAMBIO-BLOCKED",
+		IncomingNew:       true,
+		IncomingName:      "Producto bloqueado",
+		IncomingQuantity:  2,
+		MovementNote:      "debe revertirse",
+		Now:               "2026-08-07T12:00:00Z",
+	})
+	if err == nil {
+		_ = tx.Rollback()
+		t.Fatal("expected incoming failure")
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("rollback cambio: %v", err)
+	}
+	if availableCambioCount(t, db, "P-CAMBIO-ROLLBACK") != 2 || totalCambioCount(t, db, "P-CAMBIO-ROLLBACK") != 2 {
+		t.Fatalf("outgoing deletion was not rolled back")
+	}
+	var productCount, movementCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM productos WHERE sku = 'P-CAMBIO-BLOCKED'`).Scan(&productCount); err != nil {
+		t.Fatalf("count rolled back product: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM movimientos WHERE producto_id = 'P-CAMBIO-BLOCKED'`).Scan(&movementCount); err != nil {
+		t.Fatalf("count rolled back movements: %v", err)
+	}
+	if productCount != 0 || movementCount != 0 {
+		t.Fatalf("incoming changes survived rollback: products=%d movements=%d", productCount, movementCount)
+	}
+}
+
+func TestApplyCambioInventoryRejectsUnavailableOutgoing(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	seedCambioProduct(t, db, "P-CAMBIO-RESERVED", 1)
+	seedCambioProduct(t, db, "P-CAMBIO-IN", 1)
+	if _, err := db.Exec(`UPDATE unidades SET estado = 'Reservada' WHERE id = 'U-P-CAMBIO-RESERVED-01'`); err != nil {
+		t.Fatalf("reserve outgoing unit: %v", err)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin cambio: %v", err)
+	}
+	_, err = applyCambioInventory(tx, cambioInventoryInput{
+		ProductID:         "P-CAMBIO-RESERVED",
+		OutgoingUnitIDs:   []string{"U-P-CAMBIO-RESERVED-01"},
+		IncomingProductID: "P-CAMBIO-IN",
+		IncomingQuantity:  1,
+		MovementNote:      "unidad no disponible",
+		Now:               "2026-08-07T12:00:00Z",
+	})
+	if err != errInsufficientStock {
+		_ = tx.Rollback()
+		t.Fatalf("expected insufficient stock, got %v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("rollback unavailable cambio: %v", err)
+	}
+	var state string
+	if err := db.QueryRow(`SELECT estado FROM unidades WHERE id = 'U-P-CAMBIO-RESERVED-01'`).Scan(&state); err != nil {
+		t.Fatalf("query reserved unit: %v", err)
+	}
+	if state != "Reservada" || availableCambioCount(t, db, "P-CAMBIO-IN") != 1 {
+		t.Fatalf("unavailable outgoing was changed unexpectedly: state=%q", state)
 	}
 }
 
@@ -373,8 +647,8 @@ func TestInitDBLeavesNewDatabaseEmptyUnlessDemoIsExplicit(t *testing.T) {
 	if err := db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&migrationCount); err != nil {
 		t.Fatalf("latest schema migration: %v", err)
 	}
-	if migrationCount != 5 {
-		t.Fatalf("expected schema migration version 5, got %d", migrationCount)
+	if migrationCount != 6 {
+		t.Fatalf("expected schema migration version 6, got %d", migrationCount)
 	}
 }
 
@@ -531,7 +805,7 @@ func TestDashboardUsesExactCOPTotalsAndExcludesCancelledSales(t *testing.T) {
 		t.Fatalf("insert sales: %v", err)
 	}
 	start := time.Date(2026, time.August, 6, 0, 0, 0, 0, time.UTC)
-	data, err := buildDashboardSalesData(db, "2026-08-06", "2026-08-06", start, start)
+	data, err := buildDashboardData(db, "2026-08-06", "2026-08-06", start, start)
 	if err != nil {
 		t.Fatalf("build dashboard: %v", err)
 	}
@@ -540,5 +814,47 @@ func TestDashboardUsesExactCOPTotalsAndExcludesCancelledSales(t *testing.T) {
 	}
 	if len(data.Sales) != 1 || data.Sales[0].Total != "$1.001" {
 		t.Fatalf("unexpected dashboard sales: %+v", data.Sales)
+	}
+}
+
+func TestDashboardIncludesStructuredChangesByOperationAndDate(t *testing.T) {
+	t.Setenv("SEED_DEMO", "")
+	t.Setenv("ADMIN_USER", "")
+	t.Setenv("ADMIN_PASS", "")
+	db, err := initDB(filepath.Join(t.TempDir(), "data.db"), []string{"Efectivo"})
+	if err != nil {
+		t.Fatalf("initDB: %v", err)
+	}
+	defer db.Close()
+
+	_, err = db.Exec(`
+		INSERT INTO cambio_operaciones (
+			fecha, persona_cambio, notas,
+			saliente_producto_id, saliente_producto_nombre, saliente_cantidad,
+			entrante_producto_id, entrante_producto_nombre, entrante_cantidad,
+			usuario
+		) VALUES
+			('2026-08-06T10:00:00Z', 'Cliente uno', 'Talla incorrecta', 'P-OUT', 'Producto que sale', 2, 'P-IN', 'Producto que entra', 1, 'admin'),
+			('2026-08-06T11:00:00Z', 'Cliente dos', 'Cambio de referencia', 'P-OUT-2', 'Otro saliente', 1, 'P-IN-2', 'Otro entrante', 1, 'admin'),
+			('2026-08-07T10:00:00Z', 'Fuera de rango', 'No debe aparecer', 'P-OLD', 'Antiguo', 1, 'P-NEW', 'Nuevo', 1, 'admin')
+	`)
+	if err != nil {
+		t.Fatalf("insert changes: %v", err)
+	}
+
+	start := time.Date(2026, time.August, 6, 0, 0, 0, 0, time.UTC)
+	end := start
+	data, err := buildDashboardData(db, "2026-08-06", "2026-08-06", start, end)
+	if err != nil {
+		t.Fatalf("build dashboard: %v", err)
+	}
+	if data.ChangeCount != 2 || len(data.Changes) != 2 {
+		t.Fatalf("unexpected change summary count=%d rows=%d", data.ChangeCount, len(data.Changes))
+	}
+	if data.Changes[0].Persona != "Cliente dos" || data.Changes[0].SalienteProducto != "Otro saliente" || data.Changes[0].EntranteProducto != "Otro entrante" {
+		t.Fatalf("unexpected latest change: %+v", data.Changes[0])
+	}
+	if len(data.Timeline) != 1 || data.Timeline[0].Cambios != 2 {
+		t.Fatalf("unexpected timeline changes: %+v", data.Timeline)
 	}
 }

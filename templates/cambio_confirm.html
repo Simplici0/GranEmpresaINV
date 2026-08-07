@@ -246,7 +246,7 @@
     <div class="card">
     <span class="badge">¡Listo!</span>
     <h1>{{.Title}}</h1>
-    <p>Cambio registrado e inventario actualizado.</p>
+    <p>Cambio registrado: las unidades salientes se retiraron del inventario y las entrantes quedaron disponibles.</p>
 
     <div class="summary">
       <div>
@@ -267,7 +267,7 @@
 
     <div class="summary">
       <div>
-        <strong>Salen</strong>
+        <strong>Se retiran</strong>
         <span>{{len .Salientes}} unidades</span>
       </div>
       <div class="list">
@@ -276,7 +276,7 @@
         {{end}}
       </div>
       <div>
-        <strong>Entran</strong>
+        <strong>Quedan disponibles</strong>
         <span>{{len .Entrantes}} unidades</span>
       </div>
       <div class="list">

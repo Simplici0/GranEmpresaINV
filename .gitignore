@@ -5,5 +5,9 @@
 *.db.bak*
 data/
 
+# Local build artifacts
+/GranEmpresaINV
+/stocki
+
 # macOS
 .DS_Store

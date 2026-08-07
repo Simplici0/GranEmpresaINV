@@ -67,6 +67,8 @@ GranEmpresaINV es una aplicación web interna para gestionar inventario, ventas 
 
 - Inventario transporta y muestra por separado las unidades disponibles y reservadas. El filtro inicial sigue siendo `Disponible`; el filtro `Reservado` incluye productos con reservas aunque también tengan unidades disponibles.
 - Las unidades reservadas no cuentan como disponibles para vender ni para ajustar la cantidad disponible.
+- Un cambio confirmado elimina las unidades salientes disponibles, crea las entrantes como unidades `Disponible` y registra ambos movimientos; no borrar unidades históricas ya existentes en estado `Cambio`.
+- Los cambios nuevos también registran una operación estructurada en `cambio_operaciones` para el dashboard; no reconstruir cambios antiguos desde `movimientos`.
 - El alta exitosa en `/productos` usa POST-Redirect-GET hacia `/productos/new`, muestra un mensaje de confirmación y deja el formulario limpio con el siguiente SKU. Los errores conservan los valores introducidos.
 - La acción administrativa del inventario se llama `Editar producto` y permite modificar cantidad disponible, nombre, línea y precio de venta. El SKU no se modifica y las unidades reservadas quedan intactas.
 - El login incluye un control `Mostrar/Ocultar` para la contraseña, oculta por defecto y sin alterar el flujo de autenticación.
