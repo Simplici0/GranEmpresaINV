@@ -606,6 +606,13 @@
         </svg>
         <span>Inventario</span>
       </a>
+      <a class="app-nav-link" href="/carrito" data-nav-path="/carrito">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" aria-hidden="true">
+          <path d="M4 5h2l1.4 9.2a2 2 0 0 0 2 1.8h7.9a2 2 0 0 0 1.9-1.4L21 8H7" stroke-linecap="round" stroke-linejoin="round" />
+          <circle cx="10" cy="19" r="1.2" /><circle cx="18" cy="19" r="1.2" />
+        </svg>
+        <span>Carrito</span>
+      </a>
       {{if .CurrentUser}}
         {{if eq .CurrentUser.Role "admin"}}
           <a class="app-nav-link" href="/productos/new" data-nav-path="/productos/new">

@@ -34,6 +34,7 @@ GranEmpresaINV es una aplicación web interna para gestionar inventario, ventas 
 - `/productos/new`, `/productos` y `/productos/historial`: creación, consulta y movimientos de productos.
 - `/venta/new`, `/venta` y `/venta/confirm`: creación y confirmación de ventas.
 - `/cambio/new` y `/cambio`: creación y confirmación de cambios.
+- `/carrito` y `/checkout`: agrupación y confirmación de ventas, cargos y cambios.
 - `/dashboard`, `/dashboard/data` y `/csv/ventas`: indicadores y datos de ventas.
 - `/productos/csv`, `/csv/template` y `/csv/export`: carga y exportación relacionada con CSV.
 - `/admin/users`: administración de usuarios.
@@ -43,13 +44,14 @@ GranEmpresaINV es una aplicación web interna para gestionar inventario, ventas 
 ## Base de datos
 
 - `DB_PATH` selecciona la base de datos y por defecto es `data.db`.
-- `initDB` crea y ajusta el esquema directamente desde `main.go`; no existe un sistema de migraciones versionadas.
-- Las tablas principales son `productos`, `unidades`, `ventas`, `users`, `sessions`, `movimientos` y `app_meta`.
+- `initDB` crea y ajusta el esquema directamente desde `main.go` mediante migraciones ad-hoc registradas en `schema_migrations`.
+- Las tablas principales son `productos`, `unidades`, `ventas`, `users`, `sessions`, `movimientos`, `app_meta` y las tablas `checkout_*` del carrito.
 - Los importes se almacenan como `REAL`; conservar la convención existente salvo que el cambio incluya una decisión explícita sobre precisión monetaria.
 - SQLite se configura con WAL. Las bases locales pueden tener archivos `.db-wal` y `.db-shm` activos.
 - Las migraciones actuales son comprobaciones y `ALTER TABLE` ad-hoc para columnas legacy. Si se cambia el esquema, revisar bases existentes y documentar el camino de actualización.
 - `app_meta.demo_seed_disabled` controla el seed demo. Una base nueva puede recibir productos/ventas demo automáticamente; comprobar esta conducta antes de usar una base de producción.
 - `cambios` y `precio_venta_historial` aparecen en lógica legacy/reset, pero no forman parte de todo el esquema inicial actual. No asumir que existen en una base recién creada.
+- La migración 7 agrega el checkout persistente y columnas de tipo, nombre y referencia en `ventas`; se aplica automáticamente al iniciar y conserva los registros legacy.
 - No borrar, recrear ni editar una base SQLite de trabajo para probar código sin confirmar antes la ruta `DB_PATH`.
 
 ## Autenticación y permisos
@@ -68,7 +70,7 @@ GranEmpresaINV es una aplicación web interna para gestionar inventario, ventas 
 - Inventario transporta y muestra por separado las unidades disponibles y reservadas. El filtro inicial sigue siendo `Disponible`; el filtro `Reservado` incluye productos con reservas aunque también tengan unidades disponibles.
 - Las unidades reservadas no cuentan como disponibles para vender ni para ajustar la cantidad disponible.
 - Un cambio confirmado elimina las unidades salientes disponibles, crea las entrantes como unidades `Disponible` y registra ambos movimientos; no borrar unidades históricas ya existentes en estado `Cambio`.
-- Los cambios nuevos también registran una operación estructurada en `cambio_operaciones` para el dashboard; no reconstruir cambios antiguos desde `movimientos`.
+- Los cambios rápidos registran una operación estructurada en `cambio_operaciones`; los cambios agrupados del carrito usan `checkout_operaciones` y `checkout_cambio_items` para conservar listas generales de salidas/entradas. No reconstruir cambios antiguos desde `movimientos`.
 - El alta exitosa en `/productos` usa POST-Redirect-GET hacia `/productos/new`, muestra un mensaje de confirmación y deja el formulario limpio con el siguiente SKU. Los errores conservan los valores introducidos.
 - La acción administrativa del inventario se llama `Editar producto` y permite modificar cantidad disponible, nombre, línea y precio de venta. El SKU no se modifica y las unidades reservadas quedan intactas.
 - El login incluye un control `Mostrar/Ocultar` para la contraseña, oculta por defecto y sin alterar el flujo de autenticación.

@@ -7,6 +7,7 @@ import (
 	"encoding/base64"
 	"encoding/csv"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"html/template"
 	"log"
@@ -47,6 +48,119 @@ type productOption struct {
 	FechaIngreso string
 	SalePrice    int64
 	Units        []unitOption
+}
+
+const (
+	checkoutChargeProductID = "__CARGO_DIFERENCIA__"
+	checkoutStateDraft      = "borrador"
+	checkoutStatePartial    = "parcial"
+	checkoutStateConfirmed  = "confirmado"
+	checkoutStateDiscarded  = "descartado"
+	checkoutLinePending     = "pendiente"
+	checkoutLineProcessed   = "procesada"
+	checkoutLineError       = "error"
+	checkoutLineDiscarded   = "descartada"
+)
+
+type checkoutOperation struct {
+	ID           int64
+	UserID       int
+	Cliente      string
+	MetodoPago   string
+	Notas        string
+	Estado       string
+	TotalCOP     int64
+	TotalText    string
+	CreatedAt    string
+	UpdatedAt    string
+	ItemCount    int
+	PendingCount int
+}
+
+type checkoutSaleItem struct {
+	ID                int64
+	CheckoutID        int64
+	Tipo              string
+	ProductoID        string
+	ProductoNombre    string
+	Cantidad          int
+	PrecioUnitarioCOP int64
+	TotalCOP          int64
+	PrecioText        string
+	TotalText         string
+	Notas             string
+	Orden             int
+	Estado            string
+	Error             string
+	VentaID           sql.NullInt64
+	CreatedAt         string
+	UpdatedAt         string
+}
+
+type checkoutChangeItem struct {
+	ID             int64
+	CheckoutID     int64
+	Direccion      string
+	ProductoID     string
+	ProductoNombre string
+	Linea          string
+	Cantidad       int
+	EsNuevo        bool
+	Orden          int
+	Estado         string
+	Error          string
+	ProcessedAt    string
+	CreatedAt      string
+	UpdatedAt      string
+}
+
+type checkoutItemRef struct {
+	Kind  string
+	ID    int64
+	Order int
+}
+
+type checkoutProcessResult struct {
+	CheckoutID        int64
+	State             string
+	ProcessedCount    int
+	FailedCount       int
+	PendingCount      int
+	ProcessedTotalCOP int64
+	Errors            []string
+}
+
+type checkoutSaleInput struct {
+	Tipo              string
+	ProductoID        string
+	ProductoNombre    string
+	Cantidad          int
+	PrecioUnitarioCOP int64
+	TotalCOP          int64
+	Notas             string
+}
+
+type checkoutChangeInput struct {
+	Direccion      string
+	ProductoID     string
+	ProductoNombre string
+	Linea          string
+	Cantidad       int
+	EsNuevo        bool
+}
+
+type checkoutPageData struct {
+	Title          string
+	Subtitle       string
+	Flash          string
+	Error          string
+	Checkout       checkoutOperation
+	SaleItems      []checkoutSaleItem
+	ChangeItems    []checkoutChangeItem
+	Products       []productOption
+	StockByProduct map[string]int
+	PaymentMethods []string
+	CurrentUser    *User
 }
 
 type csvFailedRow struct {
@@ -447,8 +561,21 @@ func buildDashboardData(db *sql.DB, startStr, endStr string, startDate, endDate 
 	var changeCount int
 	if err := db.QueryRow(`
 		SELECT COUNT(*)
-		FROM cambio_operaciones
-		WHERE date(fecha) BETWEEN ? AND ?`, startStr, endStr).Scan(&changeCount); err != nil {
+		FROM (
+			SELECT id
+			FROM cambio_operaciones
+			WHERE date(fecha) BETWEEN ? AND ?
+			UNION ALL
+			SELECT c.id
+			FROM checkout_operaciones c
+			WHERE c.estado IN ('parcial', 'confirmado')
+			  AND date(c.updated_at) BETWEEN ? AND ?
+			  AND EXISTS (
+				SELECT 1
+				FROM checkout_cambio_items i
+				WHERE i.checkout_id = c.id AND i.estado = 'procesada'
+			  )
+		)`, startStr, endStr, startStr, endStr).Scan(&changeCount); err != nil {
 		return dashboardDataResponse{}, err
 	}
 	resp.ChangeCount = changeCount
@@ -535,11 +662,24 @@ func buildDashboardData(db *sql.DB, startStr, endStr string, startDate, endDate 
 	}
 
 	changeRows, err := db.Query(`
-		SELECT date(fecha), COUNT(*)
-		FROM cambio_operaciones
-		WHERE date(fecha) BETWEEN ? AND ?
-		GROUP BY date(fecha)
-		ORDER BY date(fecha)`, startStr, endStr)
+		SELECT fecha, COUNT(*)
+		FROM (
+			SELECT date(fecha) AS fecha
+			FROM cambio_operaciones
+			WHERE date(fecha) BETWEEN ? AND ?
+			UNION ALL
+			SELECT date(c.updated_at) AS fecha
+			FROM checkout_operaciones c
+			WHERE c.estado IN ('parcial', 'confirmado')
+			  AND date(c.updated_at) BETWEEN ? AND ?
+			  AND EXISTS (
+				SELECT 1
+				FROM checkout_cambio_items i
+				WHERE i.checkout_id = c.id AND i.estado = 'procesada'
+			  )
+		)
+		GROUP BY fecha
+		ORDER BY fecha`, startStr, endStr, startStr, endStr)
 	if err != nil {
 		return dashboardDataResponse{}, err
 	}
@@ -588,10 +728,11 @@ func buildDashboardData(db *sql.DB, startStr, endStr string, startDate, endDate 
 		SELECT
 			v.id,
 			v.fecha,
-			COALESCE(p.nombre, v.producto_id),
+			COALESCE(NULLIF(v.producto_nombre, ''), p.nombre, v.producto_id),
 			v.cantidad,
 			v.total_cop,
-			v.metodo_pago
+			v.metodo_pago,
+			COALESCE(v.tipo, 'producto')
 		FROM ventas v
 		LEFT JOIN productos p ON p.sku = v.producto_id
 		WHERE v.estado = 'confirmada' AND date(v.fecha) BETWEEN ? AND ?
@@ -611,13 +752,18 @@ func buildDashboardData(db *sql.DB, startStr, endStr string, startDate, endDate 
 			cantidad   int
 			total      int64
 			metodoPago string
+			tipo       string
 		)
-		if err := saleRows.Scan(&id, &fechaRaw, &producto, &cantidad, &total, &metodoPago); err != nil {
+		if err := saleRows.Scan(&id, &fechaRaw, &producto, &cantidad, &total, &metodoPago, &tipo); err != nil {
 			return dashboardDataResponse{}, err
 		}
 		fecha := fechaRaw
 		if len(fechaRaw) >= 10 {
 			fecha = fechaRaw[:10]
+		}
+		tipoLabel := "Venta"
+		if tipo == "cargo" {
+			tipoLabel = "Cargo"
 		}
 		sales = append(sales, dashboardSaleDetail{
 			ID:         id,
@@ -626,7 +772,7 @@ func buildDashboardData(db *sql.DB, startStr, endStr string, startDate, endDate 
 			Cantidad:   cantidad,
 			Total:      formatCurrency(total),
 			MetodoPago: metodoPago,
-			Tipo:       "Venta",
+			Tipo:       tipoLabel,
 			EsVenta:    true,
 		})
 	}
@@ -693,23 +839,61 @@ func buildDashboardData(db *sql.DB, startStr, endStr string, startDate, endDate 
 	}
 
 	detailRows, err := db.Query(`
-		SELECT
-			id,
-			fecha,
-			persona_cambio,
-			saliente_producto_id,
-			saliente_producto_nombre,
-			saliente_cantidad,
-			entrante_producto_id,
-			entrante_producto_nombre,
-			entrante_cantidad,
-			notas,
-			usuario
-		FROM cambio_operaciones
-		WHERE date(fecha) BETWEEN ? AND ?
+		SELECT id, fecha, persona, saliente_sku, saliente_producto,
+		       saliente_cantidad, entrante_sku, entrante_producto,
+		       entrante_cantidad, motivo, usuario
+		FROM (
+			SELECT
+				id,
+				fecha,
+				persona_cambio AS persona,
+				saliente_producto_id AS saliente_sku,
+				saliente_producto_nombre AS saliente_producto,
+				saliente_cantidad,
+				entrante_producto_id AS entrante_sku,
+				entrante_producto_nombre AS entrante_producto,
+				entrante_cantidad,
+				notas AS motivo,
+				usuario
+			FROM cambio_operaciones
+			WHERE date(fecha) BETWEEN ? AND ?
+			UNION ALL
+			SELECT
+				c.id,
+				c.updated_at AS fecha,
+				c.cliente AS persona,
+				COALESCE((SELECT group_concat(i.producto_id || ' x' || i.cantidad, ', ')
+				          FROM checkout_cambio_items i
+				          WHERE i.checkout_id = c.id AND i.direccion = 'salida' AND i.estado = 'procesada'), '-') AS saliente_sku,
+				COALESCE((SELECT group_concat(i.producto_nombre || ' x' || i.cantidad, ', ')
+				          FROM checkout_cambio_items i
+				          WHERE i.checkout_id = c.id AND i.direccion = 'salida' AND i.estado = 'procesada'), '-') AS saliente_producto,
+				COALESCE((SELECT SUM(i.cantidad)
+				          FROM checkout_cambio_items i
+				          WHERE i.checkout_id = c.id AND i.direccion = 'salida' AND i.estado = 'procesada'), 0) AS saliente_cantidad,
+				COALESCE((SELECT group_concat(i.producto_id || ' x' || i.cantidad, ', ')
+				          FROM checkout_cambio_items i
+				          WHERE i.checkout_id = c.id AND i.direccion = 'entrada' AND i.estado = 'procesada'), '-') AS entrante_sku,
+				COALESCE((SELECT group_concat(i.producto_nombre || ' x' || i.cantidad, ', ')
+				          FROM checkout_cambio_items i
+				          WHERE i.checkout_id = c.id AND i.direccion = 'entrada' AND i.estado = 'procesada'), '-') AS entrante_producto,
+				COALESCE((SELECT SUM(i.cantidad)
+				          FROM checkout_cambio_items i
+				          WHERE i.checkout_id = c.id AND i.direccion = 'entrada' AND i.estado = 'procesada'), 0) AS entrante_cantidad,
+				c.notas AS motivo,
+				COALESCE(u.username, '') AS usuario
+			FROM checkout_operaciones c
+			LEFT JOIN users u ON u.id = c.user_id
+			WHERE c.estado IN ('parcial', 'confirmado')
+			  AND date(c.updated_at) BETWEEN ? AND ?
+			  AND EXISTS (
+				SELECT 1 FROM checkout_cambio_items i
+				WHERE i.checkout_id = c.id AND i.estado = 'procesada'
+			  )
+		)
 		ORDER BY fecha DESC, id DESC
 		LIMIT 200
-	`, startStr, endStr)
+	`, startStr, endStr, startStr, endStr)
 	if err != nil {
 		return dashboardDataResponse{}, err
 	}
@@ -896,8 +1080,8 @@ func cancelSale(tx *sql.Tx, saleID int, user *User, reason string) error {
 	if user == nil {
 		return fmt.Errorf("usuario requerido")
 	}
-	var productID, state string
-	if err := tx.QueryRow(`SELECT producto_id, estado FROM ventas WHERE id = ?`, saleID).Scan(&productID, &state); err != nil {
+	var productID, state, saleType string
+	if err := tx.QueryRow(`SELECT producto_id, estado, COALESCE(tipo, 'producto') FROM ventas WHERE id = ?`, saleID).Scan(&productID, &state, &saleType); err != nil {
 		if err == sql.ErrNoRows {
 			return errSaleNotFound
 		}
@@ -905,6 +1089,24 @@ func cancelSale(tx *sql.Tx, saleID int, user *User, reason string) error {
 	}
 	if state != "confirmada" {
 		return errSaleAlreadyCancelled
+	}
+	if saleType == "cargo" || productID == checkoutChargeProductID {
+		now := time.Now().Format(time.RFC3339)
+		result, err := tx.Exec(`
+			UPDATE ventas
+			SET estado = 'anulada', anulada_en = ?, anulada_por = ?, anulacion_motivo = ?
+			WHERE id = ? AND estado = 'confirmada'`, now, user.Username, reason, saleID)
+		if err != nil {
+			return err
+		}
+		affected, err := result.RowsAffected()
+		if err != nil {
+			return err
+		}
+		if affected != 1 {
+			return errSaleAlreadyCancelled
+		}
+		return logAudit(tx, "sale.cancel", "venta", strconv.Itoa(saleID), reason, user, now)
 	}
 
 	rows, err := tx.Query(`SELECT unidad_id FROM venta_unidades WHERE venta_id = ? ORDER BY unidad_id`, saleID)
@@ -1270,6 +1472,1237 @@ func availableCountsByProduct(db *sql.DB) (map[string]int, error) {
 		return nil, err
 	}
 	return out, nil
+}
+
+type checkoutBusinessError struct {
+	message string
+}
+
+func (e *checkoutBusinessError) Error() string { return e.message }
+
+func checkoutBusinessErrorf(format string, args ...any) error {
+	return &checkoutBusinessError{message: fmt.Sprintf(format, args...)}
+}
+
+func isCheckoutBusinessError(err error) bool {
+	if errors.Is(err, errInsufficientStock) {
+		return true
+	}
+	var businessErr *checkoutBusinessError
+	return errors.As(err, &businessErr)
+}
+
+func maxMoneyValue() int64 {
+	return int64(^uint64(0) >> 1)
+}
+
+func multiplyCOP(unitPrice int64, quantity int) (int64, error) {
+	if unitPrice <= 0 || quantity <= 0 {
+		return 0, checkoutBusinessErrorf("El importe y la cantidad deben ser válidos.")
+	}
+	if int64(quantity) > maxMoneyValue()/unitPrice {
+		return 0, checkoutBusinessErrorf("El total de la línea es demasiado grande.")
+	}
+	return unitPrice * int64(quantity), nil
+}
+
+func checkoutText(value, label string, maxBytes int) (string, error) {
+	value = strings.TrimSpace(value)
+	if len(value) > maxBytes {
+		return "", checkoutBusinessErrorf("%s supera el máximo permitido.", label)
+	}
+	return value, nil
+}
+
+func ensureCheckoutTx(tx *sql.Tx, userID int) (int64, error) {
+	if userID <= 0 {
+		return 0, fmt.Errorf("usuario de checkout inválido")
+	}
+	var checkoutID int64
+	err := tx.QueryRow(`
+		SELECT id
+		FROM checkout_operaciones
+		WHERE user_id = ? AND estado IN ('borrador', 'parcial')
+		ORDER BY id
+		LIMIT 1`, userID).Scan(&checkoutID)
+	if err == nil {
+		return checkoutID, nil
+	}
+	if err != sql.ErrNoRows {
+		return 0, err
+	}
+
+	now := time.Now().Format(time.RFC3339)
+	if _, err := tx.Exec(`
+		INSERT OR IGNORE INTO checkout_operaciones
+			(user_id, estado, created_at, updated_at)
+		VALUES (?, 'borrador', ?, ?)`, userID, now, now); err != nil {
+		return 0, err
+	}
+	if err := tx.QueryRow(`
+		SELECT id
+		FROM checkout_operaciones
+		WHERE user_id = ? AND estado IN ('borrador', 'parcial')
+		ORDER BY id
+		LIMIT 1`, userID).Scan(&checkoutID); err != nil {
+		return 0, err
+	}
+	return checkoutID, nil
+}
+
+func ensureActiveCheckout(db *sql.DB, userID int) (int64, error) {
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	checkoutID, err := ensureCheckoutTx(tx, userID)
+	if err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	committed = true
+	return checkoutID, nil
+}
+
+func nextCheckoutOrderTx(tx *sql.Tx, checkoutID int64) (int, error) {
+	var next int
+	if err := tx.QueryRow(`
+		SELECT COALESCE(MAX(orden), 0) + 1
+		FROM (
+			SELECT orden FROM checkout_venta_items WHERE checkout_id = ?
+			UNION ALL
+			SELECT orden FROM checkout_cambio_items WHERE checkout_id = ?
+		)`, checkoutID, checkoutID).Scan(&next); err != nil {
+		return 0, err
+	}
+	return next, nil
+}
+
+func touchCheckoutTx(tx *sql.Tx, checkoutID int64, now string) error {
+	_, err := tx.Exec(`UPDATE checkout_operaciones SET updated_at = ? WHERE id = ?`, now, checkoutID)
+	return err
+}
+
+func productSalePriceTx(tx *sql.Tx, productID string) (string, int64, error) {
+	var name string
+	var price int64
+	err := tx.QueryRow(`
+		SELECT nombre,
+		       CASE WHEN COALESCE(precio_venta_cop, 0) <> 0
+		            THEN precio_venta_cop
+		            ELSE CAST(ROUND(COALESCE(precio_venta, 0)) AS INTEGER)
+		       END
+		FROM productos
+		WHERE sku = ?`, productID).Scan(&name, &price)
+	if err == sql.ErrNoRows {
+		return "", 0, checkoutBusinessErrorf("El producto seleccionado no existe.")
+	}
+	if err != nil {
+		return "", 0, err
+	}
+	return name, price, nil
+}
+
+func addCheckoutSaleItem(db *sql.DB, userID int, input checkoutSaleInput) (int64, error) {
+	input.Tipo = strings.TrimSpace(input.Tipo)
+	if input.Tipo == "" {
+		input.Tipo = "producto"
+	}
+	if input.Tipo != "producto" && input.Tipo != "cargo" {
+		return 0, checkoutBusinessErrorf("Tipo de línea de venta inválido.")
+	}
+	if input.Tipo == "producto" && input.Cantidad <= 0 {
+		return 0, checkoutBusinessErrorf("La cantidad debe ser positiva.")
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	checkoutID, err := ensureCheckoutTx(tx, userID)
+	if err != nil {
+		return 0, err
+	}
+	if input.Tipo == "cargo" {
+		if input.TotalCOP <= 0 {
+			return 0, checkoutBusinessErrorf("El cargo debe tener un valor mayor a cero.")
+		}
+		input.ProductoID = checkoutChargeProductID
+		input.ProductoNombre = "Diferencia de cambio"
+		input.Cantidad = 1
+		input.PrecioUnitarioCOP = input.TotalCOP
+	} else {
+		var textErr error
+		input.ProductoID, textErr = checkoutText(input.ProductoID, "El SKU", 80)
+		if textErr != nil {
+			return 0, textErr
+		}
+		if input.ProductoID == "" {
+			return 0, checkoutBusinessErrorf("Selecciona un producto válido.")
+		}
+		name, catalogPrice, err := productSalePriceTx(tx, input.ProductoID)
+		if err != nil {
+			return 0, err
+		}
+		input.ProductoNombre = name
+		if input.PrecioUnitarioCOP <= 0 {
+			input.PrecioUnitarioCOP = catalogPrice
+		}
+		if input.PrecioUnitarioCOP <= 0 {
+			return 0, checkoutBusinessErrorf("El producto no tiene un precio de venta válido.")
+		}
+	}
+	var textErr error
+	input.Notas, textErr = checkoutText(input.Notas, "Las notas", 500)
+	if textErr != nil {
+		return 0, textErr
+	}
+
+	total, err := multiplyCOP(input.PrecioUnitarioCOP, input.Cantidad)
+	if err != nil {
+		return 0, err
+	}
+	order, err := nextCheckoutOrderTx(tx, checkoutID)
+	if err != nil {
+		return 0, err
+	}
+	now := time.Now().Format(time.RFC3339)
+	result, err := tx.Exec(`
+		INSERT INTO checkout_venta_items (
+			checkout_id, tipo, producto_id, producto_nombre, cantidad,
+			precio_unitario_cop, total_cop, notas, orden, estado,
+			created_at, updated_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, ?)`,
+		checkoutID,
+		input.Tipo,
+		input.ProductoID,
+		strings.TrimSpace(input.ProductoNombre),
+		input.Cantidad,
+		input.PrecioUnitarioCOP,
+		total,
+		strings.TrimSpace(input.Notas),
+		order,
+		now,
+		now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	itemID, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	if err := touchCheckoutTx(tx, checkoutID, now); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	committed = true
+	return itemID, nil
+}
+
+func addCheckoutChangeItem(db *sql.DB, userID int, input checkoutChangeInput) (int64, error) {
+	input.Direccion = strings.TrimSpace(input.Direccion)
+	if input.Direccion != "salida" && input.Direccion != "entrada" {
+		return 0, checkoutBusinessErrorf("Dirección de cambio inválida.")
+	}
+	if input.Cantidad <= 0 {
+		return 0, checkoutBusinessErrorf("La cantidad debe ser positiva.")
+	}
+	var textErr error
+	input.ProductoID, textErr = checkoutText(input.ProductoID, "El SKU", 80)
+	if textErr != nil {
+		return 0, textErr
+	}
+	if input.ProductoID == "" {
+		return 0, checkoutBusinessErrorf("Selecciona un producto válido.")
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	checkoutID, err := ensureCheckoutTx(tx, userID)
+	if err != nil {
+		return 0, err
+	}
+	if input.Direccion == "salida" {
+		name, _, err := productSalePriceTx(tx, input.ProductoID)
+		if err != nil {
+			return 0, err
+		}
+		input.ProductoNombre = name
+		input.EsNuevo = false
+	} else if input.EsNuevo {
+		input.ProductoNombre, err = checkoutText(input.ProductoNombre, "El nombre del producto", 180)
+		if err != nil {
+			return 0, err
+		}
+		if input.ProductoNombre == "" {
+			return 0, checkoutBusinessErrorf("El nombre del producto entrante es obligatorio.")
+		}
+		var count int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM productos WHERE sku = ?`, input.ProductoID).Scan(&count); err != nil {
+			return 0, err
+		}
+		if count > 0 {
+			return 0, checkoutBusinessErrorf("El SKU del producto entrante ya existe.")
+		}
+		input.Linea, err = checkoutText(input.Linea, "La línea del producto", 120)
+		if err != nil {
+			return 0, err
+		}
+		if input.Linea == "" {
+			input.Linea = "Sin línea"
+		}
+	} else {
+		name, _, err := productSalePriceTx(tx, input.ProductoID)
+		if err != nil {
+			return 0, err
+		}
+		input.ProductoNombre = name
+		input.Linea = ""
+	}
+
+	order, err := nextCheckoutOrderTx(tx, checkoutID)
+	if err != nil {
+		return 0, err
+	}
+	now := time.Now().Format(time.RFC3339)
+	result, err := tx.Exec(`
+		INSERT INTO checkout_cambio_items (
+			checkout_id, direccion, producto_id, producto_nombre, linea,
+			cantidad, es_nuevo, orden, estado, created_at, updated_at
+		)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pendiente', ?, ?)`,
+		checkoutID,
+		input.Direccion,
+		input.ProductoID,
+		strings.TrimSpace(input.ProductoNombre),
+		strings.TrimSpace(input.Linea),
+		input.Cantidad,
+		boolToInt(input.EsNuevo),
+		order,
+		now,
+		now,
+	)
+	if err != nil {
+		return 0, err
+	}
+	itemID, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	if err := touchCheckoutTx(tx, checkoutID, now); err != nil {
+		return 0, err
+	}
+	if err := tx.Commit(); err != nil {
+		return 0, err
+	}
+	committed = true
+	return itemID, nil
+}
+
+func boolToInt(value bool) int {
+	if value {
+		return 1
+	}
+	return 0
+}
+
+func loadActiveCheckout(db *sql.DB, userID int) (checkoutOperation, []checkoutSaleItem, []checkoutChangeItem, error) {
+	checkoutID, err := ensureActiveCheckout(db, userID)
+	if err != nil {
+		return checkoutOperation{}, nil, nil, err
+	}
+	var checkout checkoutOperation
+	if err := db.QueryRow(`
+		SELECT id, user_id, cliente, metodo_pago, notas, estado, total_cop, created_at, updated_at
+		FROM checkout_operaciones
+		WHERE id = ? AND user_id = ?`, checkoutID, userID).Scan(
+		&checkout.ID,
+		&checkout.UserID,
+		&checkout.Cliente,
+		&checkout.MetodoPago,
+		&checkout.Notas,
+		&checkout.Estado,
+		&checkout.TotalCOP,
+		&checkout.CreatedAt,
+		&checkout.UpdatedAt,
+	); err != nil {
+		return checkoutOperation{}, nil, nil, err
+	}
+	checkout.TotalText = formatCurrency(checkout.TotalCOP)
+
+	saleRows, err := db.Query(`
+		SELECT id, checkout_id, tipo, producto_id, producto_nombre, cantidad,
+		       precio_unitario_cop, total_cop, notas, orden, estado, error,
+		       venta_id, created_at, updated_at
+		FROM checkout_venta_items
+		WHERE checkout_id = ?
+		ORDER BY orden, id`, checkoutID)
+	if err != nil {
+		return checkoutOperation{}, nil, nil, err
+	}
+	sales := make([]checkoutSaleItem, 0)
+	for saleRows.Next() {
+		var item checkoutSaleItem
+		if err := saleRows.Scan(
+			&item.ID,
+			&item.CheckoutID,
+			&item.Tipo,
+			&item.ProductoID,
+			&item.ProductoNombre,
+			&item.Cantidad,
+			&item.PrecioUnitarioCOP,
+			&item.TotalCOP,
+			&item.Notas,
+			&item.Orden,
+			&item.Estado,
+			&item.Error,
+			&item.VentaID,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			saleRows.Close()
+			return checkoutOperation{}, nil, nil, err
+		}
+		item.PrecioText = formatCurrency(item.PrecioUnitarioCOP)
+		item.TotalText = formatCurrency(item.TotalCOP)
+		sales = append(sales, item)
+	}
+	if err := saleRows.Err(); err != nil {
+		saleRows.Close()
+		return checkoutOperation{}, nil, nil, err
+	}
+	saleRows.Close()
+
+	changeRows, err := db.Query(`
+		SELECT id, checkout_id, direccion, producto_id, producto_nombre, linea,
+		       cantidad, es_nuevo, orden, estado, error, processed_at,
+		       created_at, updated_at
+		FROM checkout_cambio_items
+		WHERE checkout_id = ?
+		ORDER BY orden, id`, checkoutID)
+	if err != nil {
+		return checkoutOperation{}, nil, nil, err
+	}
+	changes := make([]checkoutChangeItem, 0)
+	for changeRows.Next() {
+		var item checkoutChangeItem
+		var isNew int
+		if err := changeRows.Scan(
+			&item.ID,
+			&item.CheckoutID,
+			&item.Direccion,
+			&item.ProductoID,
+			&item.ProductoNombre,
+			&item.Linea,
+			&item.Cantidad,
+			&isNew,
+			&item.Orden,
+			&item.Estado,
+			&item.Error,
+			&item.ProcessedAt,
+			&item.CreatedAt,
+			&item.UpdatedAt,
+		); err != nil {
+			changeRows.Close()
+			return checkoutOperation{}, nil, nil, err
+		}
+		item.EsNuevo = isNew == 1
+		changes = append(changes, item)
+	}
+	if err := changeRows.Err(); err != nil {
+		changeRows.Close()
+		return checkoutOperation{}, nil, nil, err
+	}
+	changeRows.Close()
+
+	for _, item := range sales {
+		if item.Estado != checkoutLineDiscarded {
+			checkout.ItemCount++
+		}
+	}
+	for _, item := range changes {
+		if item.Estado != checkoutLineDiscarded {
+			checkout.ItemCount++
+		}
+	}
+	for _, item := range sales {
+		if item.Estado == checkoutLinePending || item.Estado == checkoutLineError {
+			checkout.PendingCount++
+		}
+	}
+	for _, item := range changes {
+		if item.Estado == checkoutLinePending || item.Estado == checkoutLineError {
+			checkout.PendingCount++
+		}
+	}
+	return checkout, sales, changes, nil
+}
+
+func selectAvailableUnitIDsTx(tx *sql.Tx, productID string, quantity int) ([]string, error) {
+	if quantity <= 0 {
+		return nil, checkoutBusinessErrorf("La cantidad debe ser positiva.")
+	}
+	rows, err := tx.Query(`
+		SELECT id
+		FROM unidades
+		WHERE producto_id = ? AND estado IN ('Disponible', 'available')
+		ORDER BY creado_en, id
+		LIMIT ?`, productID, quantity)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	ids := make([]string, 0, quantity)
+	for rows.Next() {
+		var id string
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
+		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	if len(ids) != quantity {
+		return nil, errInsufficientStock
+	}
+	return ids, nil
+}
+
+func newCheckoutUnitID(productID, token string, index int) string {
+	return fmt.Sprintf("U-%s-%s-%d", productID, token, index)
+}
+
+func applyCheckoutSaleItem(tx *sql.Tx, item checkoutSaleItem, checkoutID int64, paymentMethod string, user *User, now string) (int64, error) {
+	expectedTotal, err := multiplyCOP(item.PrecioUnitarioCOP, item.Cantidad)
+	if err != nil || expectedTotal != item.TotalCOP {
+		return 0, checkoutBusinessErrorf("El importe de la línea de venta ya no es válido.")
+	}
+	if item.Tipo == "cargo" {
+		if item.Cantidad != 1 || item.TotalCOP <= 0 {
+			return 0, checkoutBusinessErrorf("El cargo debe tener un valor mayor a cero.")
+		}
+		result, err := tx.Exec(`
+			INSERT INTO ventas (
+				producto_id, producto_nombre, tipo, cantidad, precio_final,
+				metodo_pago, notas, fecha, precio_unitario_cop, total_cop, checkout_id
+			)
+			VALUES (?, ?, 'cargo', 1, ?, ?, ?, ?, ?, ?, ?)`,
+			checkoutChargeProductID,
+			"Diferencia de cambio",
+			float64(item.TotalCOP),
+			paymentMethod,
+			strings.TrimSpace(item.Notas),
+			now,
+			item.TotalCOP,
+			item.TotalCOP,
+			checkoutID,
+		)
+		if err != nil {
+			return 0, err
+		}
+		saleID, err := result.LastInsertId()
+		if err != nil {
+			return 0, err
+		}
+		if err := logAudit(tx, "sale.charge", "venta", strconv.FormatInt(saleID, 10), fmt.Sprintf("checkout=%d", checkoutID), user, now); err != nil {
+			return 0, err
+		}
+		return saleID, nil
+	}
+
+	productID := strings.TrimSpace(item.ProductoID)
+	if productID == "" {
+		return 0, checkoutBusinessErrorf("La línea de venta no tiene producto.")
+	}
+	if _, _, err := productSalePriceTx(tx, productID); err != nil {
+		return 0, err
+	}
+	unitIDs, err := selectAndMarkUnitsSold(tx, productID, item.Cantidad)
+	if err != nil {
+		if errors.Is(err, errInsufficientStock) {
+			return 0, errInsufficientStock
+		}
+		return 0, err
+	}
+	if err := logMovimientos(tx, productID, unitIDs, "venta", item.Notas, user, now); err != nil {
+		return 0, err
+	}
+	result, err := tx.Exec(`
+		INSERT INTO ventas (
+			producto_id, producto_nombre, tipo, cantidad, precio_final,
+			metodo_pago, notas, fecha, precio_unitario_cop, total_cop, checkout_id
+		)
+		VALUES (?, ?, 'producto', ?, ?, ?, ?, ?, ?, ?, ?)`,
+		productID,
+		strings.TrimSpace(item.ProductoNombre),
+		item.Cantidad,
+		float64(item.PrecioUnitarioCOP),
+		paymentMethod,
+		strings.TrimSpace(item.Notas),
+		now,
+		item.PrecioUnitarioCOP,
+		item.TotalCOP,
+		checkoutID,
+	)
+	if err != nil {
+		return 0, err
+	}
+	saleID, err := result.LastInsertId()
+	if err != nil {
+		return 0, err
+	}
+	for _, unitID := range unitIDs {
+		if _, err := tx.Exec(`INSERT INTO venta_unidades (venta_id, unidad_id) VALUES (?, ?)`, saleID, unitID); err != nil {
+			return 0, err
+		}
+	}
+	if err := logAudit(tx, "sale.create", "venta", strconv.FormatInt(saleID, 10), fmt.Sprintf("checkout=%d", checkoutID), user, now); err != nil {
+		return 0, err
+	}
+	return saleID, nil
+}
+
+func applyCheckoutChangeItem(tx *sql.Tx, item checkoutChangeItem, checkoutID int64, user *User, now string) error {
+	productID := strings.TrimSpace(item.ProductoID)
+	if productID == "" || item.Cantidad <= 0 {
+		return checkoutBusinessErrorf("La línea de cambio no es válida.")
+	}
+	note := fmt.Sprintf("checkout=%d", checkoutID)
+	if item.Direccion == "salida" {
+		if _, _, err := productSalePriceTx(tx, productID); err != nil {
+			return err
+		}
+		unitIDs, err := selectAvailableUnitIDsTx(tx, productID, item.Cantidad)
+		if err != nil {
+			return err
+		}
+		if _, err := deleteSpecificAvailableUnits(tx, productID, unitIDs); err != nil {
+			return err
+		}
+		if err := logMovimientos(tx, productID, unitIDs, "cambio_salida", note, user, now); err != nil {
+			return err
+		}
+		return logAudit(tx, "inventory.change.out", "producto", productID, note, user, now)
+	}
+
+	if item.Direccion != "entrada" {
+		return checkoutBusinessErrorf("Dirección de cambio inválida.")
+	}
+	incomingName := strings.TrimSpace(item.ProductoNombre)
+	if item.EsNuevo {
+		if incomingName == "" {
+			return checkoutBusinessErrorf("El nombre del producto entrante es obligatorio.")
+		}
+		var count int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM productos WHERE sku = ?`, productID).Scan(&count); err != nil {
+			return err
+		}
+		if count > 0 {
+			return checkoutBusinessErrorf("El SKU del producto entrante ya existe.")
+		}
+		line := strings.TrimSpace(item.Linea)
+		if line == "" {
+			line = "Sin línea"
+		}
+		if _, err := tx.Exec(`
+			INSERT INTO productos (sku, id, linea, nombre, fecha_ingreso)
+			VALUES (?, ?, ?, ?, ?)`, productID, productID, line, incomingName, now); err != nil {
+			return err
+		}
+	} else {
+		var catalogName string
+		if err := tx.QueryRow(`SELECT nombre FROM productos WHERE sku = ?`, productID).Scan(&catalogName); err != nil {
+			if err == sql.ErrNoRows {
+				return checkoutBusinessErrorf("El producto entrante ya no existe.")
+			}
+			return err
+		}
+		if incomingName == "" {
+			incomingName = catalogName
+		}
+	}
+
+	token, err := generateToken()
+	if err != nil {
+		return err
+	}
+	unitIDs := make([]string, 0, item.Cantidad)
+	for i := 1; i <= item.Cantidad; i++ {
+		unitID := newCheckoutUnitID(productID, token, i)
+		if _, err := tx.Exec(`
+			INSERT INTO unidades (id, producto_id, estado, creado_en, caducidad)
+			VALUES (?, ?, 'Disponible', ?, NULL)`, unitID, productID, now); err != nil {
+			return err
+		}
+		unitIDs = append(unitIDs, unitID)
+	}
+	if err := logMovimientos(tx, productID, unitIDs, "cambio_entrada", note, user, now); err != nil {
+		return err
+	}
+	return logAudit(tx, "inventory.change.in", "producto", productID, note, user, now)
+}
+
+func checkoutItemRefsTx(tx *sql.Tx, checkoutID int64) ([]checkoutItemRef, error) {
+	rows, err := tx.Query(`
+		SELECT id, 'venta', orden
+		FROM checkout_venta_items
+		WHERE checkout_id = ? AND estado IN ('pendiente', 'error')
+		UNION ALL
+		SELECT id, 'cambio', orden
+		FROM checkout_cambio_items
+		WHERE checkout_id = ? AND estado IN ('pendiente', 'error')
+		ORDER BY orden, id`, checkoutID, checkoutID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	refs := make([]checkoutItemRef, 0)
+	for rows.Next() {
+		var ref checkoutItemRef
+		if err := rows.Scan(&ref.ID, &ref.Kind, &ref.Order); err != nil {
+			return nil, err
+		}
+		refs = append(refs, ref)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return refs, nil
+}
+
+func loadCheckoutSaleItemTx(tx *sql.Tx, itemID int64) (checkoutSaleItem, error) {
+	var item checkoutSaleItem
+	err := tx.QueryRow(`
+		SELECT id, checkout_id, tipo, producto_id, producto_nombre, cantidad,
+		       precio_unitario_cop, total_cop, notas, orden, estado, error,
+		       venta_id, created_at, updated_at
+		FROM checkout_venta_items
+		WHERE id = ?`, itemID).Scan(
+		&item.ID,
+		&item.CheckoutID,
+		&item.Tipo,
+		&item.ProductoID,
+		&item.ProductoNombre,
+		&item.Cantidad,
+		&item.PrecioUnitarioCOP,
+		&item.TotalCOP,
+		&item.Notas,
+		&item.Orden,
+		&item.Estado,
+		&item.Error,
+		&item.VentaID,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	)
+	return item, err
+}
+
+func loadCheckoutChangeItemTx(tx *sql.Tx, itemID int64) (checkoutChangeItem, error) {
+	var item checkoutChangeItem
+	var isNew int
+	err := tx.QueryRow(`
+		SELECT id, checkout_id, direccion, producto_id, producto_nombre, linea,
+		       cantidad, es_nuevo, orden, estado, error, processed_at,
+		       created_at, updated_at
+		FROM checkout_cambio_items
+		WHERE id = ?`, itemID).Scan(
+		&item.ID,
+		&item.CheckoutID,
+		&item.Direccion,
+		&item.ProductoID,
+		&item.ProductoNombre,
+		&item.Linea,
+		&item.Cantidad,
+		&isNew,
+		&item.Orden,
+		&item.Estado,
+		&item.Error,
+		&item.ProcessedAt,
+		&item.CreatedAt,
+		&item.UpdatedAt,
+	)
+	item.EsNuevo = isNew == 1
+	return item, err
+}
+
+func processCheckout(db *sql.DB, userID int, checkoutID int64, cliente, paymentMethod, notes string, user *User) (checkoutProcessResult, error) {
+	result := checkoutProcessResult{CheckoutID: checkoutID}
+	var textErr error
+	cliente, textErr = checkoutText(cliente, "El nombre del cliente", 160)
+	if textErr != nil {
+		return result, textErr
+	}
+	paymentMethod = strings.TrimSpace(paymentMethod)
+	notes, textErr = checkoutText(notes, "Las notas", 2000)
+	if textErr != nil {
+		return result, textErr
+	}
+	if cliente == "" {
+		return result, checkoutBusinessErrorf("El nombre del cliente es obligatorio.")
+	}
+	if paymentMethod == "" {
+		return result, checkoutBusinessErrorf("Selecciona un método de pago.")
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return result, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	var state, storedPaymentMethod string
+	var ownerID int
+	if err := tx.QueryRow(`SELECT user_id, estado, metodo_pago FROM checkout_operaciones WHERE id = ?`, checkoutID).Scan(&ownerID, &state, &storedPaymentMethod); err != nil {
+		return result, err
+	}
+	if ownerID != userID {
+		return result, checkoutBusinessErrorf("El checkout no pertenece al usuario actual.")
+	}
+	if state != checkoutStateDraft && state != checkoutStatePartial {
+		return result, checkoutBusinessErrorf("El checkout ya no está disponible para confirmar.")
+	}
+	if state == checkoutStatePartial && strings.TrimSpace(storedPaymentMethod) != "" && storedPaymentMethod != paymentMethod {
+		return result, checkoutBusinessErrorf("El método de pago no puede cambiarse después de un procesamiento parcial.")
+	}
+	if _, err := tx.Exec(`
+		UPDATE checkout_operaciones
+		SET cliente = ?, metodo_pago = ?, notas = ?, updated_at = ?
+		WHERE id = ?`, cliente, paymentMethod, strings.TrimSpace(notes), time.Now().Format(time.RFC3339), checkoutID); err != nil {
+		return result, err
+	}
+
+	refs, err := checkoutItemRefsTx(tx, checkoutID)
+	if err != nil {
+		return result, err
+	}
+	if len(refs) == 0 {
+		return result, checkoutBusinessErrorf("Agrega al menos una línea al carrito.")
+	}
+
+	for index, ref := range refs {
+		savepoint := fmt.Sprintf("checkout_line_%d", index)
+		if _, err := tx.Exec("SAVEPOINT " + savepoint); err != nil {
+			return result, err
+		}
+		var lineErr error
+		var saleID int64
+		var lineTotal int64
+		if ref.Kind == "venta" {
+			var item checkoutSaleItem
+			item, lineErr = loadCheckoutSaleItemTx(tx, ref.ID)
+			lineTotal = item.TotalCOP
+			if lineErr == nil {
+				saleID, lineErr = applyCheckoutSaleItem(tx, item, checkoutID, paymentMethod, user, time.Now().Format(time.RFC3339))
+			}
+		} else {
+			var item checkoutChangeItem
+			item, lineErr = loadCheckoutChangeItemTx(tx, ref.ID)
+			if lineErr == nil {
+				lineErr = applyCheckoutChangeItem(tx, item, checkoutID, user, time.Now().Format(time.RFC3339))
+			}
+		}
+
+		if lineErr != nil {
+			if !isCheckoutBusinessError(lineErr) {
+				return result, lineErr
+			}
+			if _, err := tx.Exec("ROLLBACK TO SAVEPOINT " + savepoint); err != nil {
+				return result, err
+			}
+			if _, err := tx.Exec("RELEASE SAVEPOINT " + savepoint); err != nil {
+				return result, err
+			}
+			now := time.Now().Format(time.RFC3339)
+			if ref.Kind == "venta" {
+				if _, err := tx.Exec(`UPDATE checkout_venta_items SET estado = 'error', error = ?, updated_at = ? WHERE id = ? AND checkout_id = ?`, lineErr.Error(), now, ref.ID, checkoutID); err != nil {
+					return result, err
+				}
+			} else if _, err := tx.Exec(`UPDATE checkout_cambio_items SET estado = 'error', error = ?, updated_at = ? WHERE id = ? AND checkout_id = ?`, lineErr.Error(), now, ref.ID, checkoutID); err != nil {
+				return result, err
+			}
+			result.FailedCount++
+			result.Errors = append(result.Errors, lineErr.Error())
+			continue
+		}
+
+		if _, err := tx.Exec("RELEASE SAVEPOINT " + savepoint); err != nil {
+			return result, err
+		}
+		now := time.Now().Format(time.RFC3339)
+		if ref.Kind == "venta" {
+			if _, err := tx.Exec(`
+				UPDATE checkout_venta_items
+				SET estado = 'procesada', error = '', venta_id = ?, updated_at = ?
+				WHERE id = ? AND checkout_id = ?`, saleID, now, ref.ID, checkoutID); err != nil {
+				return result, err
+			}
+			result.ProcessedTotalCOP += lineTotal
+		} else if _, err := tx.Exec(`
+			UPDATE checkout_cambio_items
+			SET estado = 'procesada', error = '', processed_at = ?, updated_at = ?
+			WHERE id = ? AND checkout_id = ?`, now, now, ref.ID, checkoutID); err != nil {
+			return result, err
+		}
+		result.ProcessedCount++
+	}
+
+	var pending, failed int
+	if err := tx.QueryRow(`
+		SELECT
+			(SELECT COUNT(*) FROM checkout_venta_items WHERE checkout_id = ? AND estado IN ('pendiente', 'error')) +
+			(SELECT COUNT(*) FROM checkout_cambio_items WHERE checkout_id = ? AND estado IN ('pendiente', 'error')),
+			(SELECT COUNT(*) FROM checkout_venta_items WHERE checkout_id = ? AND estado = 'error') +
+			(SELECT COUNT(*) FROM checkout_cambio_items WHERE checkout_id = ? AND estado = 'error')`,
+		checkoutID, checkoutID, checkoutID, checkoutID).Scan(&pending, &failed); err != nil {
+		return result, err
+	}
+	result.PendingCount = pending
+	result.FailedCount = failed
+	result.State = checkoutStateConfirmed
+	if pending > 0 {
+		result.State = checkoutStatePartial
+	}
+	var processedTotal int64
+	if err := tx.QueryRow(`SELECT COALESCE(SUM(total_cop), 0) FROM checkout_venta_items WHERE checkout_id = ? AND estado = 'procesada'`, checkoutID).Scan(&processedTotal); err != nil {
+		return result, err
+	}
+	result.ProcessedTotalCOP = processedTotal
+	if _, err := tx.Exec(`
+		UPDATE checkout_operaciones
+		SET estado = ?, total_cop = ?, updated_at = ?
+		WHERE id = ? AND user_id = ?`, result.State, processedTotal, time.Now().Format(time.RFC3339), checkoutID, userID); err != nil {
+		return result, err
+	}
+	if err := tx.Commit(); err != nil {
+		return result, err
+	}
+	committed = true
+	return result, nil
+}
+
+func updateCheckoutDetails(db *sql.DB, userID int, cliente, paymentMethod, notes string) error {
+	var textErr error
+	cliente, textErr = checkoutText(cliente, "El nombre del cliente", 160)
+	if textErr != nil {
+		return textErr
+	}
+	notes, textErr = checkoutText(notes, "Las notas", 2000)
+	if textErr != nil {
+		return textErr
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	checkoutID, err := ensureCheckoutTx(tx, userID)
+	if err != nil {
+		return err
+	}
+	var storedPaymentMethod string
+	var processedSales int
+	if err := tx.QueryRow(`SELECT metodo_pago FROM checkout_operaciones WHERE id = ?`, checkoutID).Scan(&storedPaymentMethod); err != nil {
+		return err
+	}
+	if err := tx.QueryRow(`SELECT COUNT(*) FROM checkout_venta_items WHERE checkout_id = ? AND estado = 'procesada'`, checkoutID).Scan(&processedSales); err != nil {
+		return err
+	}
+	if processedSales > 0 && strings.TrimSpace(storedPaymentMethod) != "" && strings.TrimSpace(paymentMethod) != storedPaymentMethod {
+		return checkoutBusinessErrorf("El método de pago no puede cambiarse después de un procesamiento parcial.")
+	}
+	if _, err := tx.Exec(`
+		UPDATE checkout_operaciones
+		SET cliente = ?, metodo_pago = ?, notas = ?, updated_at = ?
+		WHERE id = ? AND user_id = ? AND estado IN ('borrador', 'parcial')`,
+		strings.TrimSpace(cliente), strings.TrimSpace(paymentMethod), strings.TrimSpace(notes), time.Now().Format(time.RFC3339), checkoutID, userID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func updateCheckoutSaleItem(db *sql.DB, userID int, itemID int64, quantity int, unitPrice int64, notes string) error {
+	if quantity <= 0 || unitPrice <= 0 {
+		return checkoutBusinessErrorf("La cantidad y el precio deben ser mayores a cero.")
+	}
+	var textErr error
+	notes, textErr = checkoutText(notes, "Las notas", 500)
+	if textErr != nil {
+		return textErr
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	var checkoutID int64
+	var kind, productID, productName string
+	if err := tx.QueryRow(`
+		SELECT i.checkout_id, i.tipo, i.producto_id, i.producto_nombre
+		FROM checkout_venta_items i
+		JOIN checkout_operaciones c ON c.id = i.checkout_id
+		WHERE i.id = ? AND c.user_id = ? AND c.estado IN ('borrador', 'parcial')
+		  AND i.estado IN ('pendiente', 'error')`, itemID, userID).Scan(&checkoutID, &kind, &productID, &productName); err != nil {
+		if err == sql.ErrNoRows {
+			return checkoutBusinessErrorf("La línea de venta ya no está disponible para editar.")
+		}
+		return err
+	}
+	if kind == "cargo" {
+		quantity = 1
+		productID = checkoutChargeProductID
+		productName = "Diferencia de cambio"
+	}
+	if kind == "producto" {
+		name, _, err := productSalePriceTx(tx, productID)
+		if err != nil {
+			return err
+		}
+		if productName == "" {
+			productName = name
+		}
+	}
+	total, err := multiplyCOP(unitPrice, quantity)
+	if err != nil {
+		return err
+	}
+	now := time.Now().Format(time.RFC3339)
+	if _, err := tx.Exec(`
+		UPDATE checkout_venta_items
+		SET producto_id = ?, producto_nombre = ?, cantidad = ?,
+		    precio_unitario_cop = ?, total_cop = ?, notas = ?,
+		    estado = 'pendiente', error = '', updated_at = ?
+		WHERE id = ? AND checkout_id = ?`,
+		productID, productName, quantity, unitPrice, total, strings.TrimSpace(notes), now, itemID, checkoutID); err != nil {
+		return err
+	}
+	if err := touchCheckoutTx(tx, checkoutID, now); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func updateCheckoutChangeItem(db *sql.DB, userID int, itemID int64, quantity int, name, line string) error {
+	if quantity <= 0 {
+		return checkoutBusinessErrorf("La cantidad debe ser positiva.")
+	}
+	var textErr error
+	name, textErr = checkoutText(name, "El nombre del producto", 180)
+	if textErr != nil {
+		return textErr
+	}
+	line, textErr = checkoutText(line, "La línea del producto", 120)
+	if textErr != nil {
+		return textErr
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	var checkoutID int64
+	var direction, productID string
+	var isNew int
+	if err := tx.QueryRow(`
+		SELECT i.checkout_id, i.direccion, i.producto_id, i.es_nuevo
+		FROM checkout_cambio_items i
+		JOIN checkout_operaciones c ON c.id = i.checkout_id
+		WHERE i.id = ? AND c.user_id = ? AND c.estado IN ('borrador', 'parcial')
+		  AND i.estado IN ('pendiente', 'error')`, itemID, userID).Scan(&checkoutID, &direction, &productID, &isNew); err != nil {
+		if err == sql.ErrNoRows {
+			return checkoutBusinessErrorf("La línea de cambio ya no está disponible para editar.")
+		}
+		return err
+	}
+	name = strings.TrimSpace(name)
+	line = strings.TrimSpace(line)
+	if isNew == 1 {
+		if name == "" {
+			return checkoutBusinessErrorf("El nombre del producto entrante es obligatorio.")
+		}
+		if line == "" {
+			line = "Sin línea"
+		}
+	} else {
+		var catalogName string
+		if err := tx.QueryRow(`SELECT nombre FROM productos WHERE sku = ?`, productID).Scan(&catalogName); err != nil {
+			if err == sql.ErrNoRows {
+				return checkoutBusinessErrorf("El producto de cambio ya no existe.")
+			}
+			return err
+		}
+		if name == "" {
+			name = catalogName
+		}
+		line = ""
+	}
+	if direction == "salida" {
+		var catalogName string
+		if err := tx.QueryRow(`SELECT nombre FROM productos WHERE sku = ?`, productID).Scan(&catalogName); err != nil {
+			if err == sql.ErrNoRows {
+				return checkoutBusinessErrorf("El producto saliente ya no existe.")
+			}
+			return err
+		}
+		name = catalogName
+		line = ""
+	}
+	now := time.Now().Format(time.RFC3339)
+	if _, err := tx.Exec(`
+		UPDATE checkout_cambio_items
+		SET producto_nombre = ?, linea = ?, cantidad = ?, estado = 'pendiente', error = '', updated_at = ?
+		WHERE id = ? AND checkout_id = ?`, name, line, quantity, now, itemID, checkoutID); err != nil {
+		return err
+	}
+	if err := touchCheckoutTx(tx, checkoutID, now); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func discardCheckoutItem(db *sql.DB, userID int, kind string, itemID int64) error {
+	if kind != "venta" && kind != "cambio" {
+		return checkoutBusinessErrorf("Tipo de línea inválido.")
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	table := "checkout_venta_items"
+	if kind == "cambio" {
+		table = "checkout_cambio_items"
+	}
+	if !validSQLiteIdentifier(table) {
+		return fmt.Errorf("tabla de checkout inválida")
+	}
+	query := fmt.Sprintf(`
+		UPDATE %s
+		SET estado = 'descartada', error = '', updated_at = ?
+		WHERE id = ? AND estado IN ('pendiente', 'error')
+		  AND checkout_id IN (
+			SELECT id FROM checkout_operaciones
+			WHERE user_id = ? AND estado IN ('borrador', 'parcial')
+		)`, table)
+	result, err := tx.Exec(query, time.Now().Format(time.RFC3339), itemID, userID)
+	if err != nil {
+		return err
+	}
+	affected, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if affected != 1 {
+		return checkoutBusinessErrorf("La línea ya no está disponible para eliminar.")
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
+}
+
+func discardActiveCheckout(db *sql.DB, userID int) error {
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+	checkoutID, err := ensureCheckoutTx(tx, userID)
+	if err != nil {
+		return err
+	}
+	now := time.Now().Format(time.RFC3339)
+	if _, err := tx.Exec(`
+		UPDATE checkout_venta_items SET estado = 'descartada', error = '', updated_at = ?
+		WHERE checkout_id = ? AND estado IN ('pendiente', 'error')`, now, checkoutID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		UPDATE checkout_cambio_items SET estado = 'descartada', error = '', updated_at = ?
+		WHERE checkout_id = ? AND estado IN ('pendiente', 'error')`, now, checkoutID); err != nil {
+		return err
+	}
+	if _, err := tx.Exec(`
+		UPDATE checkout_operaciones SET estado = 'descartado', updated_at = ?
+		WHERE id = ? AND user_id = ? AND estado IN ('borrador', 'parcial')`, now, checkoutID, userID); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }
 
 func formatCurrency(value int64) string {
@@ -1797,6 +3230,93 @@ func migrateCambioOperationsSchema(tx *sql.Tx) error {
 	return err
 }
 
+func migrateCheckoutSchema(tx *sql.Tx) error {
+	for _, column := range []struct {
+		name       string
+		definition string
+	}{
+		{name: "tipo", definition: "TEXT NOT NULL DEFAULT 'producto'"},
+		{name: "producto_nombre", definition: "TEXT NOT NULL DEFAULT ''"},
+		{name: "checkout_id", definition: "INTEGER"},
+	} {
+		if err := ensureSQLiteColumnTx(tx, "ventas", column.name, column.definition); err != nil {
+			return err
+		}
+	}
+
+	_, err := tx.Exec(`
+		CREATE TABLE IF NOT EXISTS checkout_operaciones (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			user_id INTEGER NOT NULL,
+			cliente TEXT NOT NULL DEFAULT '',
+			metodo_pago TEXT NOT NULL DEFAULT '',
+			notas TEXT NOT NULL DEFAULT '',
+			estado TEXT NOT NULL DEFAULT 'borrador'
+				CHECK (estado IN ('borrador', 'parcial', 'confirmado', 'descartado')),
+			total_cop INTEGER NOT NULL DEFAULT 0 CHECK (total_cop >= 0),
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+		);
+		CREATE UNIQUE INDEX IF NOT EXISTS idx_checkout_active_user
+			ON checkout_operaciones(user_id)
+			WHERE estado IN ('borrador', 'parcial');
+		CREATE INDEX IF NOT EXISTS idx_checkout_user_updated
+			ON checkout_operaciones(user_id, updated_at);
+
+		CREATE TABLE IF NOT EXISTS checkout_venta_items (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			checkout_id INTEGER NOT NULL,
+			tipo TEXT NOT NULL CHECK (tipo IN ('producto', 'cargo')),
+			producto_id TEXT NOT NULL DEFAULT '',
+			producto_nombre TEXT NOT NULL DEFAULT '',
+			cantidad INTEGER NOT NULL CHECK (cantidad > 0),
+			precio_unitario_cop INTEGER NOT NULL CHECK (precio_unitario_cop >= 0),
+			total_cop INTEGER NOT NULL CHECK (total_cop >= 0),
+			notas TEXT NOT NULL DEFAULT '',
+			orden INTEGER NOT NULL,
+			estado TEXT NOT NULL DEFAULT 'pendiente'
+				CHECK (estado IN ('pendiente', 'procesada', 'error', 'descartada')),
+			error TEXT NOT NULL DEFAULT '',
+			venta_id INTEGER,
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			FOREIGN KEY (checkout_id) REFERENCES checkout_operaciones(id) ON DELETE CASCADE,
+			FOREIGN KEY (venta_id) REFERENCES ventas(id) ON DELETE SET NULL
+		);
+		CREATE INDEX IF NOT EXISTS idx_checkout_venta_items_checkout
+			ON checkout_venta_items(checkout_id, orden);
+		CREATE INDEX IF NOT EXISTS idx_checkout_venta_items_status
+			ON checkout_venta_items(checkout_id, estado);
+
+		CREATE TABLE IF NOT EXISTS checkout_cambio_items (
+			id INTEGER PRIMARY KEY AUTOINCREMENT,
+			checkout_id INTEGER NOT NULL,
+			direccion TEXT NOT NULL CHECK (direccion IN ('salida', 'entrada')),
+			producto_id TEXT NOT NULL,
+			producto_nombre TEXT NOT NULL DEFAULT '',
+			linea TEXT NOT NULL DEFAULT '',
+			cantidad INTEGER NOT NULL CHECK (cantidad > 0),
+			es_nuevo INTEGER NOT NULL DEFAULT 0 CHECK (es_nuevo IN (0, 1)),
+			orden INTEGER NOT NULL,
+			estado TEXT NOT NULL DEFAULT 'pendiente'
+				CHECK (estado IN ('pendiente', 'procesada', 'error', 'descartada')),
+			error TEXT NOT NULL DEFAULT '',
+			processed_at TEXT NOT NULL DEFAULT '',
+			created_at TEXT NOT NULL,
+			updated_at TEXT NOT NULL,
+			FOREIGN KEY (checkout_id) REFERENCES checkout_operaciones(id) ON DELETE CASCADE
+		);
+		CREATE INDEX IF NOT EXISTS idx_checkout_cambio_items_checkout
+			ON checkout_cambio_items(checkout_id, orden);
+		CREATE INDEX IF NOT EXISTS idx_checkout_cambio_items_status
+			ON checkout_cambio_items(checkout_id, estado);
+		CREATE INDEX IF NOT EXISTS idx_ventas_checkout
+			ON ventas(checkout_id);
+	`)
+	return err
+}
+
 func demoSeedEnabled(db *sql.DB) bool {
 	raw := strings.ToLower(strings.TrimSpace(os.Getenv("SEED_DEMO")))
 	if raw != "1" && raw != "true" && raw != "yes" && raw != "on" {
@@ -1977,6 +3497,9 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 		return nil, err
 	}
 	if err := applySchemaMigration(db, 6, migrateCambioOperationsSchema); err != nil {
+		return nil, err
+	}
+	if err := applySchemaMigration(db, 7, migrateCheckoutSchema); err != nil {
 		return nil, err
 	}
 
@@ -2225,6 +3748,9 @@ func resetBusinessData(db *sql.DB) error {
 		"credit_sales",
 		"customer_events",
 		"customers",
+		"checkout_cambio_items",
+		"checkout_venta_items",
+		"checkout_operaciones",
 		"cambios",
 		"cambio_operaciones",
 		"retomas",
@@ -2310,6 +3836,7 @@ func main() {
 		"templates/venta_confirm.html",
 		"templates/cambio_new.html",
 		"templates/cambio_confirm.html",
+		"templates/carrito.html",
 		"templates/csv_template.html",
 		"templates/csv_export.html",
 		"templates/partials/header.html",
@@ -3392,12 +4919,13 @@ func main() {
 				v.id,
 				v.fecha,
 				v.producto_id,
-				COALESCE(p.nombre, ''),
+				COALESCE(NULLIF(v.producto_nombre, ''), p.nombre, ''),
 				v.cantidad,
 				v.precio_unitario_cop,
 				v.total_cop,
 				v.metodo_pago,
-				v.notas
+				v.notas,
+				COALESCE(v.tipo, 'producto')
 			FROM ventas v
 			LEFT JOIN productos p ON p.sku = v.producto_id
 			WHERE v.estado = 'confirmada' AND date(v.fecha) BETWEEN ? AND ?
@@ -3415,7 +4943,7 @@ func main() {
 		cw := csv.NewWriter(w)
 		defer cw.Flush()
 
-		_ = cw.Write([]string{"venta_id", "fecha", "sku", "producto", "cantidad", "precio_unitario", "total", "metodo_pago", "notas"})
+		_ = cw.Write([]string{"venta_id", "fecha", "sku", "producto", "cantidad", "precio_unitario", "total", "metodo_pago", "notas", "tipo"})
 
 		for rows.Next() {
 			var (
@@ -3428,8 +4956,9 @@ func main() {
 				total      int64
 				metodo     string
 				notas      string
+				tipo       string
 			)
-			if err := rows.Scan(&id, &fechaRaw, &sku, &nombre, &cantidad, &precioUnit, &total, &metodo, &notas); err != nil {
+			if err := rows.Scan(&id, &fechaRaw, &sku, &nombre, &cantidad, &precioUnit, &total, &metodo, &notas, &tipo); err != nil {
 				http.Error(w, "Error al leer ventas.", http.StatusInternalServerError)
 				return
 			}
@@ -3447,6 +4976,7 @@ func main() {
 				strconv.FormatInt(total, 10),
 				metodo,
 				notas,
+				tipo,
 			})
 		}
 		if err := rows.Err(); err != nil {
@@ -4164,6 +5694,321 @@ func main() {
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "sku": sku, "precio_venta": precioVenta})
+	})
+
+	isPaymentMethod := func(value string) bool {
+		value = strings.TrimSpace(value)
+		for _, method := range paymentMethods {
+			if value == method {
+				return true
+			}
+		}
+		return false
+	}
+	parseOptionalCOP := func(raw string) (int64, error) {
+		if strings.TrimSpace(raw) == "" {
+			return 0, nil
+		}
+		parsed, err := parseCOPInteger(raw)
+		if err != nil || parsed <= 0 {
+			return 0, checkoutBusinessErrorf("El importe debe ser mayor a cero.")
+		}
+		return int64(parsed), nil
+	}
+	parsePositiveQuantity := func(raw string) (int, error) {
+		parsed, err := strconv.Atoi(strings.TrimSpace(raw))
+		if err != nil || parsed <= 0 {
+			return 0, checkoutBusinessErrorf("La cantidad debe ser un número positivo.")
+		}
+		return parsed, nil
+	}
+	renderCheckout := func(w http.ResponseWriter, r *http.Request, flash, errorText string) {
+		currentUser := userFromContext(r)
+		if currentUser == nil {
+			http.Error(w, "Sesión requerida.", http.StatusUnauthorized)
+			return
+		}
+		productsSnapshot, err := loadProductos(db)
+		if err != nil {
+			http.Error(w, "Error al consultar productos.", http.StatusInternalServerError)
+			return
+		}
+		stockByProduct, err := availableCountsByProduct(db)
+		if err != nil {
+			http.Error(w, "Error al consultar stock.", http.StatusInternalServerError)
+			return
+		}
+		checkout, saleItems, changeItems, err := loadActiveCheckout(db, currentUser.ID)
+		if err != nil {
+			http.Error(w, "Error al cargar el carrito.", http.StatusInternalServerError)
+			return
+		}
+		data := checkoutPageData{
+			Title:          "Carrito",
+			Subtitle:       "Agrupa ventas, cargos y cambios antes de confirmar.",
+			Flash:          flash,
+			Error:          errorText,
+			Checkout:       checkout,
+			SaleItems:      saleItems,
+			ChangeItems:    changeItems,
+			Products:       productsSnapshot,
+			StockByProduct: stockByProduct,
+			PaymentMethods: paymentMethods,
+			CurrentUser:    currentUser,
+		}
+		if err := tmpl.ExecuteTemplate(w, "carrito.html", data); err != nil {
+			http.Error(w, "Error al renderizar el carrito.", http.StatusInternalServerError)
+		}
+	}
+
+	mux.HandleFunc("/carrito", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			http.Error(w, "Método no permitido.", http.StatusMethodNotAllowed)
+			return
+		}
+		renderCheckout(w, r, r.URL.Query().Get("mensaje"), r.URL.Query().Get("error"))
+	})
+
+	mux.HandleFunc("/carrito/details", func(w http.ResponseWriter, r *http.Request) {
+		currentUser := userFromContext(r)
+		if r.Method != http.MethodPost || currentUser == nil {
+			http.Error(w, "Método no permitido.", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			redirectWithMessage(w, r, "/carrito", "", "No se pudo leer el formulario.")
+			return
+		}
+		method := strings.TrimSpace(r.FormValue("metodo_pago"))
+		if method != "" && !isPaymentMethod(method) {
+			redirectWithMessage(w, r, "/carrito", "", "Selecciona un método de pago válido.")
+			return
+		}
+		if err := updateCheckoutDetails(db, currentUser.ID, r.FormValue("cliente"), method, r.FormValue("notas")); err != nil {
+			redirectWithMessage(w, r, "/carrito", "", err.Error())
+			return
+		}
+		redirectWithMessage(w, r, "/carrito", "Datos del checkout actualizados.", "")
+	})
+
+	mux.HandleFunc("/carrito/items/venta", func(w http.ResponseWriter, r *http.Request) {
+		currentUser := userFromContext(r)
+		if r.Method != http.MethodPost || currentUser == nil {
+			http.Error(w, "Método no permitido.", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			redirectWithMessage(w, r, "/carrito", "", "No se pudo leer el formulario.")
+			return
+		}
+		quantity, err := parsePositiveQuantity(r.FormValue("cantidad"))
+		if err != nil {
+			redirectWithMessage(w, r, "/carrito", "", err.Error())
+			return
+		}
+		price, err := parseOptionalCOP(r.FormValue("precio_unitario"))
+		if err != nil {
+			redirectWithMessage(w, r, "/carrito", "", err.Error())
+			return
+		}
+		if _, err := addCheckoutSaleItem(db, currentUser.ID, checkoutSaleInput{
+			Tipo:              "producto",
+			ProductoID:        r.FormValue("producto_id"),
+			Cantidad:          quantity,
+			PrecioUnitarioCOP: price,
+			Notas:             r.FormValue("notas"),
+		}); err != nil {
+			redirectWithMessage(w, r, "/carrito", "", err.Error())
+			return
+		}
+		redirectWithMessage(w, r, "/carrito", "Venta agregada al carrito.", "")
+	})
+
+	mux.HandleFunc("/carrito/items/cargo", func(w http.ResponseWriter, r *http.Request) {
+		currentUser := userFromContext(r)
+		if r.Method != http.MethodPost || currentUser == nil {
+			http.Error(w, "Método no permitido.", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			redirectWithMessage(w, r, "/carrito", "", "No se pudo leer el formulario.")
+			return
+		}
+		amount, err := parseOptionalCOP(r.FormValue("monto"))
+		if err != nil || amount <= 0 {
+			if err == nil {
+				err = checkoutBusinessErrorf("El cargo debe tener un valor mayor a cero.")
+			}
+			redirectWithMessage(w, r, "/carrito", "", err.Error())
+			return
+		}
+		if _, err := addCheckoutSaleItem(db, currentUser.ID, checkoutSaleInput{
+			Tipo:     "cargo",
+			TotalCOP: amount,
+			Notas:    r.FormValue("notas"),
+		}); err != nil {
+			redirectWithMessage(w, r, "/carrito", "", err.Error())
+			return
+		}
+		redirectWithMessage(w, r, "/carrito", "Cargo agregado al carrito.", "")
+	})
+
+	mux.HandleFunc("/carrito/items/cambio", func(w http.ResponseWriter, r *http.Request) {
+		currentUser := userFromContext(r)
+		if r.Method != http.MethodPost || currentUser == nil {
+			http.Error(w, "Método no permitido.", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			redirectWithMessage(w, r, "/carrito", "", "No se pudo leer el formulario.")
+			return
+		}
+		quantity, err := parsePositiveQuantity(r.FormValue("cantidad"))
+		if err != nil {
+			redirectWithMessage(w, r, "/carrito", "", err.Error())
+			return
+		}
+		direction := strings.TrimSpace(r.FormValue("direccion"))
+		input := checkoutChangeInput{Direccion: direction, Cantidad: quantity}
+		if direction == "salida" {
+			input.ProductoID = r.FormValue("producto_id")
+		} else if direction == "entrada" {
+			mode := r.FormValue("incoming_mode")
+			if mode == "new" {
+				input.EsNuevo = true
+				input.ProductoID = r.FormValue("incoming_new_sku")
+				input.ProductoNombre = r.FormValue("incoming_new_name")
+				input.Linea = r.FormValue("incoming_new_line")
+			} else {
+				input.ProductoID = r.FormValue("incoming_existing_id")
+			}
+		} else {
+			redirectWithMessage(w, r, "/carrito", "", "Selecciona una dirección de cambio válida.")
+			return
+		}
+		if _, err := addCheckoutChangeItem(db, currentUser.ID, input); err != nil {
+			redirectWithMessage(w, r, "/carrito", "", err.Error())
+			return
+		}
+		redirectWithMessage(w, r, "/carrito", "Línea de cambio agregada al carrito.", "")
+	})
+
+	mux.HandleFunc("/carrito/item/update", func(w http.ResponseWriter, r *http.Request) {
+		currentUser := userFromContext(r)
+		if r.Method != http.MethodPost || currentUser == nil {
+			http.Error(w, "Método no permitido.", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			redirectWithMessage(w, r, "/carrito", "", "No se pudo leer el formulario.")
+			return
+		}
+		itemID, err := strconv.ParseInt(r.FormValue("item_id"), 10, 64)
+		if err != nil || itemID <= 0 {
+			redirectWithMessage(w, r, "/carrito", "", "Línea inválida.")
+			return
+		}
+		switch r.FormValue("tipo") {
+		case "venta":
+			quantity, quantityErr := parsePositiveQuantity(r.FormValue("cantidad"))
+			price, priceErr := parseOptionalCOP(r.FormValue("precio_unitario"))
+			if price == 0 {
+				price, priceErr = parseOptionalCOP(r.FormValue("monto"))
+			}
+			if quantityErr != nil || priceErr != nil || price <= 0 {
+				if quantityErr != nil {
+					err = quantityErr
+				} else if priceErr != nil {
+					err = priceErr
+				} else {
+					err = checkoutBusinessErrorf("El importe debe ser mayor a cero.")
+				}
+				redirectWithMessage(w, r, "/carrito", "", err.Error())
+				return
+			}
+			err = updateCheckoutSaleItem(db, currentUser.ID, itemID, quantity, price, r.FormValue("notas"))
+		case "cambio":
+			quantity, quantityErr := parsePositiveQuantity(r.FormValue("cantidad"))
+			if quantityErr != nil {
+				redirectWithMessage(w, r, "/carrito", "", quantityErr.Error())
+				return
+			}
+			err = updateCheckoutChangeItem(db, currentUser.ID, itemID, quantity, r.FormValue("producto_nombre"), r.FormValue("linea"))
+		default:
+			err = checkoutBusinessErrorf("Tipo de línea inválido.")
+		}
+		if err != nil {
+			redirectWithMessage(w, r, "/carrito", "", err.Error())
+			return
+		}
+		redirectWithMessage(w, r, "/carrito", "Línea actualizada.", "")
+	})
+
+	mux.HandleFunc("/carrito/item/delete", func(w http.ResponseWriter, r *http.Request) {
+		currentUser := userFromContext(r)
+		if r.Method != http.MethodPost || currentUser == nil {
+			http.Error(w, "Método no permitido.", http.StatusMethodNotAllowed)
+			return
+		}
+		itemID, err := strconv.ParseInt(r.FormValue("item_id"), 10, 64)
+		if err != nil || itemID <= 0 {
+			redirectWithMessage(w, r, "/carrito", "", "Línea inválida.")
+			return
+		}
+		if err := discardCheckoutItem(db, currentUser.ID, r.FormValue("tipo"), itemID); err != nil {
+			redirectWithMessage(w, r, "/carrito", "", err.Error())
+			return
+		}
+		redirectWithMessage(w, r, "/carrito", "Línea eliminada del checkout.", "")
+	})
+
+	mux.HandleFunc("/carrito/descartar", func(w http.ResponseWriter, r *http.Request) {
+		currentUser := userFromContext(r)
+		if r.Method != http.MethodPost || currentUser == nil {
+			http.Error(w, "Método no permitido.", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := discardActiveCheckout(db, currentUser.ID); err != nil {
+			redirectWithMessage(w, r, "/carrito", "", err.Error())
+			return
+		}
+		redirectWithMessage(w, r, "/carrito", "Checkout descartado.", "")
+	})
+
+	mux.HandleFunc("/checkout", func(w http.ResponseWriter, r *http.Request) {
+		currentUser := userFromContext(r)
+		if r.Method != http.MethodPost || currentUser == nil {
+			http.Error(w, "Método no permitido.", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			redirectWithMessage(w, r, "/carrito", "", "No se pudo leer el formulario.")
+			return
+		}
+		method := strings.TrimSpace(r.FormValue("metodo_pago"))
+		if !isPaymentMethod(method) {
+			redirectWithMessage(w, r, "/carrito", "", "Selecciona un método de pago válido.")
+			return
+		}
+		checkout, _, _, err := loadActiveCheckout(db, currentUser.ID)
+		if err != nil {
+			redirectWithMessage(w, r, "/carrito", "", "No se pudo cargar el checkout.")
+			return
+		}
+		result, err := processCheckout(db, currentUser.ID, checkout.ID, r.FormValue("cliente"), method, r.FormValue("notas"), currentUser)
+		if err != nil {
+			redirectWithMessage(w, r, "/carrito", "", err.Error())
+			return
+		}
+		if result.State == checkoutStatePartial {
+			errorText := "Hay líneas pendientes para corregir o reintentar."
+			if len(result.Errors) > 0 {
+				errorText = result.Errors[0]
+			}
+			redirectWithMessage(w, r, "/carrito", "Checkout parcial: se procesaron las líneas disponibles.", errorText)
+			return
+		}
+		redirectWithMessage(w, r, "/carrito", "Checkout confirmado correctamente.", "")
 	})
 
 	mux.HandleFunc("/venta/new", func(w http.ResponseWriter, r *http.Request) {

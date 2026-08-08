@@ -37,6 +37,12 @@ WorkingDirectory=/opt/stocki
 La aplicación usa SQLite en modo WAL. En producción pueden existir junto a la
 base los archivos `data.db-wal` y `data.db-shm`.
 
+Al iniciar, `initDB` aplica automáticamente las migraciones pendientes. La
+migración 7 agrega el checkout persistente (`checkout_operaciones`,
+`checkout_venta_items` y `checkout_cambio_items`) y columnas de trazabilidad en
+`ventas`; no requiere pasos manuales, pero debe probarse sobre una copia antes
+de publicar una versión nueva.
+
 ## Compilación
 
 La arquitectura de producción es ARM64. El binario debe compilarse así:

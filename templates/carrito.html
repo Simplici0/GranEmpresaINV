@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>{{.Title}}</title>
+  <link rel="icon" href="/static/favicon.svg" type="image/svg+xml" sizes="any" />
+  <style>
+    :root {
+      color-scheme: light;
+      --bg: #f7f5f2;
+      --card: #ffffff;
+      --text: #26221f;
+      --muted: #6f6a65;
+      --primary: #e85d3c;
+      --primary-strong: #cf4528;
+      --primary-soft: #fff1e6;
+      --success: #2d9d78;
+      --warning: #b76808;
+      --danger: #b93636;
+      --border: #e6dfd8;
+      --shadow-soft: 0 8px 18px rgba(18, 23, 38, 0.07);
+    }
+
+    * { box-sizing: border-box; font-family: "Inter", "Segoe UI", sans-serif; }
+    body { margin: 0; background: var(--bg); color: var(--text); }
+    .page-content { padding: 24px 32px 48px; max-width: 1440px; margin: 0 auto; }
+    .cart-layout { display: grid; grid-template-columns: minmax(0, 1fr) 320px; gap: 20px; align-items: start; }
+    .cart-main { display: grid; gap: 20px; min-width: 0; }
+    .panel { background: var(--card); border: 1px solid var(--border); border-radius: 18px; padding: 20px; box-shadow: var(--shadow-soft); }
+    .panel h2, .panel h3 { margin: 0; }
+    .panel h2 { font-size: 19px; }
+    .panel h3 { font-size: 15px; }
+    .panel-header { display: flex; justify-content: space-between; align-items: start; gap: 16px; margin-bottom: 16px; }
+    .panel-header p, .helper { margin: 6px 0 0; color: var(--muted); font-size: 13px; line-height: 1.45; }
+    .notice { padding: 12px 16px; border-radius: 12px; font-size: 14px; font-weight: 650; }
+    .notice.success { background: #eaf7f1; color: #1f6b4f; border: 1px solid #c7e6d7; }
+    .notice.error { background: #fff0f0; color: var(--danger); border: 1px solid #f0caca; }
+    .details-form, .add-form, .change-form { display: grid; gap: 14px; }
+    .details-grid, .form-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px; }
+    .add-grid, .change-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; }
+    .subpanel { padding: 16px; border: 1px solid var(--border); border-radius: 15px; background: #fbfaf8; }
+    label { display: block; margin-bottom: 6px; color: var(--muted); font-size: 11px; font-weight: 800; letter-spacing: .045em; text-transform: uppercase; }
+    input, select, textarea { width: 100%; padding: 10px 12px; border: 1px solid var(--border); border-radius: 11px; background: var(--card); color: var(--text); font-size: 14px; }
+    textarea { min-height: 82px; resize: vertical; }
+    input:focus, select:focus, textarea:focus { outline: 0; border-color: var(--primary); box-shadow: 0 0 0 3px rgba(232, 93, 60, .14); }
+    .actions { display: flex; flex-wrap: wrap; gap: 9px; align-items: center; }
+    button, a.button { display: inline-flex; align-items: center; justify-content: center; gap: 7px; min-height: 40px; padding: 9px 14px; border: 1px solid var(--border); border-radius: 11px; background: var(--card); color: var(--text); font-size: 13px; font-weight: 750; text-decoration: none; cursor: pointer; }
+    button.primary { border-color: var(--primary); background: var(--primary); color: #ffffff; }
+    button.primary:hover { background: var(--primary-strong); }
+    button.secondary, a.secondary { border-color: #f2c6a8; background: var(--primary-soft); color: var(--primary-strong); }
+    button.danger { border-color: #edbaba; background: #fff6f6; color: var(--danger); }
+    button:disabled { opacity: .55; cursor: not-allowed; }
+    .summary { position: sticky; top: 92px; display: grid; gap: 14px; }
+    .summary-total { padding: 18px; border-radius: 15px; background: var(--primary); color: #ffffff; }
+    .summary-total span { display: block; font-size: 12px; opacity: .84; }
+    .summary-total strong { display: block; margin-top: 5px; font-size: 28px; letter-spacing: -.02em; }
+    .summary-list { display: grid; gap: 11px; margin: 0; }
+    .summary-row { display: flex; justify-content: space-between; gap: 12px; font-size: 13px; }
+    .summary-row dt { color: var(--muted); }
+    .summary-row dd { margin: 0; font-weight: 800; }
+    .summary-form { display: grid; gap: 12px; }
+    .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 13px; }
+    table { width: 100%; min-width: 760px; border-collapse: collapse; }
+    th, td { padding: 11px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; font-size: 13px; }
+    th { color: var(--muted); background: #faf8f5; font-size: 11px; letter-spacing: .04em; text-transform: uppercase; }
+    tr:last-child td { border-bottom: 0; }
+    .line-form { display: grid; grid-template-columns: 84px 130px minmax(150px, 1fr) auto; gap: 7px; align-items: end; min-width: 480px; }
+    .line-form label { margin-bottom: 4px; font-size: 10px; }
+    .line-form input { padding: 7px 8px; font-size: 12px; }
+    .line-form button { min-height: 32px; padding: 6px 9px; font-size: 11px; }
+    .line-title { font-weight: 800; }
+    .line-meta { margin-top: 3px; color: var(--muted); font-size: 12px; }
+    .badge { display: inline-flex; padding: 4px 8px; border-radius: 999px; font-size: 11px; font-weight: 800; }
+    .badge.pending { background: #fff5dd; color: var(--warning); }
+    .badge.processed { background: #eaf7f1; color: var(--success); }
+    .badge.error { background: #fff0f0; color: var(--danger); }
+    .badge.discarded { background: #efefef; color: #777; }
+    .line-error { margin-top: 5px; color: var(--danger); font-size: 12px; font-weight: 650; }
+    .empty { padding: 18px; border: 1px dashed var(--border); border-radius: 12px; color: var(--muted); font-size: 13px; }
+    .mode-fields[hidden] { display: none; }
+    .stock-hint { min-height: 16px; margin-top: 5px; color: var(--muted); font-size: 11px; }
+    @media (max-width: 1050px) {
+      .cart-layout { grid-template-columns: 1fr; }
+      .summary { position: static; }
+    }
+    @media (max-width: 760px) {
+      .page-content { padding: 18px 14px 32px; }
+      .add-grid, .change-grid, .details-grid, .form-grid { grid-template-columns: 1fr; }
+      .panel { padding: 15px; border-radius: 15px; }
+      .panel-header { display: grid; }
+      .line-form { grid-template-columns: repeat(2, minmax(0, 1fr)); min-width: 0; }
+      .line-form .wide { grid-column: 1 / -1; }
+      .line-form button { width: 100%; }
+    }
+  </style>
+</head>
+<body>
+  {{template "header" .}}
+  <main class="page-content">
+    {{if .Flash}}<div class="notice success">{{.Flash}}</div>{{end}}
+    {{if .Error}}<div class="notice error" style="margin-top: 12px;">{{.Error}}</div>{{end}}
+
+    <div class="cart-layout" style="margin-top: 18px;">
+      <div class="cart-main">
+        <section class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Datos del checkout</h2>
+              <p>El cliente y el método de pago son obligatorios al confirmar.</p>
+            </div>
+            <span class="badge {{if eq .Checkout.Estado "parcial"}}error{{else}}pending{{end}}">{{.Checkout.Estado}}</span>
+          </div>
+          <form class="details-form" action="/carrito/details" method="POST">
+            <input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" />
+            <div class="details-grid">
+              <div>
+                <label for="cliente">Cliente</label>
+                <input id="cliente" name="cliente" type="text" value="{{.Checkout.Cliente}}" maxlength="160" placeholder="Nombre de la persona" />
+              </div>
+              <div>
+                <label for="metodo_pago">Método de pago</label>
+                <select id="metodo_pago" name="metodo_pago">
+                  <option value="">Seleccionar después</option>
+                  {{range .PaymentMethods}}<option value="{{.}}" {{if eq $.Checkout.MetodoPago .}}selected{{end}}>{{.}}</option>{{end}}
+                </select>
+              </div>
+            </div>
+            <div>
+              <label for="checkout_notas">Notas</label>
+              <textarea id="checkout_notas" name="notas" maxlength="2000" placeholder="Observaciones generales">{{.Checkout.Notas}}</textarea>
+            </div>
+            <div class="actions"><button class="secondary" type="submit">Guardar datos</button></div>
+          </form>
+        </section>
+
+        <div class="add-grid">
+          <section class="panel">
+            <div class="panel-header"><div><h2>Agregar venta</h2><p>El precio se precarga desde el catálogo y puede editarse.</p></div></div>
+            <form class="add-form" action="/carrito/items/venta" method="POST">
+              <input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" />
+              <div>
+                <label for="sale_product">Producto</label>
+                <select id="sale_product" name="producto_id" data-product-select>
+                  {{range .Products}}<option value="{{.ID}}" data-stock="{{index $.StockByProduct .ID}}" data-price="{{.SalePrice}}">{{.Name}} ({{.ID}})</option>{{end}}
+                </select>
+                <div class="stock-hint" data-stock-hint></div>
+              </div>
+              <div class="form-grid">
+                <div><label for="sale_qty">Cantidad</label><input id="sale_qty" name="cantidad" type="number" min="1" value="1" /></div>
+                <div><label for="sale_price">Precio unitario</label><input id="sale_price" name="precio_unitario" type="text" inputmode="numeric" placeholder="Precio catálogo" /></div>
+              </div>
+              <div><label for="sale_notes">Notas</label><input id="sale_notes" name="notas" type="text" maxlength="500" placeholder="Opcional" /></div>
+              <div class="actions"><button class="primary" type="submit">Agregar venta</button><a class="button secondary" href="/venta/new">Venta rápida</a></div>
+            </form>
+          </section>
+
+          <section class="panel">
+            <div class="panel-header"><div><h2>Agregar cargo</h2><p>Úsalo para una diferencia de cambio. No consume unidades.</p></div></div>
+            <form class="add-form" action="/carrito/items/cargo" method="POST">
+              <input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" />
+              <div><label for="charge_amount">Valor del cargo</label><input id="charge_amount" name="monto" type="text" inputmode="numeric" placeholder="0" required /></div>
+              <div><label for="charge_notes">Descripción</label><input id="charge_notes" name="notas" type="text" maxlength="500" value="Diferencia de cambio" /></div>
+              <div class="actions"><button class="secondary" type="submit">Agregar cargo</button></div>
+            </form>
+          </section>
+        </div>
+
+        <section class="panel">
+          <div class="panel-header"><div><h2>Agregar cambio</h2><p>Las listas son independientes; cada línea se procesa si tiene datos y stock válidos.</p></div><a class="button secondary" href="/cambio/new">Cambio rápido</a></div>
+          <div class="change-grid">
+            <form class="subpanel change-form" action="/carrito/items/cambio" method="POST">
+              <input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" />
+              <input type="hidden" name="direccion" value="salida" />
+              <h3>Producto que sale</h3>
+              <div><label for="out_product">Producto</label><select id="out_product" name="producto_id">{{range .Products}}<option value="{{.ID}}" data-stock="{{index $.StockByProduct .ID}}">{{.Name}} ({{.ID}})</option>{{end}}</select><div class="stock-hint" data-out-stock-hint></div></div>
+              <div><label for="out_qty">Cantidad</label><input id="out_qty" name="cantidad" type="number" min="1" value="1" /></div>
+              <div class="actions"><button class="secondary" type="submit">Agregar salida</button></div>
+            </form>
+
+            <form class="subpanel change-form" action="/carrito/items/cambio" method="POST">
+              <input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" />
+              <input type="hidden" name="direccion" value="entrada" />
+              <h3>Producto que entra</h3>
+              <div><label for="incoming_mode">Tipo</label><select id="incoming_mode" name="incoming_mode"><option value="existing">Producto existente</option><option value="new">Producto nuevo</option></select></div>
+              <div class="mode-fields" data-existing-fields>
+                <label for="incoming_existing_id">Producto existente</label>
+                <select id="incoming_existing_id" name="incoming_existing_id">{{range .Products}}<option value="{{.ID}}">{{.Name}} ({{.ID}})</option>{{end}}</select>
+              </div>
+              <div class="mode-fields" data-new-fields hidden>
+                <label for="incoming_new_sku">SKU nuevo</label><input id="incoming_new_sku" name="incoming_new_sku" type="text" maxlength="80" placeholder="SKU" />
+                <label for="incoming_new_name">Nombre</label><input id="incoming_new_name" name="incoming_new_name" type="text" maxlength="180" placeholder="Nombre del producto" />
+                <label for="incoming_new_line">Línea</label><input id="incoming_new_line" name="incoming_new_line" type="text" maxlength="120" placeholder="Sin línea" />
+              </div>
+              <div><label for="incoming_qty">Cantidad</label><input id="incoming_qty" name="cantidad" type="number" min="1" value="1" /></div>
+              <div class="actions"><button class="secondary" type="submit">Agregar entrada</button></div>
+            </form>
+          </div>
+        </section>
+
+        <section class="panel">
+          <div class="panel-header"><div><h2>Ventas y cargos</h2><p>{{len .SaleItems}} líneas registradas.</p></div></div>
+          {{if .SaleItems}}
+          <div class="table-wrap"><table><thead><tr><th>Línea</th><th>Estado</th><th>Total</th><th>Editar</th></tr></thead><tbody>
+            {{range .SaleItems}}
+            <tr>
+              <td><div class="line-title">{{.ProductoNombre}}</div><div class="line-meta">{{if eq .Tipo "cargo"}}Cargo sin stock{{else}}{{.ProductoID}} · {{.Cantidad}} unidad(es){{end}}</div></td>
+              <td><span class="badge {{if eq .Estado "procesada"}}processed{{else if eq .Estado "error"}}error{{else if eq .Estado "descartada"}}discarded{{else}}pending{{end}}">{{.Estado}}</span>{{if .Error}}<div class="line-error">{{.Error}}</div>{{end}}</td>
+              <td>{{.TotalText}}</td>
+              <td>
+                {{if or (eq .Estado "pendiente") (eq .Estado "error")}}
+                <form class="line-form" action="/carrito/item/update" method="POST">
+                  <input type="hidden" name="csrf_token" value="{{$.CurrentUser.CSRFToken}}" /><input type="hidden" name="tipo" value="venta" /><input type="hidden" name="item_id" value="{{.ID}}" />
+                  {{if eq .Tipo "cargo"}}<input type="hidden" name="cantidad" value="1" /><div><label>Importe</label><input name="monto" type="text" inputmode="numeric" value="{{.TotalCOP}}" /></div>{{else}}<div><label>Cantidad</label><input name="cantidad" type="number" min="1" value="{{.Cantidad}}" /></div><div><label>Precio unit.</label><input name="precio_unitario" type="text" inputmode="numeric" value="{{.PrecioUnitarioCOP}}" /></div>{{end}}
+                  <div class="wide"><label>Notas</label><input name="notas" type="text" value="{{.Notas}}" /></div><button class="secondary" type="submit">Guardar</button>
+                </form>
+                <form class="actions" action="/carrito/item/delete" method="POST" style="margin-top: 7px;"><input type="hidden" name="csrf_token" value="{{$.CurrentUser.CSRFToken}}" /><input type="hidden" name="tipo" value="venta" /><input type="hidden" name="item_id" value="{{.ID}}" /><button class="danger" type="submit">Quitar</button></form>
+                {{end}}
+              </td>
+            </tr>
+            {{end}}
+          </tbody></table></div>
+          {{else}}<div class="empty">Todavía no hay ventas ni cargos.</div>{{end}}
+        </section>
+
+        <section class="panel">
+          <div class="panel-header"><div><h2>Listas de cambio</h2><p>{{len .ChangeItems}} líneas registradas.</p></div></div>
+          {{if .ChangeItems}}
+          <div class="table-wrap"><table><thead><tr><th>Dirección</th><th>Producto</th><th>Estado</th><th>Editar</th></tr></thead><tbody>
+            {{range .ChangeItems}}
+            <tr>
+              <td><span class="badge {{if eq .Direccion "entrada"}}processed{{else}}pending{{end}}">{{.Direccion}}</span></td>
+              <td><div class="line-title">{{.ProductoNombre}}</div><div class="line-meta">{{.ProductoID}} · {{.Cantidad}} unidad(es){{if .EsNuevo}} · nuevo{{end}}</div></td>
+              <td><span class="badge {{if eq .Estado "procesada"}}processed{{else if eq .Estado "error"}}error{{else if eq .Estado "descartada"}}discarded{{else}}pending{{end}}">{{.Estado}}</span>{{if .Error}}<div class="line-error">{{.Error}}</div>{{end}}</td>
+              <td>
+                {{if or (eq .Estado "pendiente") (eq .Estado "error")}}
+                <form class="line-form" action="/carrito/item/update" method="POST">
+                  <input type="hidden" name="csrf_token" value="{{$.CurrentUser.CSRFToken}}" /><input type="hidden" name="tipo" value="cambio" /><input type="hidden" name="item_id" value="{{.ID}}" />
+                  <div><label>Cantidad</label><input name="cantidad" type="number" min="1" value="{{.Cantidad}}" /></div><div class="wide"><label>Nombre</label><input name="producto_nombre" type="text" value="{{.ProductoNombre}}" /></div><div class="wide"><label>Línea</label><input name="linea" type="text" value="{{.Linea}}" /></div><button class="secondary" type="submit">Guardar</button>
+                </form>
+                <form class="actions" action="/carrito/item/delete" method="POST" style="margin-top: 7px;"><input type="hidden" name="csrf_token" value="{{$.CurrentUser.CSRFToken}}" /><input type="hidden" name="tipo" value="cambio" /><input type="hidden" name="item_id" value="{{.ID}}" /><button class="danger" type="submit">Quitar</button></form>
+                {{end}}
+              </td>
+            </tr>
+            {{end}}
+          </tbody></table></div>
+          {{else}}<div class="empty">Todavía no hay líneas de cambio.</div>{{end}}
+        </section>
+      </div>
+
+      <aside class="summary">
+        <section class="panel">
+          <div class="summary-total"><span>Total de ventas y cargos procesados</span><strong>{{.Checkout.TotalText}}</strong></div>
+          <dl class="summary-list" style="margin-top: 18px;">
+            <div class="summary-row"><dt>Líneas</dt><dd>{{.Checkout.ItemCount}}</dd></div>
+            <div class="summary-row"><dt>Pendientes</dt><dd>{{.Checkout.PendingCount}}</dd></div>
+            <div class="summary-row"><dt>Pago</dt><dd>{{if .Checkout.MetodoPago}}{{.Checkout.MetodoPago}}{{else}}Sin definir{{end}}</dd></div>
+          </dl>
+        </section>
+        <section class="panel">
+          <form class="summary-form" action="/checkout" method="POST">
+            <input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" />
+            <h3>Confirmar checkout</h3>
+            <p class="helper">Las líneas válidas se procesan. Las que fallen quedan disponibles para reintentar.</p>
+            <label for="confirm_client">Cliente obligatorio</label><input id="confirm_client" name="cliente" type="text" value="{{.Checkout.Cliente}}" maxlength="160" required />
+            <label for="confirm_payment">Método global</label><select id="confirm_payment" name="metodo_pago" required><option value="">Seleccionar</option>{{range .PaymentMethods}}<option value="{{.}}" {{if eq $.Checkout.MetodoPago .}}selected{{end}}>{{.}}</option>{{end}}</select>
+            <label for="confirm_notes">Notas</label><textarea id="confirm_notes" name="notas" maxlength="2000">{{.Checkout.Notas}}</textarea>
+            <button class="primary" type="submit" {{if eq .Checkout.ItemCount 0}}disabled{{end}}>Confirmar checkout</button>
+          </form>
+          <form action="/carrito/descartar" method="POST" style="margin-top: 10px;"><input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" /><button class="danger" type="submit">Descartar checkout</button></form>
+        </section>
+      </aside>
+    </div>
+  </main>
+  <script>
+    (() => {
+      const productSelect = document.querySelector("[data-product-select]");
+      const priceInput = document.querySelector("#sale_price");
+      const qtyInput = document.querySelector("#sale_qty");
+      const stockHint = document.querySelector("[data-stock-hint]");
+      const syncSale = () => {
+        const option = productSelect?.selectedOptions?.[0];
+        const stock = Number(option?.dataset.stock || 0);
+        const price = Number(option?.dataset.price || 0);
+        if (qtyInput) {
+          qtyInput.max = String(Math.max(stock, 1));
+          if (stock > 0 && Number(qtyInput.value || 1) > stock) qtyInput.value = String(stock);
+        }
+        if (priceInput && (!priceInput.value || priceInput.dataset.autofilled === "1")) {
+          priceInput.value = price > 0 ? String(price) : "";
+          priceInput.dataset.autofilled = "1";
+        }
+        if (stockHint) stockHint.textContent = `Disponibles ahora: ${stock}. El stock se valida al confirmar.`;
+      };
+      priceInput?.addEventListener("input", () => { priceInput.dataset.autofilled = "0"; });
+      productSelect?.addEventListener("change", syncSale);
+      syncSale();
+
+      const outgoingSelect = document.querySelector("#out_product");
+      const outgoingQty = document.querySelector("#out_qty");
+      const outgoingHint = document.querySelector("[data-out-stock-hint]");
+      const syncOutgoing = () => {
+        const stock = Number(outgoingSelect?.selectedOptions?.[0]?.dataset.stock || 0);
+        if (outgoingQty) {
+          outgoingQty.max = String(Math.max(stock, 1));
+          if (stock > 0 && Number(outgoingQty.value || 1) > stock) outgoingQty.value = String(stock);
+        }
+        if (outgoingHint) outgoingHint.textContent = `Disponibles ahora: ${stock}. Se tomarán FIFO al confirmar.`;
+      };
+      outgoingSelect?.addEventListener("change", syncOutgoing);
+      syncOutgoing();
+
+      const mode = document.querySelector("#incoming_mode");
+      const existing = document.querySelector("[data-existing-fields]");
+      const fresh = document.querySelector("[data-new-fields]");
+      const syncMode = () => {
+        const isNew = mode?.value === "new";
+        if (existing) existing.hidden = isNew;
+        if (fresh) fresh.hidden = !isNew;
+        existing?.querySelectorAll("input, select").forEach((field) => { field.disabled = isNew; });
+        fresh?.querySelectorAll("input, select").forEach((field) => { field.disabled = !isNew; });
+      };
+      mode?.addEventListener("change", syncMode);
+      syncMode();
+    })();
+  </script>
+</body>
+</html>

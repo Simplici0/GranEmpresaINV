@@ -1,9 +1,11 @@
 package main
 
 import (
+	"bytes"
 	"context"
 	"database/sql"
 	"fmt"
+	"html/template"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
@@ -647,8 +649,8 @@ func TestInitDBLeavesNewDatabaseEmptyUnlessDemoIsExplicit(t *testing.T) {
 	if err := db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&migrationCount); err != nil {
 		t.Fatalf("latest schema migration: %v", err)
 	}
-	if migrationCount != 6 {
-		t.Fatalf("expected schema migration version 6, got %d", migrationCount)
+	if migrationCount != 7 {
+		t.Fatalf("expected schema migration version 7, got %d", migrationCount)
 	}
 }
 
@@ -856,5 +858,334 @@ func TestDashboardIncludesStructuredChangesByOperationAndDate(t *testing.T) {
 	}
 	if len(data.Timeline) != 1 || data.Timeline[0].Cambios != 2 {
 		t.Fatalf("unexpected timeline changes: %+v", data.Timeline)
+	}
+}
+
+func seedCheckoutUser(t *testing.T, db *sql.DB, username string) int {
+	t.Helper()
+	result, err := db.Exec(`
+		INSERT INTO users (username, password_hash, role, created_at, is_active)
+		VALUES (?, 'test-hash', 'empleado', ?, 1)`, username, time.Now().Format(time.RFC3339))
+	if err != nil {
+		t.Fatalf("insert checkout user: %v", err)
+	}
+	id, err := result.LastInsertId()
+	if err != nil {
+		t.Fatalf("checkout user id: %v", err)
+	}
+	return int(id)
+}
+
+func seedCheckoutPricedProduct(t *testing.T, db *sql.DB, sku string, quantity int, price int64) {
+	t.Helper()
+	seedCambioProduct(t, db, sku, quantity)
+	if _, err := db.Exec(`UPDATE productos SET precio_venta_cop = ? WHERE sku = ?`, price, sku); err != nil {
+		t.Fatalf("set checkout price %s: %v", sku, err)
+	}
+}
+
+func TestCheckoutKeepsDraftsIsolatedByUser(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	userOne := seedCheckoutUser(t, db, "checkout-one")
+	userTwo := seedCheckoutUser(t, db, "checkout-two")
+	seedCheckoutPricedProduct(t, db, "P-CART", 3, 12000)
+
+	itemID, err := addCheckoutSaleItem(db, userOne, checkoutSaleInput{
+		ProductoID: "P-CART",
+		Cantidad:   1,
+	})
+	if err != nil {
+		t.Fatalf("add checkout item one: %v", err)
+	}
+	if itemID == 0 {
+		t.Fatal("expected checkout item id")
+	}
+	if _, err := addCheckoutSaleItem(db, userTwo, checkoutSaleInput{
+		ProductoID: "P-CART",
+		Cantidad:   2,
+	}); err != nil {
+		t.Fatalf("add checkout item two: %v", err)
+	}
+
+	checkoutOne, salesOne, _, err := loadActiveCheckout(db, userOne)
+	if err != nil {
+		t.Fatalf("load checkout one: %v", err)
+	}
+	checkoutTwo, salesTwo, _, err := loadActiveCheckout(db, userTwo)
+	if err != nil {
+		t.Fatalf("load checkout two: %v", err)
+	}
+	if checkoutOne.ID == checkoutTwo.ID || len(salesOne) != 1 || len(salesTwo) != 1 {
+		t.Fatalf("checkout drafts were not isolated: one=%+v/%d two=%+v/%d", checkoutOne, len(salesOne), checkoutTwo, len(salesTwo))
+	}
+}
+
+func TestProcessCheckoutLeavesUnavailableLinesForRetry(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	userID := seedCheckoutUser(t, db, "checkout-partial")
+	seedCheckoutPricedProduct(t, db, "P-CHECKOUT-OK", 1, 10000)
+	seedCheckoutPricedProduct(t, db, "P-CHECKOUT-LATER", 0, 15000)
+
+	if _, err := addCheckoutSaleItem(db, userID, checkoutSaleInput{ProductoID: "P-CHECKOUT-OK", Cantidad: 1}); err != nil {
+		t.Fatalf("add available sale: %v", err)
+	}
+	if _, err := addCheckoutSaleItem(db, userID, checkoutSaleInput{ProductoID: "P-CHECKOUT-LATER", Cantidad: 1}); err != nil {
+		t.Fatalf("add unavailable sale: %v", err)
+	}
+	checkout, _, _, err := loadActiveCheckout(db, userID)
+	if err != nil {
+		t.Fatalf("load partial checkout: %v", err)
+	}
+
+	result, err := processCheckout(db, userID, checkout.ID, "Cliente parcial", "Efectivo", "", &User{ID: userID, Username: "checkout-partial"})
+	if err != nil {
+		t.Fatalf("process partial checkout: %v", err)
+	}
+	if result.State != checkoutStatePartial || result.ProcessedCount != 1 || result.FailedCount != 1 {
+		t.Fatalf("unexpected partial result: %+v", result)
+	}
+	if availableCambioCount(t, db, "P-CHECKOUT-OK") != 0 || availableCambioCount(t, db, "P-CHECKOUT-LATER") != 0 {
+		t.Fatalf("unexpected stock after partial checkout")
+	}
+
+	if _, err := db.Exec(`
+		INSERT INTO unidades (id, producto_id, estado, creado_en)
+		VALUES ('U-P-CHECKOUT-LATER-01', 'P-CHECKOUT-LATER', 'Disponible', ?)`, time.Now().Format(time.RFC3339)); err != nil {
+		t.Fatalf("add retry stock: %v", err)
+	}
+	result, err = processCheckout(db, userID, checkout.ID, "Cliente parcial", "Efectivo", "", &User{ID: userID, Username: "checkout-partial"})
+	if err != nil {
+		t.Fatalf("retry partial checkout: %v", err)
+	}
+	if result.State != checkoutStateConfirmed || result.PendingCount != 0 {
+		t.Fatalf("unexpected retry result: %+v", result)
+	}
+	var salesCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM ventas WHERE checkout_id = ? AND estado = 'confirmada'`, checkout.ID).Scan(&salesCount); err != nil {
+		t.Fatalf("count checkout sales: %v", err)
+	}
+	if salesCount != 2 {
+		t.Fatalf("expected two confirmed sales after retry, got %d", salesCount)
+	}
+}
+
+func TestCheckoutCargoDoesNotConsumeInventory(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	userID := seedCheckoutUser(t, db, "checkout-cargo")
+	if _, err := addCheckoutSaleItem(db, userID, checkoutSaleInput{
+		Tipo:     "cargo",
+		TotalCOP: 2500,
+		Notas:    "Diferencia de cambio",
+	}); err != nil {
+		t.Fatalf("add checkout cargo: %v", err)
+	}
+	checkout, _, _, err := loadActiveCheckout(db, userID)
+	if err != nil {
+		t.Fatalf("load cargo checkout: %v", err)
+	}
+	result, err := processCheckout(db, userID, checkout.ID, "Cliente cargo", "Transferencia", "", &User{ID: userID, Username: "checkout-cargo"})
+	if err != nil {
+		t.Fatalf("process cargo checkout: %v", err)
+	}
+	if result.State != checkoutStateConfirmed || result.ProcessedTotalCOP != 2500 {
+		t.Fatalf("unexpected cargo result: %+v", result)
+	}
+	var kind, name string
+	var quantity, total int
+	if err := db.QueryRow(`
+		SELECT tipo, producto_nombre, cantidad, total_cop
+		FROM ventas WHERE checkout_id = ?`, checkout.ID).Scan(&kind, &name, &quantity, &total); err != nil {
+		t.Fatalf("query cargo sale: %v", err)
+	}
+	if kind != "cargo" || name != "Diferencia de cambio" || quantity != 1 || total != 2500 {
+		t.Fatalf("unexpected cargo sale: %s/%s/%d/%d", kind, name, quantity, total)
+	}
+}
+
+func TestCheckoutProcessesGeneralChangeListsIndependently(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	userID := seedCheckoutUser(t, db, "checkout-change")
+	seedCheckoutPricedProduct(t, db, "P-CHECKOUT-OUT", 2, 10000)
+	seedCheckoutPricedProduct(t, db, "P-CHECKOUT-IN", 0, 12000)
+	if _, err := addCheckoutChangeItem(db, userID, checkoutChangeInput{
+		Direccion:  "salida",
+		ProductoID: "P-CHECKOUT-OUT",
+		Cantidad:   1,
+	}); err != nil {
+		t.Fatalf("add outgoing change: %v", err)
+	}
+	if _, err := addCheckoutChangeItem(db, userID, checkoutChangeInput{
+		Direccion:  "entrada",
+		ProductoID: "P-CHECKOUT-IN",
+		Cantidad:   3,
+	}); err != nil {
+		t.Fatalf("add incoming change: %v", err)
+	}
+	checkout, _, _, err := loadActiveCheckout(db, userID)
+	if err != nil {
+		t.Fatalf("load change checkout: %v", err)
+	}
+	result, err := processCheckout(db, userID, checkout.ID, "Cliente cambio", "Efectivo", "", &User{ID: userID, Username: "checkout-change"})
+	if err != nil {
+		t.Fatalf("process change checkout: %v", err)
+	}
+	if result.State != checkoutStateConfirmed || availableCambioCount(t, db, "P-CHECKOUT-OUT") != 1 || availableCambioCount(t, db, "P-CHECKOUT-IN") != 3 {
+		t.Fatalf("unexpected change checkout result: %+v", result)
+	}
+	var processed int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM checkout_cambio_items WHERE checkout_id = ? AND estado = 'procesada'`, checkout.ID).Scan(&processed); err != nil {
+		t.Fatalf("count processed change items: %v", err)
+	}
+	if processed != 2 {
+		t.Fatalf("expected both change lists processed, got %d", processed)
+	}
+}
+
+func TestDashboardIncludesCheckoutCargoAndGeneralChange(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	userID := seedCheckoutUser(t, db, "checkout-dashboard")
+	seedCheckoutPricedProduct(t, db, "P-DASH-OUT", 2, 10000)
+	seedCheckoutPricedProduct(t, db, "P-DASH-IN", 0, 12000)
+	if _, err := addCheckoutSaleItem(db, userID, checkoutSaleInput{Tipo: "cargo", TotalCOP: 3000}); err != nil {
+		t.Fatalf("add dashboard cargo: %v", err)
+	}
+	if _, err := addCheckoutChangeItem(db, userID, checkoutChangeInput{Direccion: "salida", ProductoID: "P-DASH-OUT", Cantidad: 1}); err != nil {
+		t.Fatalf("add dashboard outgoing: %v", err)
+	}
+	if _, err := addCheckoutChangeItem(db, userID, checkoutChangeInput{Direccion: "entrada", ProductoID: "P-DASH-IN", Cantidad: 2}); err != nil {
+		t.Fatalf("add dashboard incoming: %v", err)
+	}
+	checkout, _, _, err := loadActiveCheckout(db, userID)
+	if err != nil {
+		t.Fatalf("load dashboard checkout: %v", err)
+	}
+	if _, err := processCheckout(db, userID, checkout.ID, "Cliente dashboard", "Efectivo", "Cambio general", &User{ID: userID, Username: "checkout-dashboard"}); err != nil {
+		t.Fatalf("process dashboard checkout: %v", err)
+	}
+
+	today := time.Now().UTC().Truncate(24 * time.Hour)
+	date := today.Format("2006-01-02")
+	data, err := buildDashboardData(db, date, date, today, today)
+	if err != nil {
+		t.Fatalf("build checkout dashboard: %v", err)
+	}
+	if data.RangeCount != 1 || data.RangeTotal != "$3.000" {
+		t.Fatalf("unexpected checkout dashboard totals: count=%d total=%s", data.RangeCount, data.RangeTotal)
+	}
+	if len(data.Sales) == 0 || data.Sales[0].Tipo != "Cargo" || data.Sales[0].Producto != "Diferencia de cambio" {
+		t.Fatalf("checkout cargo missing from dashboard: %+v", data.Sales)
+	}
+	if data.ChangeCount != 1 || len(data.Changes) != 1 || data.Timeline[0].Cambios != 1 {
+		t.Fatalf("checkout change missing from dashboard: count=%d rows=%d timeline=%+v", data.ChangeCount, len(data.Changes), data.Timeline)
+	}
+	if data.Changes[0].SalienteCantidad != 1 || data.Changes[0].EntranteCantidad != 2 {
+		t.Fatalf("unexpected dashboard change quantities: %+v", data.Changes[0])
+	}
+}
+
+func TestCancelCargoKeepsInventoryUntouched(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	userID := seedCheckoutUser(t, db, "checkout-cancel-cargo")
+	if _, err := addCheckoutSaleItem(db, userID, checkoutSaleInput{Tipo: "cargo", TotalCOP: 1800}); err != nil {
+		t.Fatalf("add cancellation cargo: %v", err)
+	}
+	checkout, _, _, err := loadActiveCheckout(db, userID)
+	if err != nil {
+		t.Fatalf("load cancellation checkout: %v", err)
+	}
+	if _, err := processCheckout(db, userID, checkout.ID, "Cliente cargo", "Efectivo", "", &User{ID: userID, Username: "checkout-cancel-cargo"}); err != nil {
+		t.Fatalf("process cancellation cargo: %v", err)
+	}
+	var saleID int
+	if err := db.QueryRow(`SELECT id FROM ventas WHERE checkout_id = ?`, checkout.ID).Scan(&saleID); err != nil {
+		t.Fatalf("query cancellation cargo: %v", err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin cargo cancellation: %v", err)
+	}
+	if err := cancelSale(tx, saleID, &User{ID: userID, Username: "checkout-cancel-cargo"}, "corrección"); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("cancel cargo: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit cargo cancellation: %v", err)
+	}
+	var state string
+	if err := db.QueryRow(`SELECT estado FROM ventas WHERE id = ?`, saleID).Scan(&state); err != nil {
+		t.Fatalf("query cancelled cargo state: %v", err)
+	}
+	if state != "anulada" {
+		t.Fatalf("expected cargo to be cancelled, got %s", state)
+	}
+}
+
+func TestCheckoutTemplateRenders(t *testing.T) {
+	tmpl, err := template.ParseFiles("templates/carrito.html", "templates/partials/header.html")
+	if err != nil {
+		t.Fatalf("parse checkout templates: %v", err)
+	}
+	var output bytes.Buffer
+	data := checkoutPageData{
+		Title:          "Carrito",
+		Checkout:       checkoutOperation{Estado: checkoutStateDraft},
+		Products:       []productOption{{ID: "P-001", Name: "Producto", SalePrice: 1000}},
+		StockByProduct: map[string]int{"P-001": 2},
+		PaymentMethods: []string{"Efectivo"},
+		CurrentUser:    &User{Username: "tester", Role: "empleado", CSRFToken: "csrf"},
+	}
+	if err := tmpl.ExecuteTemplate(&output, "carrito.html", data); err != nil {
+		t.Fatalf("render checkout template: %v", err)
+	}
+	if output.Len() == 0 {
+		t.Fatal("expected rendered checkout template")
+	}
+}
+
+func TestCheckoutMigrationUpgradesLegacySalesSchema(t *testing.T) {
+	db, err := sql.Open("sqlite", filepath.Join(t.TempDir(), "legacy.db"))
+	if err != nil {
+		t.Fatalf("open legacy db: %v", err)
+	}
+	defer db.Close()
+	_, err = db.Exec(`
+		PRAGMA foreign_keys=ON;
+		CREATE TABLE schema_migrations (version INTEGER PRIMARY KEY, applied_at TEXT NOT NULL);
+		CREATE TABLE users (id INTEGER PRIMARY KEY AUTOINCREMENT, username TEXT NOT NULL UNIQUE);
+		CREATE TABLE ventas (id INTEGER PRIMARY KEY AUTOINCREMENT, producto_id TEXT NOT NULL, cantidad INTEGER NOT NULL, precio_final REAL NOT NULL, metodo_pago TEXT NOT NULL, notas TEXT NOT NULL DEFAULT '', fecha TEXT NOT NULL);
+		INSERT INTO users (username) VALUES ('legacy-user');
+		INSERT INTO ventas (producto_id, cantidad, precio_final, metodo_pago, fecha) VALUES ('P-LEGACY', 1, 100, 'Efectivo', '2026-08-07T12:00:00Z');
+		INSERT INTO schema_migrations (version, applied_at) VALUES
+			(1, '2026-08-07T12:00:00Z'), (2, '2026-08-07T12:00:00Z'),
+			(3, '2026-08-07T12:00:00Z'), (4, '2026-08-07T12:00:00Z'),
+			(5, '2026-08-07T12:00:00Z'), (6, '2026-08-07T12:00:00Z')`)
+	if err != nil {
+		t.Fatalf("create legacy schema: %v", err)
+	}
+	if err := applySchemaMigration(db, 7, migrateCheckoutSchema); err != nil {
+		t.Fatalf("apply checkout migration: %v", err)
+	}
+	var columns int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM pragma_table_info('ventas') WHERE name IN ('tipo', 'producto_nombre', 'checkout_id')`).Scan(&columns); err != nil {
+		t.Fatalf("check migrated sales columns: %v", err)
+	}
+	if columns != 3 {
+		t.Fatalf("expected checkout sales columns, got %d", columns)
+	}
+	var legacyCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM ventas WHERE producto_id = 'P-LEGACY'`).Scan(&legacyCount); err != nil {
+		t.Fatalf("check legacy sale: %v", err)
+	}
+	if legacyCount != 1 {
+		t.Fatalf("legacy sale was not preserved")
+	}
+	for _, table := range []string{"checkout_operaciones", "checkout_venta_items", "checkout_cambio_items"} {
+		var count int
+		if err := db.QueryRow(`SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name = ?`, table).Scan(&count); err != nil {
+			t.Fatalf("check migrated table %s: %v", table, err)
+		}
+		if count != 1 {
+			t.Fatalf("expected migrated table %s", table)
+		}
 	}
 }
