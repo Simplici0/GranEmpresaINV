@@ -609,6 +609,15 @@ func TestCSRFMiddlewareRequiresSessionToken(t *testing.T) {
 		t.Fatalf("expected missing token to be forbidden, got %d", missingResponse.Code)
 	}
 
+	ajaxMissing := httptest.NewRequest(http.MethodPost, "/venta", nil)
+	ajaxMissing.Header.Set("Accept", "application/json")
+	ajaxMissing = ajaxMissing.WithContext(context.WithValue(ajaxMissing.Context(), userContextKey, user))
+	ajaxMissingResponse := httptest.NewRecorder()
+	handler.ServeHTTP(ajaxMissingResponse, ajaxMissing)
+	if ajaxMissingResponse.Code != http.StatusForbidden || !bytes.Contains(ajaxMissingResponse.Body.Bytes(), []byte(`"ok":false`)) {
+		t.Fatalf("expected JSON CSRF error, got status=%d body=%q", ajaxMissingResponse.Code, ajaxMissingResponse.Body.String())
+	}
+
 	valid := httptest.NewRequest(http.MethodPost, "/venta", nil)
 	valid.Header.Set("X-CSRF-Token", "csrf-token")
 	valid = valid.WithContext(context.WithValue(valid.Context(), userContextKey, user))
@@ -616,6 +625,24 @@ func TestCSRFMiddlewareRequiresSessionToken(t *testing.T) {
 	handler.ServeHTTP(validResponse, valid)
 	if validResponse.Code != http.StatusNoContent {
 		t.Fatalf("expected valid token to pass, got %d", validResponse.Code)
+	}
+}
+
+func TestAuthMiddlewareReturnsJSONForExpiredAjaxSession(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	defer db.Close()
+
+	next := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Error("authenticated handler should not be called")
+	})
+	handler := authMiddleware(db, next)
+	request := httptest.NewRequest(http.MethodPost, "/carrito/items/cambio-pair", nil)
+	request.Header.Set("Accept", "application/json")
+	response := httptest.NewRecorder()
+	handler.ServeHTTP(response, request)
+
+	if response.Code != http.StatusUnauthorized || !bytes.Contains(response.Body.Bytes(), []byte(`"ok":false`)) {
+		t.Fatalf("expected JSON auth error, got status=%d body=%q", response.Code, response.Body.String())
 	}
 }
 
@@ -1038,6 +1065,58 @@ func TestCheckoutProcessesGeneralChangeListsIndependently(t *testing.T) {
 	}
 	if processed != 2 {
 		t.Fatalf("expected both change lists processed, got %d", processed)
+	}
+}
+
+func TestAddCheckoutChangePairCommitsBothLines(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	userID := seedCheckoutUser(t, db, "checkout-change-pair")
+	seedCheckoutPricedProduct(t, db, "P-PAIR-OUT", 2, 10000)
+	seedCheckoutPricedProduct(t, db, "P-PAIR-IN", 0, 12000)
+
+	err := addCheckoutChangePair(db, userID,
+		checkoutChangeInput{Direccion: "salida", ProductoID: "P-PAIR-OUT", Cantidad: 1},
+		checkoutChangeInput{Direccion: "entrada", ProductoID: "P-PAIR-IN", Cantidad: 3},
+	)
+	if err != nil {
+		t.Fatalf("add checkout change pair: %v", err)
+	}
+
+	checkout, _, changeItems, err := loadActiveCheckout(db, userID)
+	if err != nil {
+		t.Fatalf("load paired checkout: %v", err)
+	}
+	if checkout.ID == 0 || len(changeItems) != 2 {
+		t.Fatalf("expected two paired change lines, checkout=%+v items=%d", checkout, len(changeItems))
+	}
+	if changeItems[0].Direccion != "salida" || changeItems[0].ProductoID != "P-PAIR-OUT" || changeItems[0].Cantidad != 1 ||
+		changeItems[1].Direccion != "entrada" || changeItems[1].ProductoID != "P-PAIR-IN" || changeItems[1].Cantidad != 3 {
+		t.Fatalf("unexpected paired change lines: %+v", changeItems)
+	}
+}
+
+func TestAddCheckoutChangePairRollsBackWhenIncomingIsInvalid(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	userID := seedCheckoutUser(t, db, "checkout-change-pair-rollback")
+	seedCheckoutPricedProduct(t, db, "P-PAIR-ROLLBACK", 2, 10000)
+
+	err := addCheckoutChangePair(db, userID,
+		checkoutChangeInput{Direccion: "salida", ProductoID: "P-PAIR-ROLLBACK", Cantidad: 1},
+		checkoutChangeInput{Direccion: "entrada", ProductoID: "P-DOES-NOT-EXIST", Cantidad: 1},
+	)
+	if err == nil {
+		t.Fatal("expected invalid incoming product to fail")
+	}
+
+	var checkoutCount, itemCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM checkout_operaciones WHERE user_id = ?`, userID).Scan(&checkoutCount); err != nil {
+		t.Fatalf("count rolled back checkouts: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM checkout_cambio_items`).Scan(&itemCount); err != nil {
+		t.Fatalf("count rolled back change items: %v", err)
+	}
+	if checkoutCount != 0 || itemCount != 0 {
+		t.Fatalf("paired change was partially persisted: checkouts=%d items=%d", checkoutCount, itemCount)
 	}
 }
 

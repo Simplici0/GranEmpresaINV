@@ -853,6 +853,49 @@
       font-size: 12px;
     }
 
+    /* Loading state for swap form and buttons */
+    form[aria-busy="true"] {
+      position: relative;
+    }
+    form[aria-busy="true"]::after {
+      content: "";
+      position: absolute;
+      inset: 0;
+      background: rgba(255, 255, 255, 0.5);
+      border-radius: inherit;
+      z-index: 10;
+      cursor: wait;
+    }
+    form[aria-busy="true"] button:disabled {
+      opacity: 0.5;
+      cursor: wait;
+    }
+    button.loading {
+      position: relative;
+      color: transparent !important;
+      pointer-events: none;
+    }
+    button.loading::after {
+      content: "";
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      top: 50%;
+      left: 50%;
+      margin: -9px 0 0 -9px;
+      border: 2px solid var(--primary-strong);
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    button.primary.loading::after {
+      border-color: #ffffff;
+      border-top-color: transparent;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+
     #swap-modal input:not([type="checkbox"]),
     #swap-modal select {
       min-height: 40px;
@@ -1996,15 +2039,16 @@
           <div class="modal-row">
             <div>
               <label for="swap-person">Cliente</label>
-              <input id="swap-person" name="persona_del_cambio" type="text" placeholder="Nombre" autocomplete="off" />
+              <input id="swap-person" name="persona_del_cambio" type="text" placeholder="Nombre" maxlength="160" autocomplete="off" />
               <div class="field-error" data-swap-field-error="persona_del_cambio"></div>
             </div>
             <div>
               <label for="swap-mode">Tipo de entrada</label>
-              <select id="swap-mode" name="incoming_mode">
+              <select id="swap-mode" name="incoming_mode" aria-describedby="swap-mode-hint">
                 <option value="existing">Producto existente</option>
                 <option value="new">Producto nuevo</option>
               </select>
+              <div class="modal-hint" id="swap-mode-hint">Define si el producto que entra ya existe o es nuevo.</div>
               <div class="field-error" data-swap-field-error="incoming_mode"></div>
             </div>
           </div>
@@ -2034,7 +2078,7 @@
               </div>
               <div>
                 <label for="swap-existing-qty">Cantidad</label>
-                <input id="swap-existing-qty" name="incoming_existing_qty" type="number" min="1" step="1" value="1" />
+                <input id="swap-existing-qty" name="incoming_existing_qty" type="number" min="1" max="10000" step="1" value="1" />
                 <div class="field-error" data-swap-field-error="incoming_existing_qty"></div>
               </div>
             </div>
@@ -2045,23 +2089,23 @@
             <div class="modal-row">
               <div>
                 <label for="swap-new-sku">SKU</label>
-                <input id="swap-new-sku" name="incoming_new_sku" type="text" placeholder="Código" />
+                <input id="swap-new-sku" name="incoming_new_sku" type="text" maxlength="80" placeholder="Código" />
                 <div class="field-error" data-swap-field-error="incoming_new_sku"></div>
               </div>
               <div>
                 <label for="swap-new-name">Nombre</label>
-                <input id="swap-new-name" name="incoming_new_name" type="text" placeholder="Nombre del producto" />
+                <input id="swap-new-name" name="incoming_new_name" type="text" maxlength="180" placeholder="Nombre del producto" />
                 <div class="field-error" data-swap-field-error="incoming_new_name"></div>
               </div>
             </div>
             <div class="modal-row">
               <div>
                 <label for="swap-new-line">Línea</label>
-                <input id="swap-new-line" name="incoming_new_line" type="text" placeholder="Categoría" />
+                <input id="swap-new-line" name="incoming_new_line" type="text" maxlength="120" placeholder="Categoría" />
               </div>
               <div>
                 <label for="swap-new-qty">Cantidad</label>
-                <input id="swap-new-qty" name="incoming_new_qty" type="number" min="1" step="1" value="1" />
+                <input id="swap-new-qty" name="incoming_new_qty" type="number" min="1" max="10000" step="1" value="1" />
                 <div class="field-error" data-swap-field-error="incoming_new_qty"></div>
               </div>
             </div>
@@ -2069,7 +2113,7 @@
 
           <div>
             <label for="swap-notes">Notas</label>
-            <textarea id="swap-notes" name="notas" placeholder="Observaciones"></textarea>
+            <textarea id="swap-notes" name="notas" maxlength="2000" placeholder="Observaciones"></textarea>
             <div class="modal-hint">Sin registro de dinero. Para ventas con pago, usa el flujo de ventas.</div>
           </div>
 
@@ -3332,22 +3376,25 @@
       });
     }
 
-    const postCartForm = async (endpoint, values) => {
-      const resp = await fetch(endpoint, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/x-www-form-urlencoded",
-          "X-CSRF-Token": window.appCsrfToken()
-        },
-        body: new URLSearchParams(values)
-      });
-      const error = new URL(resp.url, window.location.origin).searchParams.get("error");
-      if (error) throw new Error(error);
-      if (!resp.ok) {
-        const data = await resp.json().catch(() => ({}));
-        throw new Error(data.error || "No se pudo agregar al carrito.");
-      }
-    };
+      const postCartForm = async (endpoint, values) => {
+        const resp = await fetch(endpoint, {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/x-www-form-urlencoded",
+            "Accept": "application/json",
+            "X-Requested-With": "XMLHttpRequest",
+            "X-CSRF-Token": window.appCsrfToken()
+          },
+          body: new URLSearchParams(values)
+        });
+        const error = new URL(resp.url, window.location.origin).searchParams.get("error");
+        if (error) throw new Error(error);
+        const data = await resp.json().catch(() => null);
+        if (!resp.ok || data?.ok === false) {
+          throw new Error(data?.error || "No se pudo agregar al carrito.");
+        }
+        return data;
+      };
 
     if (saleAddCart) {
       saleAddCart.addEventListener("click", async () => {
@@ -3398,37 +3445,51 @@
         const incomingQuantity = mode === "new"
           ? parseInt(swapNewQty?.value || "0", 10)
           : parseInt(swapExistingQty?.value || "0", 10);
-        if (!Number.isFinite(incomingQuantity) || incomingQuantity < 1) {
-          setSwapError("Ingresa una cantidad entrante válida.");
+        if (!Number.isFinite(incomingQuantity) || incomingQuantity < 1 || incomingQuantity > 10000) {
+          setSwapError("La cantidad entrante debe estar entre 1 y 10.000.");
+          return;
+        }
+        if (selectedUnits > 10000) {
+          setSwapError("La cantidad saliente no puede superar 10.000 unidades.");
           return;
         }
         if (mode === "new" && (!String(swapNewSku?.value || "").trim() || !String(swapNewName?.value || "").trim())) {
           setSwapError("Completa el SKU y el nombre del producto nuevo.");
           return;
         }
-        if (swapAddCart) swapAddCart.disabled = true;
+        // Disable both buttons to prevent double submit
+        [swapAddCart, swapSubmit].forEach((button) => {
+          if (!button) return;
+          button.disabled = true;
+          button.classList.add("loading");
+        });
+        swapForm?.setAttribute("aria-busy", "true");
+        clearSwapFieldErrors();
+        setSwapError("");
         try {
-          await postCartForm("/carrito/items/cambio", {
-            direccion: "salida",
-            producto_id: swapContext.productId,
-            cantidad: String(selectedUnits)
-          });
-          const incoming = {
-            direccion: "entrada",
-            cantidad: String(incomingQuantity),
+          const pair = {
+            salida_producto_id: swapContext.productId,
+            salida_cantidad: String(selectedUnits),
+            entrada_cantidad: String(incomingQuantity),
             incoming_mode: mode
           };
           if (mode === "new") {
-            incoming.incoming_new_sku = String(swapNewSku?.value || "").trim();
-            incoming.incoming_new_name = String(swapNewName?.value || "").trim();
-            incoming.incoming_new_line = String(swapNewLine?.value || "").trim();
+            pair.incoming_new_sku = String(swapNewSku?.value || "").trim();
+            pair.incoming_new_name = String(swapNewName?.value || "").trim();
+            pair.incoming_new_line = String(swapNewLine?.value || "").trim();
           } else {
-            incoming.incoming_existing_id = String(swapExistingSelect?.value || "").trim();
+            pair.incoming_existing_id = String(swapExistingSelect?.value || "").trim();
           }
-          await postCartForm("/carrito/items/cambio", incoming);
+          await postCartForm("/carrito/items/cambio-pair", pair);
           window.location.href = "/carrito?mensaje=Cambio%20agregado%20al%20carrito.";
         } catch (err) {
-          window.location.href = `/carrito?error=${encodeURIComponent(err?.message || "No se pudo agregar el cambio al carrito.")}`;
+          // Show error inline instead of redirecting — preserves modal context & user input
+          setSwapError(err?.message || "No se pudo agregar el cambio al carrito.");
+          if (swapAddCart) swapAddCart.disabled = false;
+          if (swapSubmit) swapSubmit.disabled = false;
+        } finally {
+          [swapAddCart, swapSubmit].forEach((button) => button?.classList.remove("loading"));
+          swapForm?.removeAttribute("aria-busy");
         }
       });
     }
@@ -3531,7 +3592,13 @@
           return;
         }
 
-        if (swapSubmit) swapSubmit.disabled = true;
+        // Disable both buttons to prevent double submit
+        [swapSubmit, swapAddCart].forEach((button) => {
+          if (!button) return;
+          button.disabled = true;
+          button.classList.add("loading");
+        });
+        swapForm.setAttribute("aria-busy", "true");
         try {
           const body = new URLSearchParams(new FormData(swapForm));
           const resp = await fetch("/cambio", {
@@ -3554,6 +3621,10 @@
         } catch (err) {
           setSwapError(err?.message || "No se pudo registrar el cambio.");
           if (swapSubmit) swapSubmit.disabled = false;
+          if (swapAddCart) swapAddCart.disabled = false;
+        } finally {
+          [swapSubmit, swapAddCart].forEach((button) => button?.classList.remove("loading"));
+          swapForm.removeAttribute("aria-busy");
         }
       });
     }

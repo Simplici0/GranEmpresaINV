@@ -228,7 +228,19 @@ func countInventoryUnits(units []inventoryUnit) inventoryCounts {
 	return counts
 }
 
-var errInsufficientStock = fmt.Errorf("stock insuficiente")
+const (
+	maxCambioQuantity    = 10000
+	maxCambioSKUBytes    = 80
+	maxCambioNameBytes   = 180
+	maxCambioLineBytes   = 120
+	maxCambioPersonBytes = 160
+	maxCambioNotesBytes  = 2000
+)
+
+var (
+	errInsufficientStock       = fmt.Errorf("stock insuficiente")
+	errCambioIncomingSKUExists = fmt.Errorf("el SKU del producto entrante ya existe")
+)
 
 type sqlExecer interface {
 	Exec(query string, args ...any) (sql.Result, error)
@@ -1255,14 +1267,23 @@ type cambioInventoryResult struct {
 func applyCambioInventory(tx *sql.Tx, input cambioInventoryInput) (cambioInventoryResult, error) {
 	productID := strings.TrimSpace(input.ProductID)
 	incomingProductID := strings.TrimSpace(input.IncomingProductID)
-	if productID == "" || incomingProductID == "" || input.IncomingQuantity <= 0 {
+	if productID == "" || incomingProductID == "" || len(input.OutgoingUnitIDs) == 0 ||
+		len(input.OutgoingUnitIDs) > maxCambioQuantity || input.IncomingQuantity <= 0 || input.IncomingQuantity > maxCambioQuantity {
 		return cambioInventoryResult{}, fmt.Errorf("datos de inventario del cambio inválidos")
 	}
 	if input.IncomingNew && strings.TrimSpace(input.IncomingName) == "" {
 		return cambioInventoryResult{}, fmt.Errorf("nombre del producto entrante requerido")
 	}
 
-	if !input.IncomingNew {
+	if input.IncomingNew {
+		var productCount int
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM productos WHERE sku = ? OR id = ?`, incomingProductID, incomingProductID).Scan(&productCount); err != nil {
+			return cambioInventoryResult{}, fmt.Errorf("consultar SKU entrante: %w", err)
+		}
+		if productCount != 0 {
+			return cambioInventoryResult{}, errCambioIncomingSKUExists
+		}
+	} else {
 		var productCount int
 		if err := tx.QueryRow(`SELECT COUNT(*) FROM productos WHERE sku = ?`, incomingProductID).Scan(&productCount); err != nil {
 			return cambioInventoryResult{}, fmt.Errorf("consultar producto entrante: %w", err)
@@ -1303,7 +1324,12 @@ func applyCambioInventory(tx *sql.Tx, input cambioInventoryInput) (cambioInvento
 		if line == "" {
 			line = "Sin línea"
 		}
-		if err := upsertProducto(tx, incomingProductID, incomingName, line, now); err != nil {
+		if _, err := tx.Exec(`
+			INSERT INTO productos (sku, id, linea, nombre, fecha_ingreso)
+			VALUES (?, ?, ?, ?, ?)`, incomingProductID, incomingProductID, line, incomingName, now); err != nil {
+			if strings.Contains(strings.ToLower(err.Error()), "unique constraint failed") {
+				return cambioInventoryResult{}, errCambioIncomingSKUExists
+			}
 			return cambioInventoryResult{}, fmt.Errorf("registrar producto entrante: %w", err)
 		}
 	}
@@ -1718,38 +1744,45 @@ func addCheckoutSaleItem(db *sql.DB, userID int, input checkoutSaleInput) (int64
 	return itemID, nil
 }
 
-func addCheckoutChangeItem(db *sql.DB, userID int, input checkoutChangeInput) (int64, error) {
+func normalizeCheckoutChangeInput(input checkoutChangeInput) (checkoutChangeInput, error) {
 	input.Direccion = strings.TrimSpace(input.Direccion)
 	if input.Direccion != "salida" && input.Direccion != "entrada" {
-		return 0, checkoutBusinessErrorf("Dirección de cambio inválida.")
+		return checkoutChangeInput{}, checkoutBusinessErrorf("Dirección de cambio inválida.")
 	}
 	if input.Cantidad <= 0 {
-		return 0, checkoutBusinessErrorf("La cantidad debe ser positiva.")
+		return checkoutChangeInput{}, checkoutBusinessErrorf("La cantidad debe ser positiva.")
+	}
+	if input.Cantidad > maxCambioQuantity {
+		return checkoutChangeInput{}, checkoutBusinessErrorf("La cantidad no puede superar 10.000 unidades.")
 	}
 	var textErr error
-	input.ProductoID, textErr = checkoutText(input.ProductoID, "El SKU", 80)
+	input.ProductoID, textErr = checkoutText(input.ProductoID, "El SKU", maxCambioSKUBytes)
 	if textErr != nil {
-		return 0, textErr
+		return checkoutChangeInput{}, textErr
 	}
 	if input.ProductoID == "" {
-		return 0, checkoutBusinessErrorf("Selecciona un producto válido.")
+		return checkoutChangeInput{}, checkoutBusinessErrorf("Selecciona un producto válido.")
 	}
-
-	tx, err := db.Begin()
-	if err != nil {
-		return 0, err
-	}
-	committed := false
-	defer func() {
-		if !committed {
-			_ = tx.Rollback()
+	if input.Direccion == "entrada" && input.EsNuevo {
+		input.ProductoNombre, textErr = checkoutText(input.ProductoNombre, "El nombre del producto", maxCambioNameBytes)
+		if textErr != nil {
+			return checkoutChangeInput{}, textErr
 		}
-	}()
-
-	checkoutID, err := ensureCheckoutTx(tx, userID)
-	if err != nil {
-		return 0, err
+		if input.ProductoNombre == "" {
+			return checkoutChangeInput{}, checkoutBusinessErrorf("El nombre del producto entrante es obligatorio.")
+		}
+		input.Linea, textErr = checkoutText(input.Linea, "La línea del producto", maxCambioLineBytes)
+		if textErr != nil {
+			return checkoutChangeInput{}, textErr
+		}
+		if input.Linea == "" {
+			input.Linea = "Sin línea"
+		}
 	}
+	return input, nil
+}
+
+func insertCheckoutChangeItemTx(tx *sql.Tx, checkoutID int64, input checkoutChangeInput, now string) (int64, error) {
 	if input.Direccion == "salida" {
 		name, _, err := productSalePriceTx(tx, input.ProductoID)
 		if err != nil {
@@ -1757,42 +1790,29 @@ func addCheckoutChangeItem(db *sql.DB, userID int, input checkoutChangeInput) (i
 		}
 		input.ProductoNombre = name
 		input.EsNuevo = false
-	} else if input.EsNuevo {
-		input.ProductoNombre, err = checkoutText(input.ProductoNombre, "El nombre del producto", 180)
-		if err != nil {
-			return 0, err
-		}
-		if input.ProductoNombre == "" {
-			return 0, checkoutBusinessErrorf("El nombre del producto entrante es obligatorio.")
-		}
+	} else if input.Direccion == "entrada" && input.EsNuevo {
 		var count int
-		if err := tx.QueryRow(`SELECT COUNT(*) FROM productos WHERE sku = ?`, input.ProductoID).Scan(&count); err != nil {
+		if err := tx.QueryRow(`SELECT COUNT(*) FROM productos WHERE sku = ? OR id = ?`, input.ProductoID, input.ProductoID).Scan(&count); err != nil {
 			return 0, err
 		}
 		if count > 0 {
 			return 0, checkoutBusinessErrorf("El SKU del producto entrante ya existe.")
 		}
-		input.Linea, err = checkoutText(input.Linea, "La línea del producto", 120)
-		if err != nil {
-			return 0, err
-		}
-		if input.Linea == "" {
-			input.Linea = "Sin línea"
-		}
-	} else {
+	} else if input.Direccion == "entrada" {
 		name, _, err := productSalePriceTx(tx, input.ProductoID)
 		if err != nil {
 			return 0, err
 		}
 		input.ProductoNombre = name
 		input.Linea = ""
+	} else {
+		return 0, checkoutBusinessErrorf("Dirección de cambio inválida.")
 	}
 
 	order, err := nextCheckoutOrderTx(tx, checkoutID)
 	if err != nil {
 		return 0, err
 	}
-	now := time.Now().Format(time.RFC3339)
 	result, err := tx.Exec(`
 		INSERT INTO checkout_cambio_items (
 			checkout_id, direccion, producto_id, producto_nombre, linea,
@@ -1820,11 +1840,78 @@ func addCheckoutChangeItem(db *sql.DB, userID int, input checkoutChangeInput) (i
 	if err := touchCheckoutTx(tx, checkoutID, now); err != nil {
 		return 0, err
 	}
+	return itemID, nil
+}
+
+func addCheckoutChangeItem(db *sql.DB, userID int, input checkoutChangeInput) (int64, error) {
+	input, err := normalizeCheckoutChangeInput(input)
+	if err != nil {
+		return 0, err
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return 0, err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	checkoutID, err := ensureCheckoutTx(tx, userID)
+	if err != nil {
+		return 0, err
+	}
+	itemID, err := insertCheckoutChangeItemTx(tx, checkoutID, input, time.Now().Format(time.RFC3339))
+	if err != nil {
+		return 0, err
+	}
 	if err := tx.Commit(); err != nil {
 		return 0, err
 	}
 	committed = true
 	return itemID, nil
+}
+
+func addCheckoutChangePair(db *sql.DB, userID int, outgoing, incoming checkoutChangeInput) error {
+	outgoing, err := normalizeCheckoutChangeInput(outgoing)
+	if err != nil {
+		return err
+	}
+	incoming, err = normalizeCheckoutChangeInput(incoming)
+	if err != nil {
+		return err
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		return err
+	}
+	committed := false
+	defer func() {
+		if !committed {
+			_ = tx.Rollback()
+		}
+	}()
+
+	checkoutID, err := ensureCheckoutTx(tx, userID)
+	if err != nil {
+		return err
+	}
+	now := time.Now().Format(time.RFC3339)
+	if _, err := insertCheckoutChangeItemTx(tx, checkoutID, outgoing, now); err != nil {
+		return err
+	}
+	if _, err := insertCheckoutChangeItemTx(tx, checkoutID, incoming, now); err != nil {
+		return err
+	}
+	if err := tx.Commit(); err != nil {
+		return err
+	}
+	committed = true
+	return nil
 }
 
 func boolToInt(value bool) int {
@@ -2943,6 +3030,10 @@ func authMiddleware(db *sql.DB, next http.Handler) http.Handler {
 
 		user, err := userFromRequest(db, r)
 		if err != nil {
+			if wantsJSONRequest(r) {
+				writeJSONErrorResponse(w, http.StatusUnauthorized, "La sesión no es válida o ha expirado.")
+				return
+			}
 			http.Redirect(w, r, "/login", http.StatusSeeOther)
 			return
 		}
@@ -5893,6 +5984,58 @@ func main() {
 		redirectWithMessage(w, r, "/carrito", "Línea de cambio agregada al carrito.", "")
 	})
 
+	mux.HandleFunc("/carrito/items/cambio-pair", func(w http.ResponseWriter, r *http.Request) {
+		currentUser := userFromContext(r)
+		if r.Method != http.MethodPost || currentUser == nil {
+			http.Error(w, "Método no permitido.", http.StatusMethodNotAllowed)
+			return
+		}
+		if err := r.ParseForm(); err != nil {
+			redirectWithMessage(w, r, "/carrito", "", "No se pudo leer el formulario.")
+			return
+		}
+
+		outgoingQuantity, err := parsePositiveQuantity(r.FormValue("salida_cantidad"))
+		if err != nil {
+			redirectWithMessage(w, r, "/carrito", "", err.Error())
+			return
+		}
+		incomingQuantity, err := parsePositiveQuantity(r.FormValue("entrada_cantidad"))
+		if err != nil {
+			redirectWithMessage(w, r, "/carrito", "", err.Error())
+			return
+		}
+
+		outgoing := checkoutChangeInput{
+			Direccion:  "salida",
+			ProductoID: r.FormValue("salida_producto_id"),
+			Cantidad:   outgoingQuantity,
+		}
+		incoming := checkoutChangeInput{
+			Direccion: "entrada",
+			Cantidad:  incomingQuantity,
+		}
+
+		switch strings.TrimSpace(r.FormValue("incoming_mode")) {
+		case "existing":
+			incoming.ProductoID = r.FormValue("incoming_existing_id")
+		case "new":
+			incoming.EsNuevo = true
+			incoming.ProductoID = r.FormValue("incoming_new_sku")
+			incoming.ProductoNombre = r.FormValue("incoming_new_name")
+			incoming.Linea = r.FormValue("incoming_new_line")
+		default:
+			redirectWithMessage(w, r, "/carrito", "", "Selecciona el tipo de producto entrante.")
+			return
+		}
+
+		if err := addCheckoutChangePair(db, currentUser.ID, outgoing, incoming); err != nil {
+			redirectWithMessage(w, r, "/carrito", "", err.Error())
+			return
+		}
+		redirectWithMessage(w, r, "/carrito", "Cambio agregado al carrito.", "")
+	})
+
 	mux.HandleFunc("/carrito/item/update", func(w http.ResponseWriter, r *http.Request) {
 		currentUser := userFromContext(r)
 		if r.Method != http.MethodPost || currentUser == nil {
@@ -6433,6 +6576,13 @@ func main() {
 	mux.HandleFunc("/cambio", func(w http.ResponseWriter, r *http.Request) {
 		currentUser := userFromContext(r)
 		wantsJSON := strings.Contains(r.Header.Get("Accept"), "application/json") || r.Header.Get("X-Requested-With") == "XMLHttpRequest"
+		logCambioError := func(stage, productID, incomingMode string, outgoingCount int, cause error) {
+			userID := 0
+			if currentUser != nil {
+				userID = currentUser.ID
+			}
+			log.Printf("cambio request_id=%s stage=%s user_id=%d product_id=%q incoming_mode=%q outgoing_count=%d error=%v", requestIDFromRequest(r), stage, userID, productID, incomingMode, outgoingCount, cause)
+		}
 
 		writeJSONError := func(status int, message string, fields map[string]string) {
 			w.Header().Set("Content-Type", "application/json")
@@ -6446,6 +6596,7 @@ func main() {
 
 		productsSnapshot, err := loadProductos(db)
 		if err != nil {
+			logCambioError("load_products", "", "", 0, err)
 			if wantsJSON {
 				writeJSONError(http.StatusInternalServerError, "Error al consultar productos.", nil)
 				return
@@ -6480,17 +6631,32 @@ func main() {
 			return
 		}
 
-		productID := r.FormValue("producto_id")
-		personaCambio := r.FormValue("persona_del_cambio")
-		notas := r.FormValue("notas")
-		salientes := r.Form["salientes"]
-		incomingMode := r.FormValue("incoming_mode")
-		incomingExistingID := r.FormValue("incoming_existing_id")
-		incomingExistingQtyValue := r.FormValue("incoming_existing_qty")
-		incomingNewSKU := r.FormValue("incoming_new_sku")
-		incomingNewName := r.FormValue("incoming_new_name")
-		incomingNewLine := r.FormValue("incoming_new_line")
-		incomingNewQtyValue := r.FormValue("incoming_new_qty")
+		productID := strings.TrimSpace(r.FormValue("producto_id"))
+		personaCambio := strings.TrimSpace(r.FormValue("persona_del_cambio"))
+		notas := strings.TrimSpace(r.FormValue("notas"))
+		rawSalientes := r.Form["salientes"]
+		salientes := make([]string, 0, len(rawSalientes))
+		seenSalientes := make(map[string]struct{}, len(rawSalientes))
+		duplicateSaliente := false
+		for _, rawUnitID := range rawSalientes {
+			unitID := strings.TrimSpace(rawUnitID)
+			if unitID == "" {
+				continue
+			}
+			if _, exists := seenSalientes[unitID]; exists {
+				duplicateSaliente = true
+				continue
+			}
+			seenSalientes[unitID] = struct{}{}
+			salientes = append(salientes, unitID)
+		}
+		incomingMode := strings.TrimSpace(r.FormValue("incoming_mode"))
+		incomingExistingID := strings.TrimSpace(r.FormValue("incoming_existing_id"))
+		incomingExistingQtyValue := strings.TrimSpace(r.FormValue("incoming_existing_qty"))
+		incomingNewSKU := strings.TrimSpace(r.FormValue("incoming_new_sku"))
+		incomingNewName := strings.TrimSpace(r.FormValue("incoming_new_name"))
+		incomingNewLine := strings.TrimSpace(r.FormValue("incoming_new_line"))
+		incomingNewQtyValue := strings.TrimSpace(r.FormValue("incoming_new_qty"))
 
 		errors := make(map[string]string)
 
@@ -6503,10 +6669,16 @@ func main() {
 
 		if personaCambio == "" {
 			errors["persona_del_cambio"] = "Ingresa la persona responsable del cambio."
+		} else if len(personaCambio) > maxCambioPersonBytes {
+			errors["persona_del_cambio"] = "La persona responsable supera el máximo permitido."
+		}
+		if len(notas) > maxCambioNotesBytes {
+			errors["notas"] = "Las notas superan el máximo permitido."
 		}
 
 		availableUnits, err := availableUnitsByProduct(db, productID)
 		if err != nil {
+			logCambioError("load_available_units", productID, incomingMode, len(salientes), err)
 			if wantsJSON {
 				writeJSONError(http.StatusInternalServerError, "Error al consultar unidades disponibles.", nil)
 				return
@@ -6529,6 +6701,12 @@ func main() {
 			errors["salientes"] = "No hay unidades disponibles para el producto seleccionado."
 		} else if len(validSalientes) == 0 {
 			errors["salientes"] = "Selecciona al menos una unidad disponible como saliente."
+		}
+		if duplicateSaliente && errors["salientes"] == "" {
+			errors["salientes"] = "No selecciones la misma unidad más de una vez."
+		}
+		if len(validSalientes) > maxCambioQuantity {
+			errors["salientes"] = "La cantidad saliente no puede superar 10.000 unidades."
 		}
 		salientes = validSalientes
 
@@ -6557,33 +6735,33 @@ func main() {
 			}
 			if incomingExistingQty <= 0 {
 				errors["incoming_existing_qty"] = "Ingresa una cantidad válida para la entrada."
+			} else if incomingExistingQty > maxCambioQuantity {
+				errors["incoming_existing_qty"] = "La cantidad no puede superar 10.000 unidades."
 			}
 		} else if incomingMode == "new" {
 			if incomingNewSKU == "" {
 				errors["incoming_new_sku"] = "Ingresa el SKU del producto nuevo."
 			} else if _, exists := findProduct(productsSnapshot, incomingNewSKU); exists {
 				errors["incoming_new_sku"] = "El SKU ya existe; selecciona el producto existente."
+			} else if len(incomingNewSKU) > maxCambioSKUBytes {
+				errors["incoming_new_sku"] = "El SKU supera el máximo permitido."
 			}
 			if incomingNewName == "" {
 				errors["incoming_new_name"] = "Ingresa el nombre del producto nuevo."
+			} else if len(incomingNewName) > maxCambioNameBytes {
+				errors["incoming_new_name"] = "El nombre supera el máximo permitido."
+			}
+			if len(incomingNewLine) > maxCambioLineBytes {
+				errors["incoming_new_line"] = "La línea supera el máximo permitido."
 			}
 			if incomingNewQty <= 0 {
 				errors["incoming_new_qty"] = "Ingresa una cantidad válida para la entrada."
+			} else if incomingNewQty > maxCambioQuantity {
+				errors["incoming_new_qty"] = "La cantidad no puede superar 10.000 unidades."
 			}
 		}
 
-		if len(errors) > 0 {
-			if wantsJSON {
-				message := "Datos inválidos."
-				for _, key := range []string{"producto_id", "persona_del_cambio", "salientes", "incoming_mode", "incoming_existing_id", "incoming_existing_qty", "incoming_new_sku", "incoming_new_name", "incoming_new_qty"} {
-					if msg, ok := errors[key]; ok && msg != "" {
-						message = msg
-						break
-					}
-				}
-				writeJSONError(http.StatusBadRequest, message, errors)
-				return
-			}
+		renderCambioForm := func(status int) {
 			data := cambioFormData{
 				Title:               "Registrar cambio",
 				ProductoID:          productID,
@@ -6603,15 +6781,31 @@ func main() {
 				Errors:              errors,
 				CurrentUser:         currentUser,
 			}
-			w.WriteHeader(http.StatusBadRequest)
+			w.WriteHeader(status)
 			if err := tmpl.ExecuteTemplate(w, "cambio_new.html", data); err != nil {
-				http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
+				logCambioError("render_form", productID, incomingMode, len(salientes), err)
 			}
+		}
+
+		if len(errors) > 0 {
+			if wantsJSON {
+				message := "Datos inválidos."
+				for _, key := range []string{"producto_id", "persona_del_cambio", "salientes", "incoming_mode", "incoming_existing_id", "incoming_existing_qty", "incoming_new_sku", "incoming_new_name", "incoming_new_line", "incoming_new_qty", "notas"} {
+					if msg, ok := errors[key]; ok && msg != "" {
+						message = msg
+						break
+					}
+				}
+				writeJSONError(http.StatusBadRequest, message, errors)
+				return
+			}
+			renderCambioForm(http.StatusBadRequest)
 			return
 		}
 
 		tx, err := db.Begin()
 		if err != nil {
+			logCambioError("begin_transaction", productID, incomingMode, len(salientes), err)
 			if wantsJSON {
 				writeJSONError(http.StatusInternalServerError, "Error al iniciar el cambio.", nil)
 				return
@@ -6652,6 +6846,7 @@ func main() {
 			Now:               now,
 		})
 		if err != nil {
+			logCambioError("apply_inventory", productID, incomingMode, len(salientes), err)
 			if rollbackErr := tx.Rollback(); rollbackErr != nil {
 				log.Printf("rollback cambio: %v", rollbackErr)
 			}
@@ -6663,28 +6858,16 @@ func main() {
 					return
 				}
 				errors["salientes"] = "No hay stock disponible suficiente para completar el cambio."
-				data := cambioFormData{
-					Title:               "Registrar cambio",
-					ProductoID:          productID,
-					Productos:           productsSnapshot,
-					Unidades:            availableUnits,
-					PersonaCambio:       personaCambio,
-					Notas:               notas,
-					Salientes:           salientes,
-					SalientesMap:        buildSalientesMap(salientes),
-					IncomingMode:        incomingMode,
-					IncomingExistingID:  incomingExistingID,
-					IncomingExistingQty: incomingExistingQty,
-					IncomingNewSKU:      incomingNewSKU,
-					IncomingNewName:     incomingNewName,
-					IncomingNewLine:     incomingNewLine,
-					IncomingNewQty:      incomingNewQty,
-					Errors:              errors,
+				renderCambioForm(http.StatusBadRequest)
+				return
+			}
+			if err == errCambioIncomingSKUExists {
+				errors["incoming_new_sku"] = "El SKU ya fue registrado; selecciona el producto existente."
+				if wantsJSON {
+					writeJSONError(http.StatusBadRequest, errors["incoming_new_sku"], errors)
+					return
 				}
-				w.WriteHeader(http.StatusBadRequest)
-				if err := tmpl.ExecuteTemplate(w, "cambio_new.html", data); err != nil {
-					http.Error(w, "Error al renderizar el template", http.StatusInternalServerError)
-				}
+				renderCambioForm(http.StatusBadRequest)
 				return
 			}
 			if wantsJSON {
@@ -6696,6 +6879,7 @@ func main() {
 		}
 
 		if err := tx.Commit(); err != nil {
+			logCambioError("commit_transaction", productID, incomingMode, len(salientes), err)
 			if wantsJSON {
 				writeJSONError(http.StatusInternalServerError, "Error al confirmar el cambio.", nil)
 				return

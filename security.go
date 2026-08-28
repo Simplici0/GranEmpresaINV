@@ -1,7 +1,9 @@
 package main
 
 import (
+	"context"
 	"crypto/subtle"
+	"encoding/json"
 	"log"
 	"net"
 	"net/http"
@@ -10,6 +12,29 @@ import (
 	"sync"
 	"time"
 )
+
+type requestIDContextKey struct{}
+
+func requestIDFromRequest(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	requestID, _ := r.Context().Value(requestIDContextKey{}).(string)
+	return requestID
+}
+
+func wantsJSONRequest(r *http.Request) bool {
+	return strings.Contains(r.Header.Get("Accept"), "application/json") || r.Header.Get("X-Requested-With") == "XMLHttpRequest"
+}
+
+func writeJSONErrorResponse(w http.ResponseWriter, status int, message string) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"ok":    false,
+		"error": message,
+	})
+}
 
 type loginAttempt struct {
 	failures    int
@@ -112,6 +137,10 @@ func csrfMiddleware(next http.Handler) http.Handler {
 
 		user := userFromContext(r)
 		if user == nil || user.CSRFToken == "" {
+			if wantsJSONRequest(r) {
+				writeJSONErrorResponse(w, http.StatusUnauthorized, "La sesión no está disponible.")
+				return
+			}
 			http.Error(w, "Solicitud no autorizada.", http.StatusForbidden)
 			return
 		}
@@ -121,6 +150,10 @@ func csrfMiddleware(next http.Handler) http.Handler {
 			provided = strings.TrimSpace(r.FormValue("csrf_token"))
 		}
 		if subtle.ConstantTimeCompare([]byte(provided), []byte(user.CSRFToken)) != 1 {
+			if wantsJSONRequest(r) {
+				writeJSONErrorResponse(w, http.StatusForbidden, "Token CSRF inválido.")
+				return
+			}
 			http.Error(w, "Token CSRF inválido.", http.StatusForbidden)
 			return
 		}
@@ -185,7 +218,8 @@ func requestLoggingMiddleware(next http.Handler) http.Handler {
 		w.Header().Set("X-Request-ID", requestID)
 		started := time.Now()
 		wrapped := &statusWriter{ResponseWriter: w}
-		next.ServeHTTP(wrapped, r)
+		ctx := context.WithValue(r.Context(), requestIDContextKey{}, requestID)
+		next.ServeHTTP(wrapped, r.WithContext(ctx))
 		status := wrapped.status
 		if status == 0 {
 			status = http.StatusOK

@@ -386,6 +386,38 @@
       color: var(--info);
       font-weight: 600;
     }
+
+    /* Loading indicator for submit button */
+    button.loading {
+      position: relative;
+      color: transparent !important;
+      pointer-events: none;
+    }
+    button.loading::after {
+      content: "";
+      position: absolute;
+      width: 18px;
+      height: 18px;
+      top: 50%;
+      left: 50%;
+      margin: -9px 0 0 -9px;
+      border: 2px solid var(--primary-strong);
+      border-top-color: transparent;
+      border-radius: 50%;
+      animation: spin 0.6s linear infinite;
+    }
+    button.primary.loading::after {
+      border-color: #ffffff;
+      border-top-color: transparent;
+    }
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+    /* Double-submit guard */
+    button[type="submit"]:disabled {
+      opacity: 0.55;
+      cursor: wait;
+    }
   </style>
 </head>
 <body>
@@ -403,7 +435,7 @@
       <input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" />
       <div class="row">
         <div>
-          <label for="producto_id">Sale</label>
+          <label for="producto_id">Producto que sale</label>
           <select id="producto_id" name="producto_id">
             {{range .Productos}}
               <option value="{{.ID}}" {{if eq $.ProductoID .ID}}selected{{end}}>{{.Name}} ({{.ID}})</option>
@@ -415,7 +447,7 @@
         </div>
         <div>
           <label for="persona_del_cambio">Cliente</label>
-          <input id="persona_del_cambio" name="persona_del_cambio" type="text" value="{{.PersonaCambio}}" placeholder="Nombre" />
+          <input id="persona_del_cambio" name="persona_del_cambio" type="text" value="{{.PersonaCambio}}" placeholder="Nombre" maxlength="160" />
           {{with index .Errors "persona_del_cambio"}}
             <div class="error">{{.}}</div>
           {{end}}
@@ -424,7 +456,7 @@
 
       <div class="section">
         <h2>Unidades que salen</h2>
-        <div class="hint">{{len .Unidades}} disponibles</div>
+        <div class="hint">{{len .Unidades}} disponibles · Las más antiguas se toman primero (FIFO)</div>
         {{if .Unidades}}
           <details class="multi-select" data-multi-select>
             <summary>
@@ -452,11 +484,11 @@
         <h2>Unidades que entran</h2>
         <div>
           <label for="incoming_mode">Tipo</label>
-          <select id="incoming_mode" name="incoming_mode">
+          <select id="incoming_mode" name="incoming_mode" aria-describedby="incoming-mode-hint">
             <option value="existing" {{if or (eq .IncomingMode "") (eq .IncomingMode "existing")}}selected{{end}}>Existente</option>
             <option value="new" {{if eq .IncomingMode "new"}}selected{{end}}>Nuevo</option>
           </select>
-          <div class="hint">Producto existente o nuevo</div>
+          <div class="hint" id="incoming-mode-hint">Define si el producto que entra ya existe o es uno nuevo.</div>
         </div>
         {{with index .Errors "incoming_mode"}}
           <div class="error">{{.}}</div>
@@ -486,7 +518,7 @@
           </div>
           <div>
             <label for="incoming_existing_qty">Cantidad</label>
-            <input id="incoming_existing_qty" name="incoming_existing_qty" type="number" min="1" value="{{.IncomingExistingQty}}" />
+            <input id="incoming_existing_qty" name="incoming_existing_qty" type="number" min="1" max="10000" value="{{.IncomingExistingQty}}" />
             {{with index .Errors "incoming_existing_qty"}}
               <div class="error">{{.}}</div>
             {{end}}
@@ -496,14 +528,14 @@
         <div class="row" id="incoming_new_fields">
           <div>
             <label for="incoming_new_sku">SKU</label>
-            <input id="incoming_new_sku" name="incoming_new_sku" type="text" value="{{.IncomingNewSKU}}" placeholder="Código" />
+            <input id="incoming_new_sku" name="incoming_new_sku" type="text" value="{{.IncomingNewSKU}}" placeholder="Código" maxlength="80" />
             {{with index .Errors "incoming_new_sku"}}
               <div class="error">{{.}}</div>
             {{end}}
           </div>
           <div>
             <label for="incoming_new_name">Nombre</label>
-            <input id="incoming_new_name" name="incoming_new_name" type="text" value="{{.IncomingNewName}}" placeholder="Nombre del producto" />
+            <input id="incoming_new_name" name="incoming_new_name" type="text" value="{{.IncomingNewName}}" placeholder="Nombre del producto" maxlength="180" />
             {{with index .Errors "incoming_new_name"}}
               <div class="error">{{.}}</div>
             {{end}}
@@ -513,11 +545,14 @@
         <div class="row" id="incoming_new_qty_fields">
           <div>
             <label for="incoming_new_line">Línea</label>
-            <input id="incoming_new_line" name="incoming_new_line" type="text" value="{{.IncomingNewLine}}" placeholder="Categoría" />
+            <input id="incoming_new_line" name="incoming_new_line" type="text" value="{{.IncomingNewLine}}" placeholder="Categoría" maxlength="120" />
+            {{with index .Errors "incoming_new_line"}}
+              <div class="error">{{.}}</div>
+            {{end}}
           </div>
           <div>
             <label for="incoming_new_qty">Cantidad</label>
-            <input id="incoming_new_qty" name="incoming_new_qty" type="number" min="1" value="{{.IncomingNewQty}}" />
+            <input id="incoming_new_qty" name="incoming_new_qty" type="number" min="1" max="10000" value="{{.IncomingNewQty}}" />
             {{with index .Errors "incoming_new_qty"}}
               <div class="error">{{.}}</div>
             {{end}}
@@ -527,7 +562,10 @@
 
       <div>
         <label for="notas">Notas</label>
-        <textarea id="notas" name="notas" placeholder="Observaciones">{{.Notas}}</textarea>
+        <textarea id="notas" name="notas" placeholder="Observaciones" maxlength="2000">{{.Notas}}</textarea>
+        {{with index .Errors "notas"}}
+          <div class="error">{{.}}</div>
+        {{end}}
       </div>
 
       <div class="note">Sin registro de dinero. Para ventas con pago, usa el flujo de ventas.</div>
@@ -666,6 +704,18 @@
     if (multiSelect) {
       multiSelect.addEventListener("change", updateSelectionCount);
       updateSelectionCount();
+    }
+
+    // Prevent double submit on form
+    const cambioForm = document.querySelector('form[action="/cambio"]');
+    if (cambioForm) {
+      cambioForm.addEventListener("submit", () => {
+        const btn = cambioForm.querySelector('button[type="submit"]');
+        if (btn) {
+          btn.disabled = true;
+          btn.classList.add("loading");
+        }
+      });
     }
   </script>
 </body>

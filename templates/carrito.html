@@ -60,6 +60,19 @@
     .summary-row dt { color: var(--muted); }
     .summary-row dd { margin: 0; font-weight: 800; }
     .summary-form { display: grid; gap: 12px; }
+    .summary-form button:disabled { opacity: .55; cursor: not-allowed; }
+    /* Loading indicator for buttons */
+    button.loading { position: relative; color: transparent !important; pointer-events: none; }
+    button.loading::after {
+      content: ""; position: absolute; width: 18px; height: 18px;
+      top: 50%; left: 50%; margin: -9px 0 0 -9px;
+      border: 2px solid var(--primary-strong); border-top-color: transparent;
+      border-radius: 50%; animation: spin 0.6s linear infinite;
+    }
+    button.primary.loading::after { border-color: #ffffff; border-top-color: transparent; }
+    @keyframes spin { to { transform: rotate(360deg); } }
+    /* Styles for the incoming form stock hint */
+    .incoming-hint { margin-top: 4px; }
     .table-wrap { overflow-x: auto; border: 1px solid var(--border); border-radius: 13px; }
     table { width: 100%; min-width: 760px; border-collapse: collapse; }
     th, td { padding: 11px 12px; border-bottom: 1px solid var(--border); text-align: left; vertical-align: top; font-size: 13px; }
@@ -185,7 +198,8 @@
               <div><label for="incoming_mode">Tipo</label><select id="incoming_mode" name="incoming_mode"><option value="existing">Producto existente</option><option value="new">Producto nuevo</option></select></div>
               <div class="mode-fields" data-existing-fields>
                 <label for="incoming_existing_id">Producto existente</label>
-                <select id="incoming_existing_id" name="incoming_existing_id">{{range .Products}}<option value="{{.ID}}">{{.Name}} ({{.ID}})</option>{{end}}</select>
+                <select id="incoming_existing_id" name="incoming_existing_id" data-incoming-select>{{range .Products}}<option value="{{.ID}}" data-stock="{{index $.StockByProduct .ID}}">{{.Name}} ({{.ID}})</option>{{end}}</select>
+                <div class="stock-hint incoming-hint" data-incoming-stock-hint></div>
               </div>
               <div class="mode-fields" data-new-fields hidden>
                 <label for="incoming_new_sku">SKU nuevo</label><input id="incoming_new_sku" name="incoming_new_sku" type="text" maxlength="80" placeholder="SKU" />
@@ -267,13 +281,26 @@
             <label for="confirm_notes">Notas</label><textarea id="confirm_notes" name="notas" maxlength="2000">{{.Checkout.Notas}}</textarea>
             <button class="primary" type="submit" {{if eq .Checkout.ItemCount 0}}disabled{{end}}>Confirmar checkout</button>
           </form>
-          <form action="/carrito/descartar" method="POST" style="margin-top: 10px;"><input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" /><button class="danger" type="submit">Descartar checkout</button></form>
+          <form action="/carrito/descartar" method="POST" style="margin-top: 10px;" onsubmit="return confirm('¿Descartar todo el checkout? Las líneas pendientes se perderán permanentemente.');"><input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" /><button class="danger" type="submit">Descartar checkout</button></form>
         </section>
       </aside>
     </div>
   </main>
   <script>
     (() => {
+      // Helper: prevent double submit on any form
+      const protectForm = (form) => {
+        if (!form) return;
+        form.addEventListener("submit", (event) => {
+          if (event.defaultPrevented) return;
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) { btn.disabled = true; btn.classList.add("loading"); }
+        });
+      };
+
+      // Protect all forms from double submit
+      document.querySelectorAll("form").forEach(protectForm);
+
       const productSelect = document.querySelector("[data-product-select]");
       const priceInput = document.querySelector("#sale_price");
       const qtyInput = document.querySelector("#sale_qty");
@@ -313,14 +340,33 @@
       const mode = document.querySelector("#incoming_mode");
       const existing = document.querySelector("[data-existing-fields]");
       const fresh = document.querySelector("[data-new-fields]");
+      const incomingSelect = document.querySelector("[data-incoming-select]");
+      const incomingHint = document.querySelector("[data-incoming-stock-hint]");
       const syncMode = () => {
         const isNew = mode?.value === "new";
         if (existing) existing.hidden = isNew;
         if (fresh) fresh.hidden = !isNew;
         existing?.querySelectorAll("input, select").forEach((field) => { field.disabled = isNew; });
         fresh?.querySelectorAll("input, select").forEach((field) => { field.disabled = !isNew; });
+        // Update stock hint for incoming
+        if (!isNew && incomingSelect && incomingHint) {
+          const stock = Number(incomingSelect.selectedOptions?.[0]?.dataset.stock || 0);
+          incomingHint.textContent = stock > 0
+            ? `${stock} unidades disponibles. Se asignarán al entrar.`
+            : "Este producto no tiene unidades disponibles actualmente.";
+        }
+      };
+      const syncIncomingStock = () => {
+        if (!incomingSelect || !incomingHint) return;
+        const isNew = mode?.value === "new";
+        if (isNew) { incomingHint.textContent = ""; return; }
+        const stock = Number(incomingSelect.selectedOptions?.[0]?.dataset.stock || 0);
+        incomingHint.textContent = stock > 0
+          ? `${stock} unidades disponibles. Se asignarán al entrar.`
+          : "Este producto no tiene unidades disponibles actualmente.";
       };
       mode?.addEventListener("change", syncMode);
+      incomingSelect?.addEventListener("change", syncIncomingStock);
       syncMode();
     })();
   </script>
