@@ -1562,3 +1562,183 @@ func TestCheckoutMigrationUpgradesLegacySalesSchema(t *testing.T) {
 		}
 	}
 }
+
+func setupProductDB(t *testing.T) *sql.DB {
+	t.Helper()
+	db, err := sql.Open("sqlite", ":memory:")
+	if err != nil {
+		t.Fatalf("open db: %v", err)
+	}
+	db.SetMaxOpenConns(1)
+	db.SetMaxIdleConns(1)
+	if _, err := db.Exec("PRAGMA journal_mode=WAL"); err != nil {
+		db.Close()
+		t.Fatalf("pragma wal: %v", err)
+	}
+	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
+		db.Close()
+		t.Fatalf("pragma busy_timeout: %v", err)
+	}
+	if _, err := db.Exec("PRAGMA synchronous=NORMAL"); err != nil {
+		db.Close()
+		t.Fatalf("pragma synchronous: %v", err)
+	}
+	_, err = db.Exec(`
+		CREATE TABLE productos (
+			sku TEXT PRIMARY KEY,
+			id TEXT,
+			linea TEXT NOT NULL,
+			nombre TEXT NOT NULL,
+			precio_base REAL NOT NULL DEFAULT 0,
+			precio_venta REAL NOT NULL DEFAULT 0,
+			precio_consultora REAL NOT NULL DEFAULT 0,
+			precio_base_cop INTEGER NOT NULL DEFAULT 0,
+			precio_venta_cop INTEGER NOT NULL DEFAULT 0,
+			precio_consultora_cop INTEGER NOT NULL DEFAULT 0,
+			descuento REAL NOT NULL DEFAULT 0,
+			anotaciones TEXT NOT NULL DEFAULT '',
+			aplica_caducidad INTEGER NOT NULL DEFAULT 0,
+			fecha_ingreso TEXT NOT NULL DEFAULT (CURRENT_TIMESTAMP)
+		);
+		CREATE TABLE unidades (
+			id TEXT PRIMARY KEY,
+			producto_id TEXT NOT NULL,
+			estado TEXT NOT NULL,
+			creado_en TEXT NOT NULL,
+			caducidad TEXT
+		);
+	`)
+	if err != nil {
+		db.Close()
+		t.Fatalf("create schema: %v", err)
+	}
+	return db
+}
+
+func TestGenerateNextProductSKUWithDB(t *testing.T) {
+	db := setupProductDB(t)
+	defer db.Close()
+
+	if _, err := db.Exec(`INSERT INTO productos (sku, id, linea, nombre) VALUES ('P-001','P-001','L1','Prod1'),('P-002','P-002','L1','Prod2')`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	sku, err := generateNextProductSKU(db)
+	if err != nil {
+		t.Fatalf("generate sku db: %v", err)
+	}
+	if sku != "P-003" {
+		t.Fatalf("expected P-003, got %q", sku)
+	}
+}
+
+func TestGenerateNextProductSKUWithinTx(t *testing.T) {
+	db := setupProductDB(t)
+	defer db.Close()
+
+	if _, err := db.Exec(`INSERT INTO productos (sku, id, linea, nombre) VALUES ('P-001','P-001','L1','Prod1'),('P-010','P-010','L1','Prod10')`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin: %v", err)
+	}
+	defer tx.Rollback()
+
+	sku, err := generateNextProductSKU(tx)
+	if err != nil {
+		t.Fatalf("generate sku tx: %v", err)
+	}
+	if sku != "P-011" {
+		t.Fatalf("expected P-011, got %q", sku)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit: %v", err)
+	}
+}
+
+func TestCreateProductNoDeadlock(t *testing.T) {
+	db := setupProductDB(t)
+	defer db.Close()
+
+	if _, err := db.Exec(`INSERT INTO productos (sku, id, linea, nombre, precio_venta) VALUES ('P-001','P-001','Nutricion','Prod1', 1000)`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+
+	done := make(chan error, 1)
+	go func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer cancel()
+		tx, err := db.BeginTx(ctx, nil)
+		if err != nil {
+			done <- fmt.Errorf("begin: %w", err)
+			return
+		}
+		defer tx.Rollback()
+
+		sku, err := generateNextProductSKU(tx)
+		if err != nil {
+			done <- fmt.Errorf("generate: %w", err)
+			return
+		}
+		now := time.Now().Format(time.RFC3339)
+		if err := upsertProducto(tx, sku, "Nuevo Producto", "Linea Test", now); err != nil {
+			done <- fmt.Errorf("upsert: %w", err)
+			return
+		}
+		if _, err := tx.ExecContext(ctx, `UPDATE productos SET precio_venta = ?, precio_venta_cop = ? WHERE sku = ?`, float64(2500), 2500, sku); err != nil {
+			done <- fmt.Errorf("update precio: %w", err)
+			return
+		}
+		for j := 0; j < 3; j++ {
+			unitID := fmt.Sprintf("U-%s-%d", sku, time.Now().UnixNano()+int64(j))
+			if _, err := tx.ExecContext(ctx, `INSERT INTO unidades (id, producto_id, estado, creado_en, caducidad) VALUES (?, ?, ?, ?, ?)`, unitID, sku, "Disponible", now, nil); err != nil {
+				done <- fmt.Errorf("insert unidad: %w", err)
+				return
+			}
+		}
+		if err := tx.Commit(); err != nil {
+			done <- fmt.Errorf("commit: %w", err)
+			return
+		}
+		done <- nil
+	}()
+
+	select {
+	case err := <-done:
+		if err != nil {
+			t.Fatalf("transaction failed: %v", err)
+		}
+	case <-time.After(4 * time.Second):
+		t.Fatal("deadlock detected while creating a product")
+	}
+
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM productos WHERE sku = 'P-002'`).Scan(&count); err != nil {
+		t.Fatalf("query product: %v", err)
+	}
+	if count != 1 {
+		t.Fatalf("product P-002 was not created, count=%d", count)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM unidades WHERE producto_id = 'P-002'`).Scan(&count); err != nil {
+		t.Fatalf("query units: %v", err)
+	}
+	if count != 3 {
+		t.Fatalf("expected 3 units, got %d", count)
+	}
+}
+
+func TestGenerateNextProductSKUFindsGap(t *testing.T) {
+	db := setupProductDB(t)
+	defer db.Close()
+
+	if _, err := db.Exec(`INSERT INTO productos (sku, id, linea, nombre) VALUES ('P-001','P-001','L1','A'),('P-002','P-002','L1','B'),('P-004','P-004','L1','C')`); err != nil {
+		t.Fatalf("seed: %v", err)
+	}
+	sku, err := generateNextProductSKU(db)
+	if err != nil {
+		t.Fatalf("generate: %v", err)
+	}
+	if sku != "P-005" {
+		t.Fatalf("expected P-005 (max+1), got %q", sku)
+	}
+}

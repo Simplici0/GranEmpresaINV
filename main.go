@@ -353,17 +353,21 @@ func loadProductos(db *sql.DB) ([]productOption, error) {
 	return products, nil
 }
 
-func generateNextProductSKU(db *sql.DB) (string, error) {
-	rows, err := db.Query(`SELECT sku FROM productos WHERE sku LIKE 'P-%'`)
+type skuQuerier interface {
+	Query(query string, args ...any) (*sql.Rows, error)
+	QueryRow(query string, args ...any) *sql.Row
+}
+
+func generateNextProductSKU(q skuQuerier) (string, error) {
+	rows, err := q.Query(`SELECT sku FROM productos WHERE sku LIKE 'P-%'`)
 	if err != nil {
 		return "", err
 	}
-	defer rows.Close()
-
 	maxNum := 0
 	for rows.Next() {
 		var sku string
 		if err := rows.Scan(&sku); err != nil {
+			rows.Close()
 			return "", err
 		}
 		if !strings.HasPrefix(sku, "P-") {
@@ -378,13 +382,15 @@ func generateNextProductSKU(db *sql.DB) (string, error) {
 		}
 	}
 	if err := rows.Err(); err != nil {
+		rows.Close()
 		return "", err
 	}
+	rows.Close()
 
 	for next := maxNum + 1; ; next++ {
 		candidate := fmt.Sprintf("P-%03d", next)
 		var count int
-		if err := db.QueryRow(`SELECT COUNT(*) FROM productos WHERE sku = ?`, candidate).Scan(&count); err != nil {
+		if err := q.QueryRow(`SELECT COUNT(*) FROM productos WHERE sku = ?`, candidate).Scan(&count); err != nil {
 			return "", err
 		}
 		if count == 0 {
@@ -3743,6 +3749,9 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 	if _, err := db.Exec("PRAGMA busy_timeout=5000"); err != nil {
 		return nil, err
 	}
+	if _, err := db.Exec("PRAGMA synchronous=NORMAL"); err != nil {
+		return nil, err
+	}
 	// Keep FK enforcement disabled during migrations/seeding to avoid startup failures
 	// on legacy schemas; re-enable once we've aligned the schema.
 	if _, err := db.Exec("PRAGMA foreign_keys=OFF"); err != nil {
@@ -5084,24 +5093,31 @@ func main() {
 			return
 		}
 
-		tx, err := db.Begin()
+		ctx, cancel := context.WithTimeout(r.Context(), 5*time.Second)
+		defer cancel()
+		tx, err := db.BeginTx(ctx, nil)
 		if err != nil {
+			log.Printf("POST /productos: begin tx failed: %v", err)
 			http.Error(w, "No se pudo iniciar la transacción", http.StatusInternalServerError)
 			return
 		}
 		defer tx.Rollback()
 
-		sku, err := generateNextProductSKU(db)
+		sku, err := generateNextProductSKU(tx)
 		if err != nil {
+			log.Printf("POST /productos: generateNextProductSKU failed: %v", err)
 			http.Error(w, "No se pudo generar el SKU", http.StatusInternalServerError)
 			return
 		}
 		now := time.Now().Format(time.RFC3339)
+		log.Printf("POST /productos: generated sku=%s nombre=%q linea=%q cantidad=%d precio=%d", sku, nombre, linea, cantidad, precioVenta)
 		if err := upsertProducto(tx, sku, nombre, linea, now); err != nil {
+			log.Printf("POST /productos: upsertProducto sku=%s err=%v", sku, err)
 			http.Error(w, "No se pudo guardar el producto", http.StatusInternalServerError)
 			return
 		}
-		if _, err := tx.Exec(`UPDATE productos SET precio_venta = ?, precio_venta_cop = ? WHERE sku = ?`, float64(precioVenta), precioVenta, sku); err != nil {
+		if _, err := tx.ExecContext(ctx, `UPDATE productos SET precio_venta = ?, precio_venta_cop = ? WHERE sku = ?`, float64(precioVenta), precioVenta, sku); err != nil {
+			log.Printf("POST /productos: update precio sku=%s err=%v", sku, err)
 			http.Error(w, "No se pudo guardar el precio del producto", http.StatusInternalServerError)
 			return
 		}
@@ -5113,10 +5129,11 @@ func main() {
 			if aplicaCad && caducidad != "" {
 				cad = caducidad
 			}
-			if _, err := tx.Exec(
+			if _, err := tx.ExecContext(ctx,
 				`INSERT INTO unidades (id, producto_id, estado, creado_en, caducidad) VALUES (?, ?, ?, ?, ?)`,
 				unitID, sku, "Disponible", now, cad,
 			); err != nil {
+				log.Printf("POST /productos: insert unidad sku=%s unit=%s err=%v", sku, unitID, err)
 				http.Error(w, "No se pudieron crear unidades", http.StatusInternalServerError)
 				return
 			}
@@ -5127,9 +5144,11 @@ func main() {
 		}
 
 		if err := tx.Commit(); err != nil {
+			log.Printf("POST /productos: commit sku=%s err=%v", sku, err)
 			http.Error(w, "No se pudo confirmar la transacción", http.StatusInternalServerError)
 			return
 		}
+		log.Printf("POST /productos: committed sku=%s cantidad=%d", sku, cantidad)
 
 		redirectWithMessage(w, r, "/productos/new", "Producto agregado correctamente.", "")
 	}))
