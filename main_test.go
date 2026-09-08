@@ -9,6 +9,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -451,6 +452,299 @@ func TestApplyCambioInventoryRejectsUnavailableOutgoing(t *testing.T) {
 	}
 }
 
+func TestApplyCambioInventoryMultiProcessesMultipleLines(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	seedCambioProduct(t, db, "P-MULTI-OUT-A", 2)
+	seedCambioProduct(t, db, "P-MULTI-OUT-B", 3)
+	seedCambioProduct(t, db, "P-MULTI-IN-A", 1)
+	seedCambioProduct(t, db, "P-MULTI-IN-B", 0)
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin multi cambio: %v", err)
+	}
+	result, err := applyCambioInventoryMulti(tx, cambioMultiInput{
+		Salientes: []cambioLineInput{
+			{ProductoID: "P-MULTI-OUT-A", Cantidad: 1},
+			{ProductoID: "P-MULTI-OUT-B", Cantidad: 2},
+		},
+		Entrantes: []cambioLineInput{
+			{ProductoID: "P-MULTI-IN-A", Cantidad: 2},
+			{ProductoID: "P-MULTI-IN-B", Cantidad: 3},
+		},
+		PersonaCambio: "Cliente multi",
+		Notas:         "varios productos",
+		MovementNote:  "cliente multi",
+		User:          &User{Username: "tester", Role: "admin"},
+		Now:           "2026-08-08T12:00:00Z",
+	})
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("applyCambioInventoryMulti: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit multi cambio: %v", err)
+	}
+
+	if len(result.SalienteUnitIDs) != 3 || len(result.EntranteUnitIDs) != 5 || result.OperationID == 0 {
+		t.Fatalf("unexpected multi cambio result: %+v", result)
+	}
+	if availableCambioCount(t, db, "P-MULTI-OUT-A") != 1 || availableCambioCount(t, db, "P-MULTI-OUT-B") != 1 {
+		t.Fatalf("outgoing quantities were not reduced")
+	}
+	if availableCambioCount(t, db, "P-MULTI-IN-A") != 3 || availableCambioCount(t, db, "P-MULTI-IN-B") != 3 {
+		t.Fatalf("incoming quantities were not increased")
+	}
+	if movementCambioCount(t, db, "cambio_salida", "P-MULTI-OUT-A") != 1 ||
+		movementCambioCount(t, db, "cambio_salida", "P-MULTI-OUT-B") != 2 ||
+		movementCambioCount(t, db, "cambio_entrada", "P-MULTI-IN-A") != 2 ||
+		movementCambioCount(t, db, "cambio_entrada", "P-MULTI-IN-B") != 3 {
+		t.Fatalf("unexpected multi movement counts")
+	}
+	rows, err := db.Query(`
+		SELECT direccion, producto_id, cantidad, es_nuevo
+		FROM cambio_operacion_items
+		WHERE operacion_id = ?
+		ORDER BY orden`, result.OperationID)
+	if err != nil {
+		t.Fatalf("query multi items: %v", err)
+	}
+	defer rows.Close()
+	type itemRow struct {
+		direccion string
+		sku       string
+		cantidad  int
+		esNuevo   int
+	}
+	items := []itemRow{}
+	for rows.Next() {
+		var item itemRow
+		if err := rows.Scan(&item.direccion, &item.sku, &item.cantidad, &item.esNuevo); err != nil {
+			t.Fatalf("scan multi item: %v", err)
+		}
+		items = append(items, item)
+	}
+	if err := rows.Err(); err != nil {
+		t.Fatalf("rows error: %v", err)
+	}
+	if len(items) != 4 ||
+		items[0].direccion != "salida" || items[0].sku != "P-MULTI-OUT-A" || items[0].cantidad != 1 ||
+		items[1].direccion != "salida" || items[1].sku != "P-MULTI-OUT-B" || items[1].cantidad != 2 ||
+		items[2].direccion != "entrada" || items[2].sku != "P-MULTI-IN-A" || items[2].cantidad != 2 ||
+		items[3].direccion != "entrada" || items[3].sku != "P-MULTI-IN-B" || items[3].cantidad != 3 || items[3].esNuevo != 0 {
+		t.Fatalf("unexpected multi items: %+v", items)
+	}
+
+	var persona, outgoingName, incomingName string
+	var outgoingQty, incomingQty int
+	if err := db.QueryRow(`
+		SELECT persona_cambio, saliente_producto_nombre, saliente_cantidad,
+		       entrante_producto_nombre, entrante_cantidad
+		FROM cambio_operaciones WHERE id = ?`, result.OperationID).Scan(
+		&persona, &outgoingName, &outgoingQty, &incomingName, &incomingQty); err != nil {
+		t.Fatalf("query multi header: %v", err)
+	}
+	if persona != "Cliente multi" || outgoingName != "Producto P-MULTI-OUT-A" || outgoingQty != 1 ||
+		incomingName != "Producto P-MULTI-IN-A" || incomingQty != 2 {
+		t.Fatalf("unexpected multi header: persona=%q out=%q/%d in=%q/%d", persona, outgoingName, outgoingQty, incomingName, incomingQty)
+	}
+}
+
+func TestApplyCambioInventoryMultiCreatesMultipleNewIncoming(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	seedCambioProduct(t, db, "P-MULTI-OUT", 2)
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin multi new: %v", err)
+	}
+	_, err = applyCambioInventoryMulti(tx, cambioMultiInput{
+		Salientes: []cambioLineInput{
+			{ProductoID: "P-MULTI-OUT", Cantidad: 1},
+		},
+		Entrantes: []cambioLineInput{
+			{ProductoID: "P-MULTI-NEW-A", Cantidad: 2, EsNuevo: true, Nombre: "Producto nuevo A", Linea: "Cambios"},
+			{ProductoID: "P-MULTI-NEW-B", Cantidad: 1, EsNuevo: true, Nombre: "Producto nuevo B"},
+		},
+		PersonaCambio: "Cliente nuevo",
+		MovementNote:  "productos nuevos",
+		Now:           "2026-08-08T13:00:00Z",
+	})
+	if err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("applyCambioInventoryMulti new products: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit multi new: %v", err)
+	}
+
+	var productCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM productos WHERE sku IN ('P-MULTI-NEW-A', 'P-MULTI-NEW-B')`).Scan(&productCount); err != nil {
+		t.Fatalf("count new products: %v", err)
+	}
+	if productCount != 2 || availableCambioCount(t, db, "P-MULTI-NEW-A") != 2 || availableCambioCount(t, db, "P-MULTI-NEW-B") != 1 {
+		t.Fatalf("new incoming products were not created with their units")
+	}
+	var lineas int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM cambio_operacion_items WHERE direccion = 'entrada' AND es_nuevo = 1`).Scan(&lineas); err != nil {
+		t.Fatalf("count new incoming items: %v", err)
+	}
+	if lineas != 2 {
+		t.Fatalf("expected two new incoming items, got %d", lineas)
+	}
+}
+
+func TestApplyCambioInventoryMultiRollsBackOnIncomingFailure(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	seedCambioProduct(t, db, "P-MULTI-ROLLBACK", 2)
+	if _, err := db.Exec(`
+		CREATE TRIGGER fail_multi_cambio_incoming
+		BEFORE INSERT ON unidades
+		WHEN NEW.producto_id = 'P-MULTI-BLOCKED'
+		BEGIN
+			SELECT RAISE(ABORT, 'entrada bloqueada');
+		END;
+	`); err != nil {
+		t.Fatalf("create failure trigger: %v", err)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin multi rollback: %v", err)
+	}
+	_, err = applyCambioInventoryMulti(tx, cambioMultiInput{
+		Salientes: []cambioLineInput{
+			{ProductoID: "P-MULTI-ROLLBACK", Cantidad: 1},
+		},
+		Entrantes: []cambioLineInput{
+			{ProductoID: "P-MULTI-IN-OK", Cantidad: 1},
+			{ProductoID: "P-MULTI-BLOCKED", Cantidad: 1, EsNuevo: true, Nombre: "Bloqueado"},
+		},
+		MovementNote: "debe revertirse",
+		Now:          "2026-08-08T14:00:00Z",
+	})
+	if err == nil {
+		_ = tx.Rollback()
+		t.Fatal("expected incoming failure")
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("rollback multi cambio: %v", err)
+	}
+	if availableCambioCount(t, db, "P-MULTI-ROLLBACK") != 2 || totalCambioCount(t, db, "P-MULTI-ROLLBACK") != 2 {
+		t.Fatalf("outgoing deletion was not rolled back")
+	}
+	var count int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM productos WHERE sku IN ('P-MULTI-IN-OK', 'P-MULTI-BLOCKED')`).Scan(&count); err != nil {
+		t.Fatalf("count rolled back products: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("incoming products survived rollback")
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM cambio_operaciones`).Scan(&count); err != nil {
+		t.Fatalf("count rolled back operations: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("operation header survived rollback")
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM cambio_operacion_items`).Scan(&count); err != nil {
+		t.Fatalf("count rolled back items: %v", err)
+	}
+	if count != 0 {
+		t.Fatalf("operation items survived rollback")
+	}
+}
+
+func TestApplyCambioInventoryMultiRejectsDuplicateOutgoing(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	seedCambioProduct(t, db, "P-MULTI-DUP", 4)
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin duplicate cambio: %v", err)
+	}
+	_, err = applyCambioInventoryMulti(tx, cambioMultiInput{
+		Salientes: []cambioLineInput{
+			{ProductoID: "P-MULTI-DUP", Cantidad: 1},
+			{ProductoID: "P-MULTI-DUP", Cantidad: 1},
+		},
+		Entrantes: []cambioLineInput{
+			{ProductoID: "P-MULTI-DUP", Cantidad: 2},
+		},
+		MovementNote: "duplicado",
+		Now:          "2026-08-08T15:00:00Z",
+	})
+	if err == nil || !strings.Contains(err.Error(), "repetido") {
+		_ = tx.Rollback()
+		t.Fatalf("expected duplicate outgoing error, got %v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("rollback duplicate cambio: %v", err)
+	}
+	if availableCambioCount(t, db, "P-MULTI-DUP") != 4 {
+		t.Fatalf("duplicate outgoing changed stock")
+	}
+}
+
+func TestApplyCambioInventoryMultiRejectsNewSKUCollision(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	seedCambioProduct(t, db, "P-MULTI-COLLIDE", 1)
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin collision cambio: %v", err)
+	}
+	_, err = applyCambioInventoryMulti(tx, cambioMultiInput{
+		Salientes: []cambioLineInput{
+			{ProductoID: "P-MULTI-COLLIDE", Cantidad: 1},
+		},
+		Entrantes: []cambioLineInput{
+			{ProductoID: "P-MULTI-COLLIDE", Cantidad: 1, EsNuevo: true, Nombre: "Colisión"},
+		},
+		MovementNote: "colision",
+		Now:          "2026-08-08T16:00:00Z",
+	})
+	if err != errCambioIncomingSKUExists {
+		_ = tx.Rollback()
+		t.Fatalf("expected incoming SKU collision, got %v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("rollback collision cambio: %v", err)
+	}
+	if availableCambioCount(t, db, "P-MULTI-COLLIDE") != 1 {
+		t.Fatalf("collision changed stock")
+	}
+}
+
+func TestApplyCambioInventoryMultiRejectsInsufficientStock(t *testing.T) {
+	db := setupCambioInventoryDB(t)
+	seedCambioProduct(t, db, "P-MULTI-SHORT", 1)
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin short cambio: %v", err)
+	}
+	_, err = applyCambioInventoryMulti(tx, cambioMultiInput{
+		Salientes: []cambioLineInput{
+			{ProductoID: "P-MULTI-SHORT", Cantidad: 5},
+		},
+		Entrantes: []cambioLineInput{
+			{ProductoID: "P-MULTI-SHORT", Cantidad: 1},
+		},
+		MovementNote: "sin stock",
+		Now:          "2026-08-08T17:00:00Z",
+	})
+	if err == nil || !strings.Contains(err.Error(), "stock insuficiente para") {
+		_ = tx.Rollback()
+		t.Fatalf("expected insufficient stock error, got %v", err)
+	}
+	if err := tx.Rollback(); err != nil {
+		t.Fatalf("rollback short cambio: %v", err)
+	}
+	if availableCambioCount(t, db, "P-MULTI-SHORT") != 1 {
+		t.Fatalf("insufficient stock changed stock")
+	}
+}
+
 func TestResetBusinessDataDeletesBusinessTablesAndDisablesDemoSeed(t *testing.T) {
 	db, err := sql.Open("sqlite", ":memory:")
 	if err != nil {
@@ -676,8 +970,8 @@ func TestInitDBLeavesNewDatabaseEmptyUnlessDemoIsExplicit(t *testing.T) {
 	if err := db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&migrationCount); err != nil {
 		t.Fatalf("latest schema migration: %v", err)
 	}
-	if migrationCount != 7 {
-		t.Fatalf("expected schema migration version 7, got %d", migrationCount)
+	if migrationCount != 8 {
+		t.Fatalf("expected schema migration version 8, got %d", migrationCount)
 	}
 }
 

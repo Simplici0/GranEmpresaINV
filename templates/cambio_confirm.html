@@ -250,10 +250,6 @@
 
     <div class="summary">
       <div>
-        <strong>Sale</strong>
-        <span>{{.ProductoNombre}} ({{.ProductoID}})</span>
-      </div>
-      <div>
         <strong>Cliente</strong>
         <span>{{.PersonaCambio}}</span>
       </div>
@@ -268,58 +264,22 @@
     <div class="summary">
       <div>
         <strong>Se retiran</strong>
-        <span>{{len .Salientes}} unidades</span>
+        <span>{{len .SalienteLines}} línea(s) de salida</span>
       </div>
       <div class="list">
-        {{range .Salientes}}
-          <span class="tag warning">{{.}}</span>
+        {{range .SalienteLines}}
+          <span class="tag warning">{{.ProductoNombre}} ({{.ProductoID}}) × {{.Cantidad}}</span>
         {{end}}
       </div>
       <div>
         <strong>Quedan disponibles</strong>
-        <span>{{len .Entrantes}} unidades</span>
+        <span>{{len .EntranteLines}} línea(s) de entrada</span>
       </div>
       <div class="list">
-        {{range .Entrantes}}
-          <span class="tag">{{.}}</span>
+        {{range .EntranteLines}}
+          <span class="tag">{{.ProductoNombre}} ({{.ProductoID}}) × {{.Cantidad}}{{if .EsNuevo}} · nuevo{{end}}</span>
         {{end}}
       </div>
-    </div>
-
-    <div class="summary">
-      <div>
-        <strong>Tipo</strong>
-        <span>{{if eq .IncomingMode "new"}}Nuevo{{else}}Existente{{end}}</span>
-      </div>
-      {{if eq .IncomingMode "existing"}}
-        <div>
-          <strong>Producto</strong>
-          <span>{{.IncomingExistingID}}</span>
-        </div>
-        <div>
-          <strong>Cantidad</strong>
-          <span>{{.IncomingExistingQty}}</span>
-        </div>
-      {{else}}
-        <div>
-          <strong>SKU</strong>
-          <span>{{.IncomingNewSKU}}</span>
-        </div>
-        <div>
-          <strong>Nombre</strong>
-          <span>{{.IncomingNewName}}</span>
-        </div>
-        {{if .IncomingNewLine}}
-          <div>
-            <strong>Línea</strong>
-            <span>{{.IncomingNewLine}}</span>
-          </div>
-        {{end}}
-        <div>
-          <strong>Cantidad</strong>
-          <span>{{.IncomingNewQty}}</span>
-        </div>
-      {{end}}
     </div>
 
       <a class="button" href="/inventario?mensaje=Cambio%20registrado%20correctamente">Volver</a>

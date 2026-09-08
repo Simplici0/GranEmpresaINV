@@ -774,35 +774,6 @@
       font-size: 15px;
     }
 
-    .swap-unit-list {
-      display: grid;
-      gap: 8px;
-      max-height: 190px;
-      overflow-y: auto;
-      padding: 10px;
-      border: 1px solid var(--border);
-      border-radius: 12px;
-      background: var(--color-surface, #ffffff);
-    }
-
-    .swap-unit-option {
-      display: flex;
-      align-items: center;
-      gap: 10px;
-      color: var(--text);
-      font-size: 13px;
-      font-weight: 700;
-    }
-
-    .swap-unit-option input {
-      width: auto;
-      min-height: auto;
-    }
-
-    .swap-mode-fields[hidden] {
-      display: none;
-    }
-
     .field-error {
       min-height: 16px;
       color: var(--danger);
@@ -853,6 +824,56 @@
       font-size: 12px;
     }
 
+    #swap-modal .line-list {
+      display: grid;
+      gap: 10px;
+    }
+
+    #swap-modal .line-row {
+      border: 1px dashed var(--border);
+      border-radius: 12px;
+      padding: 10px;
+      background: #ffffff;
+    }
+
+    #swap-modal .line-row.new-mode {
+      border-color: var(--primary);
+      background: #fff9f6;
+    }
+
+    #swap-modal .line-grid {
+      display: grid;
+      gap: 12px;
+      grid-template-columns: minmax(110px, 0.5fr) minmax(0, 1fr) minmax(110px, 0.5fr) auto;
+      align-items: end;
+    }
+
+    #swap-modal .in-existing-fields,
+    #swap-modal .in-new-fields {
+      display: grid;
+      gap: 8px;
+    }
+
+    #swap-modal .in-new-fields[hidden] {
+      display: none;
+    }
+
+    #swap-modal .row-actions {
+      align-self: center;
+    }
+
+    #swap-modal .row-actions button {
+      min-height: 34px;
+      padding: 5px 10px;
+      font-size: 12px;
+    }
+
+    #swap-modal .swap-balance-hint {
+      margin-top: 10px;
+      font-weight: 700;
+      color: var(--primary);
+    }
+
     /* Loading state for swap form and buttons */
     form[aria-busy="true"] {
       position: relative;
@@ -901,85 +922,6 @@
       min-height: 40px;
       padding-top: 8px;
       padding-bottom: 8px;
-    }
-
-    #swap-modal .swap-unit-option {
-      min-width: 0;
-      min-height: 28px;
-    }
-
-    #swap-modal .swap-unit-option input[type="checkbox"] {
-      width: 16px;
-      height: 16px;
-      min-width: 16px;
-      min-height: 16px;
-      padding: 0;
-      margin: 0;
-      flex: 0 0 16px;
-      accent-color: var(--primary);
-    }
-
-    #swap-modal .swap-unit-list {
-      gap: 4px;
-      max-height: 128px;
-      padding: 6px 8px;
-      border-radius: 10px;
-    }
-
-    #swap-modal .swap-unit-dropdown {
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      background: var(--color-surface, #ffffff);
-      overflow: hidden;
-    }
-
-    #swap-modal .swap-unit-dropdown summary {
-      min-height: 40px;
-      padding: 0 12px;
-      display: flex;
-      align-items: center;
-      justify-content: space-between;
-      gap: 12px;
-      cursor: pointer;
-      list-style: none;
-      font-size: 13px;
-      font-weight: 800;
-      color: var(--text);
-    }
-
-    #swap-modal .swap-unit-dropdown summary::-webkit-details-marker {
-      display: none;
-    }
-
-    #swap-modal .swap-unit-dropdown summary::after {
-      content: "";
-      width: 8px;
-      height: 8px;
-      border-right: 2px solid currentColor;
-      border-bottom: 2px solid currentColor;
-      transform: rotate(45deg) translateY(-2px);
-      opacity: 0.6;
-      transition: transform 0.16s ease;
-    }
-
-    #swap-modal .swap-unit-dropdown[open] summary::after {
-      transform: rotate(225deg) translate(-2px, -1px);
-    }
-
-    #swap-modal .swap-unit-dropdown[open] .swap-unit-list {
-      border-width: 1px 0 0;
-      border-radius: 0;
-    }
-
-    #swap-modal .swap-unit-option span {
-      min-width: 0;
-      overflow: hidden;
-      text-overflow: ellipsis;
-      white-space: nowrap;
-    }
-
-    #swap-existing-id {
-      margin-top: 6px;
     }
 
     #internal-use-modal input:not([type="hidden"]),
@@ -1453,10 +1395,6 @@
         padding: 10px;
       }
 
-      #swap-modal .swap-unit-list {
-        max-height: 116px;
-      }
-
       #swap-modal .modal {
         width: min(900px, calc(100vw - 24px));
       }
@@ -1499,10 +1437,6 @@
 
       #swap-modal .modal {
         width: calc(100vw - 20px);
-      }
-
-      #swap-modal .swap-unit-option span {
-        white-space: normal;
       }
 
       .filters {
@@ -2027,6 +1961,7 @@
         <div>
           <h3 id="swap-title">Registrar cambio</h3>
           <div id="swap-subtitle" class="modal-subtitle"></div>
+          <div class="modal-subtitle swap-quick-note">Un producto sale y puedes agregar varios que entran.</div>
         </div>
         <button type="button" class="modal-close" data-modal-close aria-label="Cerrar">✕</button>
       </div>
@@ -2042,73 +1977,33 @@
               <input id="swap-person" name="persona_del_cambio" type="text" placeholder="Nombre" maxlength="160" autocomplete="off" />
               <div class="field-error" data-swap-field-error="persona_del_cambio"></div>
             </div>
-            <div>
-              <label for="swap-mode">Tipo de entrada</label>
-              <select id="swap-mode" name="incoming_mode" aria-describedby="swap-mode-hint">
-                <option value="existing">Producto existente</option>
-                <option value="new">Producto nuevo</option>
-              </select>
-              <div class="modal-hint" id="swap-mode-hint">Define si el producto que entra ya existe o es nuevo.</div>
-              <div class="field-error" data-swap-field-error="incoming_mode"></div>
-            </div>
           </div>
 
           <section class="swap-section">
-            <h4>Unidades que salen</h4>
-            <div id="swap-units-hint" class="modal-hint"></div>
-            <details id="swap-unit-dropdown" class="swap-unit-dropdown">
-              <summary>
-                <span>Seleccionar unidades</span>
-                <span id="swap-unit-summary">0 seleccionadas</span>
-              </summary>
-              <div id="swap-unit-list" class="swap-unit-list" aria-label="Unidades disponibles"></div>
-            </details>
-            <div class="field-error" data-swap-field-error="salientes"></div>
-          </section>
-
-          <section id="swap-existing-fields" class="swap-section swap-mode-fields">
-            <h4>Unidades que entran</h4>
+            <h4>Producto que sale</h4>
+            <div class="modal-hint">Las unidades se retiran automáticamente por FIFO, las más antiguas primero.</div>
             <div class="modal-row">
               <div>
-                <label for="swap-existing-search">Producto</label>
-                <input id="swap-existing-search" type="text" placeholder="Buscar por nombre o SKU" autocomplete="off" />
-                <select id="swap-existing-id" name="incoming_existing_id"></select>
-                <div id="swap-existing-status" class="modal-hint"></div>
-                <div class="field-error" data-swap-field-error="incoming_existing_id"></div>
+                <label for="swap-out-product">Producto</label>
+                <select id="swap-out-product" name="out_product">
+                  {{range .Products}}<option value="{{.ID}}" data-price="{{.SalePrice}}">{{.Name}} ({{.ID}})</option>{{end}}
+                </select>
+                <div class="field-error" data-swap-field-error="out_product"></div>
               </div>
               <div>
-                <label for="swap-existing-qty">Cantidad</label>
-                <input id="swap-existing-qty" name="incoming_existing_qty" type="number" min="1" max="10000" step="1" value="1" />
-                <div class="field-error" data-swap-field-error="incoming_existing_qty"></div>
+                <label for="swap-out-qty">Cantidad</label>
+                <input id="swap-out-qty" name="out_qty" type="number" min="1" max="10000" step="1" value="1" />
+                <div class="field-error" data-swap-field-error="out_qty"></div>
               </div>
             </div>
           </section>
 
-          <section id="swap-new-fields" class="swap-section swap-mode-fields" hidden>
-            <h4>Producto nuevo que entra</h4>
-            <div class="modal-row">
-              <div>
-                <label for="swap-new-sku">SKU</label>
-                <input id="swap-new-sku" name="incoming_new_sku" type="text" maxlength="80" placeholder="Código" />
-                <div class="field-error" data-swap-field-error="incoming_new_sku"></div>
-              </div>
-              <div>
-                <label for="swap-new-name">Nombre</label>
-                <input id="swap-new-name" name="incoming_new_name" type="text" maxlength="180" placeholder="Nombre del producto" />
-                <div class="field-error" data-swap-field-error="incoming_new_name"></div>
-              </div>
-            </div>
-            <div class="modal-row">
-              <div>
-                <label for="swap-new-line">Línea</label>
-                <input id="swap-new-line" name="incoming_new_line" type="text" maxlength="120" placeholder="Categoría" />
-              </div>
-              <div>
-                <label for="swap-new-qty">Cantidad</label>
-                <input id="swap-new-qty" name="incoming_new_qty" type="number" min="1" max="10000" step="1" value="1" />
-                <div class="field-error" data-swap-field-error="incoming_new_qty"></div>
-              </div>
-            </div>
+          <section class="swap-section">
+            <h4>Productos que entran</h4>
+            <div class="modal-hint">Puedes agregar varios productos. Cada uno puede ser existente o nuevo.</div>
+            <div id="swap-in-rows" class="line-list"></div>
+            <button type="button" class="secondary" id="swap-add-in">+ Agregar producto que entra</button>
+            <div class="field-error" data-swap-field-error="entrantes"></div>
           </section>
 
           <div>
@@ -2116,6 +2011,8 @@
             <textarea id="swap-notes" name="notas" maxlength="2000" placeholder="Observaciones"></textarea>
             <div class="modal-hint">Sin registro de dinero. Para ventas con pago, usa el flujo de ventas.</div>
           </div>
+
+          <div id="swap-balance" class="modal-hint swap-balance-hint"></div>
 
           <div class="modal-actions">
             <button type="button" class="secondary" data-modal-close>Cancelar</button>
@@ -2714,27 +2611,15 @@
     const swapError = document.getElementById("swap-error");
     const swapProductId = document.getElementById("swap-product-id");
     const swapPerson = document.getElementById("swap-person");
-    const swapMode = document.getElementById("swap-mode");
-    const swapUnitDropdown = document.getElementById("swap-unit-dropdown");
-    const swapUnitList = document.getElementById("swap-unit-list");
-    const swapUnitSummary = document.getElementById("swap-unit-summary");
-    const swapUnitsHint = document.getElementById("swap-units-hint");
-    const swapExistingFields = document.getElementById("swap-existing-fields");
-    const swapExistingSearch = document.getElementById("swap-existing-search");
-    const swapExistingSelect = document.getElementById("swap-existing-id");
-    const swapExistingStatus = document.getElementById("swap-existing-status");
-    const swapExistingQty = document.getElementById("swap-existing-qty");
-    const swapNewFields = document.getElementById("swap-new-fields");
-    const swapNewSku = document.getElementById("swap-new-sku");
-    const swapNewName = document.getElementById("swap-new-name");
-    const swapNewLine = document.getElementById("swap-new-line");
-    const swapNewQty = document.getElementById("swap-new-qty");
+    const swapOutProduct = document.getElementById("swap-out-product");
+    const swapOutQty = document.getElementById("swap-out-qty");
+    const swapInRows = document.getElementById("swap-in-rows");
+    const swapAddIn = document.getElementById("swap-add-in");
     const swapNotes = document.getElementById("swap-notes");
     const swapSubmit = document.getElementById("swap-submit");
     const swapAddCart = document.getElementById("swap-add-cart");
+    const swapBalance = document.getElementById("swap-balance");
     let swapContext = null;
-    let swapExistingOptions = [];
-    let lastSwapExistingValue = "";
 
     const internalUseModal = document.getElementById("internal-use-modal");
     const internalUseSubtitle = document.getElementById("internal-use-subtitle");
@@ -3026,110 +2911,185 @@
       });
     };
 
-    const updateSwapMode = () => {
-      const mode = swapMode?.value || "existing";
-      const useExisting = mode === "existing";
-      if (swapExistingFields) swapExistingFields.hidden = !useExisting;
-      if (swapNewFields) swapNewFields.hidden = useExisting;
-      [swapExistingSearch, swapExistingSelect, swapExistingQty].forEach((field) => {
-        if (field) field.disabled = !useExisting;
-      });
-      [swapNewSku, swapNewName, swapNewLine, swapNewQty].forEach((field) => {
-        if (field) field.disabled = useExisting;
-      });
-    };
-
-    const updateSwapExistingStatus = (count, query) => {
-      if (!swapExistingStatus) return;
-      const trimmed = String(query || "").trim();
-      if (!trimmed) {
-        swapExistingStatus.textContent = `${count} productos disponibles`;
-        return;
-      }
-      swapExistingStatus.textContent = count === 0
-        ? `Sin coincidencias para "${trimmed}"`
-        : `${count} coincidencia${count === 1 ? "" : "s"} para "${trimmed}"`;
-    };
-
-    const filterSwapExistingOptions = (query = "") => {
-      if (!swapExistingSelect) return;
-      const normalized = String(query || "").trim().toLowerCase();
-      const currentValue = swapExistingSelect.value;
-      const filtered = swapExistingOptions.filter(({ value, label }) => {
-        if (!normalized) return true;
-        return value.toLowerCase().includes(normalized) || label.toLowerCase().includes(normalized);
-      });
-      let nextSelected = "";
-      if (filtered.some((option) => option.value === currentValue)) {
-        nextSelected = currentValue;
-      } else if (filtered.some((option) => option.value === lastSwapExistingValue)) {
-        nextSelected = lastSwapExistingValue;
-      } else if (filtered.length > 0) {
-        nextSelected = filtered[0].value;
-      }
-
-      swapExistingSelect.replaceChildren();
-      if (filtered.length === 0) {
+    const buildSwapProductOptions = () => {
+      const fragment = document.createDocumentFragment();
+      products.forEach((p) => {
         const option = document.createElement("option");
-        option.value = "";
-        option.textContent = "Sin coincidencias";
-        option.disabled = true;
-        option.selected = true;
-        swapExistingSelect.appendChild(option);
-        swapExistingSelect.dataset.emptyResults = "true";
-      } else {
-        filtered.forEach(({ value, label }) => {
-          const option = document.createElement("option");
-          option.value = value;
-          option.textContent = label;
-          option.selected = value === nextSelected;
-          swapExistingSelect.appendChild(option);
-        });
-        swapExistingSelect.dataset.emptyResults = "false";
-        lastSwapExistingValue = nextSelected;
-      }
-      swapExistingSelect.disabled = (swapMode?.value || "existing") !== "existing" || filtered.length === 0;
-      updateSwapExistingStatus(filtered.length, query);
-    };
-
-    const updateSwapUnitSummary = () => {
-      if (!swapUnitSummary || !swapUnitList) return;
-      const total = swapUnitList.querySelectorAll('input[name="salientes"]').length;
-      const selected = swapUnitList.querySelectorAll('input[name="salientes"]:checked').length;
-      swapUnitSummary.textContent = total === 0
-        ? "Sin unidades"
-        : `${selected} de ${total} seleccionada${selected === 1 ? "" : "s"}`;
-    };
-
-    const populateSwapUnits = (product, defaultQty) => {
-      if (!swapUnitList || !swapUnitsHint) return;
-      swapUnitList.replaceChildren();
-      if (swapUnitDropdown) swapUnitDropdown.open = false;
-      const availableUnits = (product?.units || []).filter((unit) => unit.statusClass === "available");
-      swapUnitsHint.textContent = `${availableUnits.length} disponibles`;
-      if (availableUnits.length === 0) {
-        const empty = document.createElement("div");
-        empty.className = "modal-empty";
-        empty.textContent = "No hay unidades disponibles para este producto.";
-        swapUnitList.appendChild(empty);
-        updateSwapUnitSummary();
-        return;
-      }
-      availableUnits.forEach((unit, index) => {
-        const label = document.createElement("label");
-        label.className = "swap-unit-option";
-        const input = document.createElement("input");
-        input.type = "checkbox";
-        input.name = "salientes";
-        input.value = unit.id;
-        input.checked = index < Math.min(defaultQty, availableUnits.length);
-        const text = document.createElement("span");
-        text.textContent = unit.expires ? `${unit.id} · caduca ${formatOptionalDate(unit.expires)}` : unit.id;
-        label.appendChild(input);
-        label.appendChild(text);
-        swapUnitList.appendChild(label);
+        option.value = p.id;
+        option.dataset.price = String(p.salePrice || 0);
+        option.textContent = `${p.name} (${p.id})`;
+        fragment.appendChild(option);
       });
-      updateSwapUnitSummary();
+      return fragment;
+    };
+
+    const makeSwapField = (labelText) => {
+      const wrap = document.createElement("div");
+      const label = document.createElement("label");
+      label.textContent = labelText;
+      wrap.appendChild(label);
+      return wrap;
+    };
+
+    const makeSwapRemoveButton = () => {
+      const wrap = document.createElement("div");
+      wrap.className = "row-actions";
+      const button = document.createElement("button");
+      button.type = "button";
+      button.className = "secondary";
+      button.dataset.swapRemoveRow = "";
+      button.textContent = "Quitar";
+      wrap.appendChild(button);
+      return wrap;
+    };
+
+    const makeSwapInRow = () => {
+      const row = document.createElement("div");
+      row.className = "line-row";
+      row.dataset.swapInRow = "";
+      const grid = document.createElement("div");
+      grid.className = "line-grid";
+
+      const modeWrap = makeSwapField("Tipo");
+      const mode = document.createElement("select");
+      mode.name = "in_mode";
+      const optExisting = document.createElement("option");
+      optExisting.value = "existing";
+      optExisting.textContent = "Existente";
+      const optNew = document.createElement("option");
+      optNew.value = "new";
+      optNew.textContent = "Nuevo";
+      mode.append(optExisting, optNew);
+      modeWrap.appendChild(mode);
+      grid.appendChild(modeWrap);
+
+      const existingWrap = makeSwapField("Producto existente");
+      existingWrap.className = "in-existing-fields";
+      const existingSelect = document.createElement("select");
+      existingSelect.name = "in_existing";
+      existingSelect.append(buildSwapProductOptions());
+      existingWrap.appendChild(existingSelect);
+      grid.appendChild(existingWrap);
+
+      const newWrap = document.createElement("div");
+      newWrap.className = "in-new-fields";
+      newWrap.hidden = true;
+      const addLabeledInput = (labelText, inputEl) => {
+        const label = document.createElement("label");
+        label.textContent = labelText;
+        newWrap.append(label, inputEl);
+      };
+      const sku = document.createElement("input");
+      sku.type = "text";
+      sku.name = "in_new_sku";
+      sku.maxLength = 80;
+      sku.placeholder = "SKU";
+      const name = document.createElement("input");
+      name.type = "text";
+      name.name = "in_new_name";
+      name.maxLength = 180;
+      name.placeholder = "Nombre del producto";
+      const line = document.createElement("input");
+      line.type = "text";
+      line.name = "in_new_line";
+      line.maxLength = 120;
+      line.placeholder = "Categoría";
+      addLabeledInput("SKU", sku);
+      addLabeledInput("Nombre", name);
+      addLabeledInput("Línea", line);
+      grid.appendChild(newWrap);
+
+      const qtyWrap = makeSwapField("Cantidad");
+      const qty = document.createElement("input");
+      qty.type = "number";
+      qty.name = "in_qty";
+      qty.min = "1";
+      qty.max = "10000";
+      qty.step = "1";
+      qty.value = "1";
+      qtyWrap.appendChild(qty);
+      grid.appendChild(qtyWrap);
+
+      grid.appendChild(makeSwapRemoveButton());
+      row.appendChild(grid);
+      return row;
+    };
+
+    const syncSwapInMode = (row) => {
+      const mode = row.querySelector('select[name="in_mode"]');
+      const isNew = mode?.value === "new";
+      row.querySelectorAll(".in-existing-fields").forEach((el) => { el.hidden = isNew; });
+      row.querySelectorAll(".in-new-fields").forEach((el) => { el.hidden = !isNew; });
+      row.querySelectorAll(".in-existing-fields input, .in-existing-fields select").forEach((el) => { el.disabled = isNew; });
+      row.querySelectorAll(".in-new-fields input").forEach((el) => { el.disabled = !isNew; });
+      if (isNew) {
+        row.classList.add("new-mode");
+      } else {
+        row.classList.remove("new-mode");
+      }
+    };
+
+    const updateSwapAddCartVisibility = () => {
+      if (!swapAddCart) return;
+      const rows = swapInRows ? swapInRows.querySelectorAll('[data-swap-in-row]') : [];
+      swapAddCart.hidden = rows.length !== 1;
+    };
+
+    const updateSwapBalance = () => {
+      if (!swapBalance) return;
+      const money = (value) => {
+        try {
+          return new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 }).format(value);
+        } catch (_) {
+          return String(value);
+        }
+      };
+      const outQty = parseInt(swapOutQty?.value || "0", 10);
+      const outProduct = swapOutProduct?.value || swapContext?.productId || "";
+      const outPrice = Number(products.find((p) => p.id === outProduct)?.salePrice || 0);
+      const outTotal = outPrice * (Number.isFinite(outQty) && outQty > 0 ? outQty : 0);
+      let inTotal = 0;
+      let missing = 0;
+      swapInRows?.querySelectorAll('[data-swap-in-row]').forEach((row) => {
+        const mode = row.querySelector('select[name="in_mode"]')?.value || "existing";
+        let price = 0;
+        if (mode === "existing") {
+          const select = row.querySelector('select[name="in_existing"]');
+          price = Number(select?.selectedOptions?.[0]?.dataset.price || 0);
+          if (!(price > 0)) missing++;
+        }
+        const qty = parseInt(row.querySelector('input[name="in_qty"]')?.value || "0", 10);
+        inTotal += price * (Number.isFinite(qty) && qty > 0 ? qty : 0);
+      });
+      const diff = inTotal - outTotal;
+      let text = `Sale: $${money(outTotal)} · Entra: $${money(inTotal)} · Diferencia: ${diff > 0 ? "+" : ""}$${money(diff)}`;
+      if (diff > 0) {
+        text += " (a favor de la empresa)";
+      } else if (diff < 0) {
+        text += " (a favor del cliente)";
+      }
+      if ((outPrice <= 0 && outQty > 0) || missing > 0) {
+        text += " · Hay productos sin precio.";
+      }
+      swapBalance.textContent = text;
+    };
+
+    const wireSwapRow = (row) => {
+      row.querySelectorAll('select[name="in_mode"], select[name="in_existing"], input[name="in_qty"]').forEach((el) => {
+        el.addEventListener("change", updateSwapBalance);
+        el.addEventListener("input", updateSwapBalance);
+      });
+      row.querySelectorAll('select[name="in_mode"]').forEach((el) => {
+        el.addEventListener("change", () => syncSwapInMode(row));
+      });
+      const remove = row.querySelector("[data-swap-remove-row]");
+      if (remove) {
+        remove.addEventListener("click", () => {
+          row.remove();
+          updateSwapAddCartVisibility();
+          updateSwapBalance();
+        });
+      }
     };
 
     const openSwapModal = ({ product, productId, defaultQty }) => {
@@ -3140,18 +3100,20 @@
       setSwapError("");
       if (swapProductId) swapProductId.value = productId;
       if (swapSubtitle) swapSubtitle.textContent = product ? `${product.name} · SKU ${productId}` : `SKU ${productId}`;
-      if (swapExistingQty) swapExistingQty.value = String(Math.max(1, defaultQty || 1));
-      if (swapNewQty) swapNewQty.value = String(Math.max(1, defaultQty || 1));
-      if (swapMode) swapMode.value = "existing";
-      swapExistingOptions = products.map((item) => ({
-        value: item.id,
-        label: `${item.name} (${item.id})`
-      }));
-      lastSwapExistingValue = swapExistingOptions[0]?.value || "";
-      if (swapExistingSearch) swapExistingSearch.value = "";
-      filterSwapExistingOptions("");
-      populateSwapUnits(product, Math.max(1, defaultQty || 1));
-      updateSwapMode();
+      if (swapOutProduct) {
+        swapOutProduct.value = productId;
+      }
+      if (swapOutQty) {
+        swapOutQty.value = String(Math.max(1, defaultQty || 1));
+      }
+      if (swapInRows) {
+        swapInRows.replaceChildren();
+        const firstRow = makeSwapInRow();
+        swapInRows.appendChild(firstRow);
+        wireSwapRow(firstRow);
+      }
+      updateSwapAddCartVisibility();
+      updateSwapBalance();
       if (swapSubmit) swapSubmit.disabled = false;
       openModal(swapModal, product ? `${product.name} · SKU ${productId}` : `SKU ${productId}`);
       if (swapPerson) swapPerson.focus();
@@ -3436,28 +3398,31 @@
     if (swapAddCart) {
       swapAddCart.addEventListener("click", async () => {
         if (!swapContext) return;
-        const selectedUnits = swapUnitList?.querySelectorAll('input[name="salientes"]:checked').length || 0;
-        if (selectedUnits < 1) {
-          setSwapError("Selecciona al menos una unidad disponible como saliente.");
+        const outQty = parseInt(swapOutQty?.value || "0", 10);
+        if (!Number.isFinite(outQty) || outQty < 1 || outQty > 10000) {
+          setSwapError("La cantidad saliente debe estar entre 1 y 10.000.");
           return;
         }
-        const mode = swapMode?.value || "existing";
-        const incomingQuantity = mode === "new"
-          ? parseInt(swapNewQty?.value || "0", 10)
-          : parseInt(swapExistingQty?.value || "0", 10);
+        const rows = swapInRows ? Array.from(swapInRows.querySelectorAll('[data-swap-in-row]')) : [];
+        if (rows.length !== 1) {
+          setSwapError("Agregar al carrito solo está disponible con un producto de entrada.");
+          return;
+        }
+        const row = rows[0];
+        const mode = row.querySelector('select[name="in_mode"]')?.value || "existing";
+        const incomingQuantity = parseInt(row.querySelector('input[name="in_qty"]')?.value || "0", 10);
         if (!Number.isFinite(incomingQuantity) || incomingQuantity < 1 || incomingQuantity > 10000) {
           setSwapError("La cantidad entrante debe estar entre 1 y 10.000.");
           return;
         }
-        if (selectedUnits > 10000) {
-          setSwapError("La cantidad saliente no puede superar 10.000 unidades.");
-          return;
+        if (mode === "new") {
+          const sku = String(row.querySelector('input[name="in_new_sku"]')?.value || "").trim();
+          const name = String(row.querySelector('input[name="in_new_name"]')?.value || "").trim();
+          if (!sku || !name) {
+            setSwapError("Completa el SKU y el nombre del producto nuevo.");
+            return;
+          }
         }
-        if (mode === "new" && (!String(swapNewSku?.value || "").trim() || !String(swapNewName?.value || "").trim())) {
-          setSwapError("Completa el SKU y el nombre del producto nuevo.");
-          return;
-        }
-        // Disable both buttons to prevent double submit
         [swapAddCart, swapSubmit].forEach((button) => {
           if (!button) return;
           button.disabled = true;
@@ -3468,22 +3433,21 @@
         setSwapError("");
         try {
           const pair = {
-            salida_producto_id: swapContext.productId,
-            salida_cantidad: String(selectedUnits),
+            salida_producto_id: swapOutProduct?.value || swapContext.productId,
+            salida_cantidad: String(outQty),
             entrada_cantidad: String(incomingQuantity),
             incoming_mode: mode
           };
           if (mode === "new") {
-            pair.incoming_new_sku = String(swapNewSku?.value || "").trim();
-            pair.incoming_new_name = String(swapNewName?.value || "").trim();
-            pair.incoming_new_line = String(swapNewLine?.value || "").trim();
+            pair.incoming_new_sku = String(row.querySelector('input[name="in_new_sku"]')?.value || "").trim();
+            pair.incoming_new_name = String(row.querySelector('input[name="in_new_name"]')?.value || "").trim();
+            pair.incoming_new_line = String(row.querySelector('input[name="in_new_line"]')?.value || "").trim();
           } else {
-            pair.incoming_existing_id = String(swapExistingSelect?.value || "").trim();
+            pair.incoming_existing_id = String(row.querySelector('select[name="in_existing"]')?.value || "").trim();
           }
           await postCartForm("/carrito/items/cambio-pair", pair);
           window.location.href = "/carrito?mensaje=Cambio%20agregado%20al%20carrito.";
         } catch (err) {
-          // Show error inline instead of redirecting — preserves modal context & user input
           setSwapError(err?.message || "No se pudo agregar el cambio al carrito.");
           if (swapAddCart) swapAddCart.disabled = false;
           if (swapSubmit) swapSubmit.disabled = false;
@@ -3558,23 +3522,22 @@
       });
     }
 
-    if (swapMode) {
-      swapMode.addEventListener("change", updateSwapMode);
+    if (swapOutProduct) {
+      swapOutProduct.addEventListener("change", updateSwapBalance);
     }
-    if (swapExistingSearch) {
-      swapExistingSearch.addEventListener("input", (event) => {
-        filterSwapExistingOptions(event.target.value);
+    if (swapOutQty) {
+      swapOutQty.addEventListener("input", updateSwapBalance);
+      swapOutQty.addEventListener("change", updateSwapBalance);
+    }
+    if (swapAddIn) {
+      swapAddIn.addEventListener("click", () => {
+        if (!swapInRows) return;
+        const row = makeSwapInRow();
+        swapInRows.appendChild(row);
+        wireSwapRow(row);
+        updateSwapAddCartVisibility();
+        updateSwapBalance();
       });
-    }
-    if (swapExistingSelect) {
-      swapExistingSelect.addEventListener("change", () => {
-        if (swapExistingSelect.dataset.emptyResults !== "true") {
-          lastSwapExistingValue = swapExistingSelect.value;
-        }
-      });
-    }
-    if (swapUnitList) {
-      swapUnitList.addEventListener("change", updateSwapUnitSummary);
     }
     if (swapForm) {
       swapForm.addEventListener("submit", async (event) => {
@@ -3582,17 +3545,42 @@
         clearSwapFieldErrors();
         setSwapError("");
 
-        const selectedUnits = swapUnitList
-          ? swapUnitList.querySelectorAll('input[name="salientes"]:checked').length
-          : 0;
-        if (selectedUnits < 1) {
-          const fields = { salientes: "Selecciona al menos una unidad disponible como saliente." };
+        const outQty = parseInt(swapOutQty?.value || "0", 10);
+        if (!Number.isFinite(outQty) || outQty < 1 || outQty > 10000) {
+          const fields = { out_qty: "La cantidad saliente debe estar entre 1 y 10.000." };
           setSwapFieldErrors(fields);
-          setSwapError(fields.salientes);
+          setSwapError(fields.out_qty);
+          return;
+        }
+        const rows = swapInRows ? Array.from(swapInRows.querySelectorAll('[data-swap-in-row]')) : [];
+        if (rows.length < 1) {
+          const fields = { entrantes: "Agrega al menos un producto de entrada." };
+          setSwapFieldErrors(fields);
+          setSwapError(fields.entrantes);
+          return;
+        }
+        let invalidIn = "";
+        for (const row of rows) {
+          const mode = row.querySelector('select[name="in_mode"]')?.value || "existing";
+          const qty = parseInt(row.querySelector('input[name="in_qty"]')?.value || "0", 10);
+          if (!Number.isFinite(qty) || qty < 1 || qty > 10000) {
+            invalidIn = "La cantidad entrante debe estar entre 1 y 10.000.";
+            break;
+          }
+          if (mode === "new") {
+            const sku = String(row.querySelector('input[name="in_new_sku"]')?.value || "").trim();
+            const name = String(row.querySelector('input[name="in_new_name"]')?.value || "").trim();
+            if (!sku || !name) {
+              invalidIn = "Completa el SKU y el nombre de cada producto nuevo.";
+              break;
+            }
+          }
+        }
+        if (invalidIn) {
+          setSwapError(invalidIn);
           return;
         }
 
-        // Disable both buttons to prevent double submit
         [swapSubmit, swapAddCart].forEach((button) => {
           if (!button) return;
           button.disabled = true;
@@ -3600,7 +3588,25 @@
         });
         swapForm.setAttribute("aria-busy", "true");
         try {
-          const body = new URLSearchParams(new FormData(swapForm));
+          const body = new URLSearchParams({
+            multi: "1",
+            persona_del_cambio: String(swapPerson?.value || "").trim(),
+            notas: String(swapNotes?.value || "").trim(),
+            out_product: String(swapOutProduct?.value || swapContext?.productId || ""),
+            out_qty: String(outQty)
+          });
+          rows.forEach((row) => {
+            const mode = row.querySelector('select[name="in_mode"]')?.value || "existing";
+            body.append("in_mode", mode);
+            body.append("in_qty", String(parseInt(row.querySelector('input[name="in_qty"]')?.value || "0", 10)));
+            if (mode === "new") {
+              body.append("in_new_sku", String(row.querySelector('input[name="in_new_sku"]')?.value || "").trim());
+              body.append("in_new_name", String(row.querySelector('input[name="in_new_name"]')?.value || "").trim());
+              body.append("in_new_line", String(row.querySelector('input[name="in_new_line"]')?.value || "").trim());
+            } else {
+              body.append("in_existing", String(row.querySelector('select[name="in_existing"]')?.value || ""));
+            }
+          });
           const resp = await fetch("/cambio", {
             method: "POST",
             headers: {
@@ -3613,7 +3619,6 @@
           });
           const data = await resp.json().catch(() => ({}));
           if (!resp.ok || !data.ok) {
-            setSwapFieldErrors(data.fields || {});
             throw new Error(data.error || "No se pudo registrar el cambio.");
           }
           closeModal(swapModal);

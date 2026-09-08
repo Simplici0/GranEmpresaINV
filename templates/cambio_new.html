@@ -245,6 +245,31 @@
     .section h2 {
       margin: 0;
       font-size: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .section h2::before {
+      content: "";
+      width: 20px;
+      height: 20px;
+      border-radius: 50%;
+      background: var(--primary-soft);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      color: var(--primary);
+      font-size: 12px;
+      font-weight: 700;
+    }
+
+    #out-section h2::before {
+      content: "1";
+    }
+
+    #in-section h2::before {
+      content: "2";
     }
 
     .multi-select {
@@ -318,6 +343,7 @@
     .error {
       color: var(--danger);
       font-size: 12px;
+      margin-top: 4px;
     }
 
     .is-hidden {
@@ -329,6 +355,13 @@
       gap: 12px;
       flex-wrap: wrap;
       align-items: center;
+      margin-top: 8px;
+    }
+
+    .actions button {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
     }
 
     button,
@@ -418,6 +451,97 @@
       opacity: 0.55;
       cursor: wait;
     }
+
+    .line-list {
+      display: grid;
+      gap: 12px;
+    }
+
+    .line-row.new-mode {
+      border: 1px solid var(--primary);
+      border-radius: 12px;
+      padding: 12px;
+      background: #fff9f6;
+    }
+
+    .line-row.new-mode .in-new-fields {
+      border: 1px dashed var(--primary);
+      border-radius: 10px;
+      padding: 12px;
+      background: #fffefc;
+    }
+
+    .line-grid {
+      display: grid;
+      gap: 14px;
+      grid-template-columns: minmax(0, 1fr) minmax(130px, 0.35fr) auto;
+      align-items: end;
+    }
+
+    .in-existing-fields,
+    .in-new-fields {
+      display: grid;
+      gap: 8px;
+    }
+
+    .in-new-fields[hidden] {
+      display: none;
+    }
+
+    .row-actions {
+      align-self: center;
+    }
+
+    .balance {
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px 18px;
+      background: #fff8f3;
+      display: grid;
+      gap: 12px;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      margin-top: 16px;
+      box-shadow: 0 2px 6px rgba(0, 0, 0, 0.03);
+    }
+
+    .balance > div:not(.balance-note) {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      padding: 8px;
+      border-radius: 10px;
+      background: rgba(232, 93, 60, 0.05);
+    }
+
+    .balance span {
+      font-size: 11px;
+      color: var(--muted);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+
+    .balance strong {
+      font-size: 16px;
+      font-weight: 800;
+    }
+
+    .balance-diff.positive {
+      color: var(--success);
+    }
+
+    .balance-diff.negative {
+      color: var(--danger);
+    }
+
+    .balance-diff.neutral {
+      color: var(--primary);
+    }
+
+    .balance-note {
+      grid-column: 1 / -1;
+      font-size: 12px;
+      color: var(--muted);
+    }
   </style>
 </head>
 <body>
@@ -431,133 +555,111 @@
       Si hay dinero involucrado, usa el flujo de ventas.
     </div>
 
-    <form action="/cambio" method="POST">
+    <form id="cambio-form" action="/cambio" method="POST">
       <input type="hidden" name="csrf_token" value="{{.CurrentUser.CSRFToken}}" />
+      <input type="hidden" name="multi" value="1" />
       <div class="row">
         <div>
-          <label for="producto_id">Producto que sale</label>
-          <select id="producto_id" name="producto_id">
-            {{range .Productos}}
-              <option value="{{.ID}}" {{if eq $.ProductoID .ID}}selected{{end}}>{{.Name}} ({{.ID}})</option>
-            {{end}}
-          </select>
-          {{with index .Errors "producto_id"}}
-            <div class="error">{{.}}</div>
-          {{end}}
-        </div>
-        <div>
           <label for="persona_del_cambio">Cliente</label>
-          <input id="persona_del_cambio" name="persona_del_cambio" type="text" value="{{.PersonaCambio}}" placeholder="Nombre" maxlength="160" />
+          <input id="persona_del_cambio" name="persona_del_cambio" type="text" value="{{.PersonaCambio}}" placeholder="Nombre" maxlength="160" autocomplete="off" />
           {{with index .Errors "persona_del_cambio"}}
             <div class="error">{{.}}</div>
           {{end}}
         </div>
       </div>
 
-      <div class="section">
-        <h2>Unidades que salen</h2>
-        <div class="hint">{{len .Unidades}} disponibles · Las más antiguas se toman primero (FIFO)</div>
-        {{if .Unidades}}
-          <details class="multi-select" data-multi-select>
-            <summary>
-              <span>Seleccionar unidades</span>
-              <span class="summary-meta"><span class="selection-count" data-selection-count>0</span> de {{len .Unidades}} seleccionadas</span>
-            </summary>
-            <div class="options" role="listbox" aria-label="Unidades disponibles">
-              {{range .Unidades}}
-                <label class="option">
-                  <input type="checkbox" name="salientes" value="{{.ID}}" {{if index $.SalientesMap .ID}}checked{{end}} />
-                  {{.ID}}
-                </label>
-              {{end}}
+      <div class="section" id="out-section">
+        <h2>Productos que salen</h2>
+        <div class="hint">Se retiran del inventario. Las unidades se toman por FIFO, las más antiguas primero. <strong>Puedes agregar varios productos.</strong></div>
+        <div id="out-rows" class="line-list">
+          {{range .OutLines}}
+          <div class="line-row" data-out-row data-selected="{{.ProductoID}}">
+            <div class="line-grid">
+              <div>
+                <label>Producto</label>
+                <select name="out_product" data-product-select>
+                  {{range $.Productos}}<option value="{{.ID}}" data-price="{{.SalePrice}}">{{.Name}} ({{.ID}})</option>{{end}}
+                </select>
+                {{with .ErrorProducto}}<div class="error">{{.}}</div>{{end}}
+              </div>
+              <div>
+                <label>Cantidad</label>
+                <input type="number" name="out_qty" min="1" max="10000" step="1" value="{{.Cantidad}}" />
+                {{with .ErrorCantidad}}<div class="error">{{.}}</div>{{end}}
+              </div>
+              <div class="row-actions">
+                <button type="button" class="secondary" data-remove-row>Quitar</button>
+              </div>
             </div>
-          </details>
-        {{else}}
-          <div class="error">No hay unidades disponibles para este producto.</div>
-        {{end}}
+          </div>
+          {{end}}
+        </div>
+        <div class="actions">
+          <button type="button" class="secondary" data-add-out>+ Agregar producto que sale</button>
+        </div>
         {{with index .Errors "salientes"}}
           <div class="error">{{.}}</div>
         {{end}}
       </div>
 
-      <div class="section">
-        <h2>Unidades que entran</h2>
-        <div>
-          <label for="incoming_mode">Tipo</label>
-          <select id="incoming_mode" name="incoming_mode" aria-describedby="incoming-mode-hint">
-            <option value="existing" {{if or (eq .IncomingMode "") (eq .IncomingMode "existing")}}selected{{end}}>Existente</option>
-            <option value="new" {{if eq .IncomingMode "new"}}selected{{end}}>Nuevo</option>
-          </select>
-          <div class="hint" id="incoming-mode-hint">Define si el producto que entra ya existe o es uno nuevo.</div>
+      <div class="section" id="in-section">
+        <h2>Productos que entran</h2>
+        <div class="hint">Quedan disponibles en el inventario. Pueden ser existentes o nuevos. <strong>Puedes agregar varios productos.</strong></div>
+        <div id="in-rows" class="line-list">
+          {{range .InLines}}
+          <div class="line-row" data-in-row data-mode="{{if eq .IncomingMode "new"}}new{{else}}existing{{end}}" data-selected="{{.IncomingExistingID}}">
+            <div class="line-grid">
+              <div>
+                <label>Tipo</label>
+                <select name="in_mode" data-in-mode>
+                  <option value="existing">Existente</option>
+                  <option value="new">Nuevo</option>
+                </select>
+              </div>
+              <div class="in-existing-fields">
+                <label>Producto existente</label>
+                <select name="in_existing" data-product-select>
+                  {{range $.Productos}}<option value="{{.ID}}" data-price="{{.SalePrice}}">{{.Name}} ({{.ID}})</option>{{end}}
+                </select>
+                {{with .ErrorSKU}}<div class="error">{{.}}</div>{{end}}
+              </div>
+              <div class="in-new-fields" hidden>
+                <label>SKU</label>
+                <input type="text" name="in_new_sku" value="{{.IncomingNewSKU}}" maxlength="80" placeholder="Código" />
+                {{with .ErrorSKU}}<div class="error">{{.}}</div>{{end}}
+                <label>Nombre</label>
+                <input type="text" name="in_new_name" value="{{.IncomingNewName}}" maxlength="180" placeholder="Nombre del producto" />
+                {{with .ErrorNombre}}<div class="error">{{.}}</div>{{end}}
+                <label>Línea</label>
+                <input type="text" name="in_new_line" value="{{.IncomingNewLine}}" maxlength="120" placeholder="Categoría" />
+                {{with .ErrorLinea}}<div class="error">{{.}}</div>{{end}}
+              </div>
+              <div>
+                <label>Cantidad</label>
+                <input type="number" name="in_qty" min="1" max="10000" step="1" value="{{.Cantidad}}" />
+                {{with .ErrorCantidad}}<div class="error">{{.}}</div>{{end}}
+              </div>
+              <div class="row-actions">
+                <button type="button" class="secondary" data-remove-row>Quitar</button>
+              </div>
+            </div>
+          </div>
+          {{end}}
         </div>
-        {{with index .Errors "incoming_mode"}}
+        <div class="actions">
+          <button type="button" class="secondary" data-add-in>+ Agregar producto que entra</button>
+        </div>
+        {{with index .Errors "entrantes"}}
           <div class="error">{{.}}</div>
         {{end}}
+      </div>
 
-        <div class="row" id="incoming_existing_fields">
-          <div>
-            <label for="incoming_existing_id">Producto</label>
-            <div class="field-stack">
-              <input
-                id="incoming_existing_search"
-                type="text"
-                placeholder="Buscar por nombre o SKU"
-                autocomplete="off"
-                spellcheck="false"
-              />
-              <select id="incoming_existing_id" name="incoming_existing_id">
-                {{range .Productos}}
-                  <option value="{{.ID}}" {{if eq $.IncomingExistingID .ID}}selected{{end}}>{{.Name}} ({{.ID}})</option>
-                {{end}}
-              </select>
-              <div class="search-status" data-existing-search-status>{{len .Productos}} productos disponibles</div>
-            </div>
-            {{with index .Errors "incoming_existing_id"}}
-              <div class="error">{{.}}</div>
-            {{end}}
-          </div>
-          <div>
-            <label for="incoming_existing_qty">Cantidad</label>
-            <input id="incoming_existing_qty" name="incoming_existing_qty" type="number" min="1" max="10000" value="{{.IncomingExistingQty}}" />
-            {{with index .Errors "incoming_existing_qty"}}
-              <div class="error">{{.}}</div>
-            {{end}}
-          </div>
-        </div>
-
-        <div class="row" id="incoming_new_fields">
-          <div>
-            <label for="incoming_new_sku">SKU</label>
-            <input id="incoming_new_sku" name="incoming_new_sku" type="text" value="{{.IncomingNewSKU}}" placeholder="Código" maxlength="80" />
-            {{with index .Errors "incoming_new_sku"}}
-              <div class="error">{{.}}</div>
-            {{end}}
-          </div>
-          <div>
-            <label for="incoming_new_name">Nombre</label>
-            <input id="incoming_new_name" name="incoming_new_name" type="text" value="{{.IncomingNewName}}" placeholder="Nombre del producto" maxlength="180" />
-            {{with index .Errors "incoming_new_name"}}
-              <div class="error">{{.}}</div>
-            {{end}}
-          </div>
-        </div>
-
-        <div class="row" id="incoming_new_qty_fields">
-          <div>
-            <label for="incoming_new_line">Línea</label>
-            <input id="incoming_new_line" name="incoming_new_line" type="text" value="{{.IncomingNewLine}}" placeholder="Categoría" maxlength="120" />
-            {{with index .Errors "incoming_new_line"}}
-              <div class="error">{{.}}</div>
-            {{end}}
-          </div>
-          <div>
-            <label for="incoming_new_qty">Cantidad</label>
-            <input id="incoming_new_qty" name="incoming_new_qty" type="number" min="1" max="10000" value="{{.IncomingNewQty}}" />
-            {{with index .Errors "incoming_new_qty"}}
-              <div class="error">{{.}}</div>
-            {{end}}
-          </div>
-        </div>
+      <div class="balance" data-balance>
+        <div><span>Sale</span><strong data-out-total>$0</strong></div>
+        <div><span>Entra</span><strong data-in-total>$0</strong></div>
+        <div><span>Diferencia</span><strong data-diff class="balance-diff">$0</strong></div>
+        <div class="balance-note" data-no-price hidden>Hay productos sin precio definido; el total puede estar incompleto.</div>
+        <div class="balance-note" data-favor></div>
       </div>
 
       <div>
@@ -568,155 +670,323 @@
         {{end}}
       </div>
 
-      <div class="note">Sin registro de dinero. Para ventas con pago, usa el flujo de ventas.</div>
+      <div class="note">La diferencia de valor se muestra como referencia. No se registra dinero; para pagos usa el flujo de ventas.</div>
 
       <div class="actions">
-        <button class="primary" type="submit">Confirmar</button>
+        <button class="primary" type="submit">Confirmar cambio</button>
         <a class="button secondary" href="/inventario">Cancelar</a>
       </div>
     </form>
     </div>
   </main>
   <script>
-    const incomingModeSelect = document.querySelector('#incoming_mode');
-    const incomingExistingSearch = document.querySelector('#incoming_existing_search');
-    const incomingExistingSelect = document.querySelector('#incoming_existing_id');
-    const incomingExistingSearchStatus = document.querySelector('[data-existing-search-status]');
-    const existingFields = document.querySelectorAll('#incoming_existing_search, #incoming_existing_id, #incoming_existing_qty');
-    const newFields = document.querySelectorAll('#incoming_new_sku, #incoming_new_name, #incoming_new_line, #incoming_new_qty');
-    const existingFieldGroup = document.querySelector('#incoming_existing_fields');
-    const newFieldGroup = document.querySelector('#incoming_new_fields');
-    const newQtyFieldGroup = document.querySelector('#incoming_new_qty_fields');
-    const multiSelect = document.querySelector('[data-multi-select]');
-    const selectionCount = document.querySelector('[data-selection-count]');
-    const incomingExistingOptions = incomingExistingSelect
-      ? Array.from(incomingExistingSelect.options).map((option) => ({
-          value: option.value,
-          label: option.textContent
-        }))
-      : [];
-    let lastExistingProductValue = incomingExistingSelect ? incomingExistingSelect.value : "";
+    (() => {
+      const products = [
+        {{- range .Productos }}
+        { id: "{{js .ID}}", name: "{{js .Name}}", price: {{.SalePrice}} },
+        {{- end }}
+      ];
+      const priceByID = new Map(products.map((p) => [p.id, Number(p.price || 0)]));
+      const money = (value) => {
+        try {
+          return new Intl.NumberFormat("es-CO", { maximumFractionDigits: 0 }).format(value);
+        } catch (_) {
+          return String(value);
+        }
+      };
 
-    const updateSelectionCount = () => {
-      if (!multiSelect || !selectionCount) return;
-      const checked = multiSelect.querySelectorAll('input[type="checkbox"]:checked').length;
-      selectionCount.textContent = checked;
-    };
+      const outRows = document.querySelector("#out-rows");
+      const inRows = document.querySelector("#in-rows");
+      const outTotalEl = document.querySelector("[data-out-total]");
+      const inTotalEl = document.querySelector("[data-in-total]");
+      const diffEl = document.querySelector("[data-diff]");
+      const noPriceEl = document.querySelector("[data-no-price]");
+      const favorEl = document.querySelector("[data-favor]");
 
-    const updateIncomingExistingSearchStatus = (count, query) => {
-      if (!incomingExistingSearchStatus) return;
-      const trimmedQuery = String(query || "").trim();
-      if (!trimmedQuery) {
-        incomingExistingSearchStatus.textContent = `${count} productos disponibles`;
-        return;
-      }
-      if (count === 0) {
-        incomingExistingSearchStatus.textContent = `Sin coincidencias para "${trimmedQuery}"`;
-        return;
-      }
-      incomingExistingSearchStatus.textContent = `${count} coincidencia${count === 1 ? "" : "s"} para "${trimmedQuery}"`;
-    };
-
-    const syncIncomingExistingSelectAvailability = () => {
-      if (!incomingExistingSelect) return;
-      const mode = incomingModeSelect ? incomingModeSelect.value : "existing";
-      const hasEmptyResults = incomingExistingSelect.dataset.emptyResults === "true";
-      incomingExistingSelect.toggleAttribute("disabled", mode !== "existing" || hasEmptyResults);
-    };
-
-    const filterIncomingExistingOptions = (query = "") => {
-      if (!incomingExistingSelect) return;
-      const normalizedQuery = String(query || "").trim().toLowerCase();
-      const currentValue = incomingExistingSelect.value;
-      const filteredOptions = incomingExistingOptions.filter(({ value, label }) => {
-        if (!normalizedQuery) return true;
-        return label.toLowerCase().includes(normalizedQuery) || value.toLowerCase().includes(normalizedQuery);
-      });
-
-      let nextSelectedValue = "";
-      if (filteredOptions.some((option) => option.value === currentValue)) {
-        nextSelectedValue = currentValue;
-      } else if (filteredOptions.some((option) => option.value === lastExistingProductValue)) {
-        nextSelectedValue = lastExistingProductValue;
-      } else if (filteredOptions.length > 0) {
-        nextSelectedValue = filteredOptions[0].value;
-      }
-
-      incomingExistingSelect.replaceChildren();
-
-      if (filteredOptions.length === 0) {
-        const emptyOption = document.createElement("option");
-        emptyOption.value = "";
-        emptyOption.textContent = "Sin coincidencias";
-        emptyOption.disabled = true;
-        emptyOption.selected = true;
-        incomingExistingSelect.appendChild(emptyOption);
-        incomingExistingSelect.dataset.emptyResults = "true";
-      } else {
-        filteredOptions.forEach(({ value, label }) => {
+      const buildProductOptions = () => {
+        const fragment = document.createDocumentFragment();
+        products.forEach((p) => {
           const option = document.createElement("option");
-          option.value = value;
-          option.textContent = label;
-          option.selected = value === nextSelectedValue;
-          incomingExistingSelect.appendChild(option);
+          option.value = p.id;
+          option.dataset.price = String(p.price || 0);
+          option.textContent = `${p.name} (${p.id})`;
+          fragment.appendChild(option);
         });
-        incomingExistingSelect.dataset.emptyResults = "false";
-        lastExistingProductValue = nextSelectedValue;
-      }
+        return fragment;
+      };
 
-      updateIncomingExistingSearchStatus(filteredOptions.length, query);
-      syncIncomingExistingSelectAvailability();
-    };
+      const makeField = (labelText) => {
+        const wrap = document.createElement("div");
+        const label = document.createElement("label");
+        label.textContent = labelText;
+        wrap.appendChild(label);
+        return wrap;
+      };
 
-    const updateIncomingMode = () => {
-      const mode = incomingModeSelect ? incomingModeSelect.value : "existing";
-      existingFields.forEach((field) => field.toggleAttribute("disabled", mode !== "existing"));
-      newFields.forEach((field) => field.toggleAttribute("disabled", mode !== "new"));
-      if (existingFieldGroup) {
-        existingFieldGroup.classList.toggle("is-hidden", mode !== "existing");
-      }
-      if (newFieldGroup) {
-        newFieldGroup.classList.toggle("is-hidden", mode !== "new");
-      }
-      if (newQtyFieldGroup) {
-        newQtyFieldGroup.classList.toggle("is-hidden", mode !== "new");
-      }
-      syncIncomingExistingSelectAvailability();
-    };
+      const makeRemoveButton = () => {
+        const wrap = document.createElement("div");
+        wrap.className = "row-actions";
+        const button = document.createElement("button");
+        button.type = "button";
+        button.className = "secondary";
+        button.dataset.removeRow = "";
+        button.textContent = "Quitar";
+        wrap.appendChild(button);
+        return wrap;
+      };
 
-    if (incomingModeSelect) {
-      incomingModeSelect.addEventListener("change", updateIncomingMode);
-    }
-    if (incomingExistingSearch) {
-      incomingExistingSearch.addEventListener("input", (event) => {
-        filterIncomingExistingOptions(event.target.value);
-      });
-    }
-    if (incomingExistingSelect) {
-      incomingExistingSelect.addEventListener("change", () => {
-        if (incomingExistingSelect.dataset.emptyResults !== "true") {
-          lastExistingProductValue = incomingExistingSelect.value;
+      const makeOutRow = () => {
+        const row = document.createElement("div");
+        row.className = "line-row";
+        row.dataset.outRow = "";
+        const grid = document.createElement("div");
+        grid.className = "line-grid";
+
+        const productWrap = makeField("Producto");
+        const select = document.createElement("select");
+        select.name = "out_product";
+        select.dataset.productSelect = "";
+        select.append(buildProductOptions());
+        productWrap.appendChild(select);
+        grid.appendChild(productWrap);
+
+        const qtyWrap = makeField("Cantidad");
+        const qty = document.createElement("input");
+        qty.type = "number";
+        qty.name = "out_qty";
+        qty.min = "1";
+        qty.max = "10000";
+        qty.step = "1";
+        qty.value = "1";
+        qtyWrap.appendChild(qty);
+        grid.appendChild(qtyWrap);
+
+        grid.appendChild(makeRemoveButton());
+        row.appendChild(grid);
+        return row;
+      };
+
+      const makeInRow = () => {
+        const row = document.createElement("div");
+        row.className = "line-row";
+        row.dataset.inRow = "";
+        const grid = document.createElement("div");
+        grid.className = "line-grid";
+
+        const modeWrap = makeField("Tipo");
+        const mode = document.createElement("select");
+        mode.name = "in_mode";
+        mode.dataset.inMode = "";
+        const optExisting = document.createElement("option");
+        optExisting.value = "existing";
+        optExisting.textContent = "Existente";
+        const optNew = document.createElement("option");
+        optNew.value = "new";
+        optNew.textContent = "Nuevo";
+        mode.append(optExisting, optNew);
+        modeWrap.appendChild(mode);
+        grid.appendChild(modeWrap);
+
+        const existingWrap = makeField("Producto existente");
+        existingWrap.className = "in-existing-fields";
+        const existingSelect = document.createElement("select");
+        existingSelect.name = "in_existing";
+        existingSelect.dataset.productSelect = "";
+        existingSelect.append(buildProductOptions());
+        existingWrap.appendChild(existingSelect);
+        grid.appendChild(existingWrap);
+
+        const newWrap = document.createElement("div");
+        newWrap.className = "in-new-fields";
+        newWrap.hidden = true;
+        const addLabeledInput = (text, inputEl) => {
+          const label = document.createElement("label");
+          label.textContent = text;
+          newWrap.append(label, inputEl);
+        };
+        const sku = document.createElement("input");
+        sku.type = "text";
+        sku.name = "in_new_sku";
+        sku.maxLength = 80;
+        sku.placeholder = "SKU";
+        const name = document.createElement("input");
+        name.type = "text";
+        name.name = "in_new_name";
+        name.maxLength = 180;
+        name.placeholder = "Nombre del producto";
+        const line = document.createElement("input");
+        line.type = "text";
+        line.name = "in_new_line";
+        line.maxLength = 120;
+        line.placeholder = "Categoría";
+        addLabeledInput("SKU", sku);
+        addLabeledInput("Nombre", name);
+        addLabeledInput("Línea", line);
+        grid.appendChild(newWrap);
+
+        const qtyWrap = makeField("Cantidad");
+        const qty = document.createElement("input");
+        qty.type = "number";
+        qty.name = "in_qty";
+        qty.min = "1";
+        qty.max = "10000";
+        qty.step = "1";
+        qty.value = "1";
+        qtyWrap.appendChild(qty);
+        grid.appendChild(qtyWrap);
+
+        grid.appendChild(makeRemoveButton());
+        row.appendChild(grid);
+        return row;
+      };
+
+      const syncInMode = (row) => {
+        const mode = row.querySelector('select[name="in_mode"]');
+        const isNew = mode?.value === "new";
+        row.querySelectorAll(".in-existing-fields").forEach((el) => { el.hidden = isNew; });
+        row.querySelectorAll(".in-new-fields").forEach((el) => { el.hidden = !isNew; });
+        row.querySelectorAll(".in-existing-fields input, .in-existing-fields select").forEach((el) => { el.disabled = isNew; });
+        row.querySelectorAll(".in-new-fields input").forEach((el) => { el.disabled = !isNew; });
+
+        // Añadir clase para diferenciar modo nuevo
+        if (isNew) {
+          row.classList.add("new-mode");
+        } else {
+          row.classList.remove("new-mode");
         }
-      });
-      filterIncomingExistingOptions(incomingExistingSearch ? incomingExistingSearch.value : "");
-    }
-    updateIncomingMode();
-    if (multiSelect) {
-      multiSelect.addEventListener("change", updateSelectionCount);
-      updateSelectionCount();
-    }
+      };
 
-    // Prevent double submit on form
-    const cambioForm = document.querySelector('form[action="/cambio"]');
-    if (cambioForm) {
-      cambioForm.addEventListener("submit", () => {
-        const btn = cambioForm.querySelector('button[type="submit"]');
-        if (btn) {
-          btn.disabled = true;
-          btn.classList.add("loading");
+      const recalc = () => {
+        let outTotal = 0;
+        let inTotal = 0;
+        let missing = 0;
+        document.querySelectorAll('[data-out-row]').forEach((row) => {
+          const select = row.querySelector('select[name="out_product"]');
+          const qty = parseInt(row.querySelector('input[name="out_qty"]')?.value || "0", 10);
+          const price = Number(select?.selectedOptions?.[0]?.dataset.price || 0);
+          if (!(price > 0)) missing++;
+          outTotal += price * (Number.isFinite(qty) && qty > 0 ? qty : 0);
+        });
+        document.querySelectorAll('[data-in-row]').forEach((row) => {
+          const mode = row.querySelector('select[name="in_mode"]')?.value || "existing";
+          let price = 0;
+          if (mode === "existing") {
+            const select = row.querySelector('select[name="in_existing"]');
+            price = Number(select?.selectedOptions?.[0]?.dataset.price || 0);
+            if (!(price > 0)) missing++;
+          }
+          const qty = parseInt(row.querySelector('input[name="in_qty"]')?.value || "0", 10);
+          inTotal += price * (Number.isFinite(qty) && qty > 0 ? qty : 0);
+        });
+        if (outTotalEl) outTotalEl.textContent = "$" + money(outTotal);
+        if (inTotalEl) inTotalEl.textContent = "$" + money(inTotal);
+        const diff = inTotal - outTotal;
+        if (diffEl) {
+          diffEl.textContent = `${diff > 0 ? "+" : ""}$` + money(diff);
+          // Añadir clases según el valor de diferencia
+          diffEl.className = "balance-diff";
+          if (diff > 0) {
+            diffEl.classList.add("positive");
+          } else if (diff < 0) {
+            diffEl.classList.add("negative");
+          } else {
+            diffEl.classList.add("neutral");
+          }
         }
+        if (noPriceEl) noPriceEl.hidden = missing === 0;
+        if (favorEl) {
+          if (diff > 0) {
+            favorEl.textContent = "La entrada vale más que la salida (a favor de la empresa).";
+          } else if (diff < 0) {
+            favorEl.textContent = "La salida vale más que la entrada (a favor del cliente).";
+          } else {
+            favorEl.textContent = "Ambos lados tienen el mismo valor.";
+          }
+        }
+      };
+
+      const wireRow = (row) => {
+        row.querySelectorAll(
+          'select[name="out_product"], input[name="out_qty"], select[name="in_existing"], select[name="in_mode"], input[name="in_qty"]'
+        ).forEach((el) => {
+          el.addEventListener("change", recalc);
+          el.addEventListener("input", recalc);
+        });
+        row.querySelectorAll('select[name="in_mode"]').forEach((el) => {
+          el.addEventListener("change", () => syncInMode(row));
+        });
+        const remove = row.querySelector("[data-remove-row]");
+        if (remove) {
+          remove.addEventListener("click", () => {
+            row.remove();
+            recalc();
+          });
+        }
+      };
+
+      document.querySelectorAll('[data-out-row]').forEach((row) => {
+        const select = row.querySelector('select[name="out_product"]');
+        const selected = row.dataset.selected || "";
+        if (select && selected && Array.from(select.options).some((option) => option.value === selected)) {
+          select.value = selected;
+        }
+        wireRow(row);
       });
-    }
+
+      document.querySelectorAll('[data-in-row]').forEach((row) => {
+        const mode = row.querySelector('select[name="in_mode"]');
+        if (mode && (row.dataset.mode || "existing") === "new") {
+          mode.value = "new";
+        }
+        syncInMode(row);
+        const existingSelect = row.querySelector('select[name="in_existing"]');
+        const selected = row.dataset.selected || "";
+        if (existingSelect && selected && Array.from(existingSelect.options).some((option) => option.value === selected)) {
+          existingSelect.value = selected;
+        }
+        wireRow(row);
+      });
+      recalc();
+
+      const addOutButton = document.querySelector("[data-add-out]");
+      addOutButton?.addEventListener("click", () => {
+        if (!outRows) return;
+        const row = makeOutRow();
+        outRows.appendChild(row);
+        wireRow(row);
+        recalc();
+      });
+
+      const addInButton = document.querySelector("[data-add-in]");
+      addInButton?.addEventListener("click", () => {
+        if (!inRows) return;
+        const row = makeInRow();
+        inRows.appendChild(row);
+        wireRow(row);
+        recalc();
+      });
+
+      const form = document.querySelector('form[action="/cambio"]');
+      if (form) {
+        form.addEventListener("submit", (event) => {
+          let invalid = false;
+          form.querySelectorAll('input[name="out_qty"], input[name="in_qty"]').forEach((el) => {
+            const value = parseInt(el.value || "0", 10);
+            if (!Number.isFinite(value) || value < 1 || value > 10000) invalid = true;
+          });
+          if (invalid) {
+            event.preventDefault();
+            window.alert("Revisa las cantidades de los productos (entre 1 y 10.000).");
+            return;
+          }
+          const btn = form.querySelector('button[type="submit"]');
+          if (btn) {
+            btn.disabled = true;
+            btn.classList.add("loading");
+          }
+        });
+      }
+    })();
   </script>
 </body>
 </html>
