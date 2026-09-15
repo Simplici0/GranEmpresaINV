@@ -970,8 +970,8 @@ func TestInitDBLeavesNewDatabaseEmptyUnlessDemoIsExplicit(t *testing.T) {
 	if err := db.QueryRow("SELECT MAX(version) FROM schema_migrations").Scan(&migrationCount); err != nil {
 		t.Fatalf("latest schema migration: %v", err)
 	}
-	if migrationCount != 8 {
-		t.Fatalf("expected schema migration version 8, got %d", migrationCount)
+	if migrationCount != 9 {
+		t.Fatalf("expected schema migration version 9, got %d", migrationCount)
 	}
 }
 
@@ -1049,6 +1049,13 @@ func TestCancelSaleReplenishesLinkedUnitsAndKeepsHistory(t *testing.T) {
 	if state != "Disponible" {
 		t.Fatalf("expected replenished unit, got %q", state)
 	}
+	var linkCount int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM venta_unidades WHERE venta_id = ?`, saleID).Scan(&linkCount); err != nil {
+		t.Fatalf("count sale links: %v", err)
+	}
+	if linkCount != 0 {
+		t.Fatalf("expected cancelled sale links to be cleared, got %d", linkCount)
+	}
 	var movementType string
 	if err := db.QueryRow(`SELECT tipo FROM movimientos WHERE unidad_id = 'U-900' ORDER BY id DESC LIMIT 1`).Scan(&movementType); err != nil {
 		t.Fatalf("movement: %v", err)
@@ -1062,6 +1069,143 @@ func TestCancelSaleReplenishesLinkedUnitsAndKeepsHistory(t *testing.T) {
 	}
 	if auditType != "sale.cancel" || auditUser != "root" {
 		t.Fatalf("unexpected audit event type=%q user=%q", auditType, auditUser)
+	}
+}
+
+func TestCancelledSaleUnitsCanBeResoldAndStockReduced(t *testing.T) {
+	t.Setenv("SEED_DEMO", "")
+	t.Setenv("ADMIN_USER", "")
+	t.Setenv("ADMIN_PASS", "")
+	db, err := initDB(filepath.Join(t.TempDir(), "data.db"), []string{"Efectivo"})
+	if err != nil {
+		t.Fatalf("initDB: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(`
+		INSERT INTO productos (sku, id, linea, nombre, precio_venta_cop) VALUES ('P-910', 'P-910', 'Test', 'Producto reventa', 12000);
+		INSERT INTO unidades (id, producto_id, estado, creado_en) VALUES
+			('U-910A', 'P-910', 'Vendida', '2026-08-06T12:00:00Z'),
+			('U-910B', 'P-910', 'Vendida', '2026-08-06T12:01:00Z');
+		INSERT INTO ventas (producto_id, cantidad, precio_final, metodo_pago, notas, fecha, precio_unitario_cop, total_cop)
+		VALUES ('P-910', 2, 24000, 'Efectivo', '', '2026-08-06T12:00:00Z', 12000, 24000);
+	`); err != nil {
+		t.Fatalf("seed sale: %v", err)
+	}
+	var saleID int
+	if err := db.QueryRow(`SELECT id FROM ventas WHERE producto_id = 'P-910'`).Scan(&saleID); err != nil {
+		t.Fatalf("sale id: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO venta_unidades (venta_id, unidad_id) VALUES (?, 'U-910A'), (?, 'U-910B')`, saleID, saleID); err != nil {
+		t.Fatalf("link sale units: %v", err)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin cancel: %v", err)
+	}
+	if err := cancelSale(tx, saleID, &User{Username: "root", Role: "admin"}, "prueba de reventa"); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("cancelSale: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit cancel: %v", err)
+	}
+
+	// La unidad anulada puede revenderse (antes fallaba por UNIQUE en venta_unidades).
+	resale, err := db.Exec(`
+		INSERT INTO ventas (producto_id, cantidad, precio_final, metodo_pago, notas, fecha, precio_unitario_cop, total_cop)
+		VALUES ('P-910', 1, 12000, 'Efectivo', '', '2026-08-07T12:00:00Z', 12000, 12000);
+	`)
+	if err != nil {
+		t.Fatalf("resale venta: %v", err)
+	}
+	resaleID, err := resale.LastInsertId()
+	if err != nil {
+		t.Fatalf("resale id: %v", err)
+	}
+	if _, err := db.Exec(`INSERT INTO venta_unidades (venta_id, unidad_id) VALUES (?, 'U-910A')`, resaleID); err != nil {
+		t.Fatalf("resell cancelled unit: %v", err)
+	}
+
+	// La reducción de stock puede borrar la otra unidad repuesta (antes fallaba por FK RESTRICT).
+	tx, err = db.Begin()
+	if err != nil {
+		t.Fatalf("begin stock edit: %v", err)
+	}
+	if _, err := deleteSpecificAvailableUnits(tx, "P-910", []string{"U-910B"}); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("delete replenished unit: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit stock edit: %v", err)
+	}
+
+	var remaining int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM unidades WHERE id = 'U-910B'`).Scan(&remaining); err != nil {
+		t.Fatalf("count deleted unit: %v", err)
+	}
+	if remaining != 0 {
+		t.Fatalf("expected replenished unit to be deleted, got %d", remaining)
+	}
+}
+
+func TestMigrationRepairsAnnulledSaleLinks(t *testing.T) {
+	t.Setenv("SEED_DEMO", "")
+	t.Setenv("ADMIN_USER", "")
+	t.Setenv("ADMIN_PASS", "")
+	db, err := initDB(filepath.Join(t.TempDir(), "data.db"), []string{"Efectivo"})
+	if err != nil {
+		t.Fatalf("initDB: %v", err)
+	}
+	defer db.Close()
+
+	if _, err := db.Exec(`
+		INSERT INTO productos (sku, id, linea, nombre) VALUES ('P-920', 'P-920', 'Test', 'Producto legacy');
+		INSERT INTO unidades (id, producto_id, estado, creado_en) VALUES
+			('U-920A', 'P-920', 'Disponible', '2026-08-06T12:00:00Z'),
+			('U-920B', 'P-920', 'Vendida', '2026-08-06T12:01:00Z');
+		INSERT INTO ventas (producto_id, cantidad, precio_final, metodo_pago, notas, fecha, precio_unitario_cop, total_cop, estado)
+		VALUES ('P-920', 1, 0, 'Efectivo', '', '2026-08-06T12:00:00Z', 0, 0, 'anulada');
+		INSERT INTO ventas (producto_id, cantidad, precio_final, metodo_pago, notas, fecha, precio_unitario_cop, total_cop, estado)
+		VALUES ('P-920', 1, 0, 'Efectivo', '', '2026-08-06T12:01:00Z', 0, 0, 'confirmada');
+	`); err != nil {
+		t.Fatalf("seed legacy state: %v", err)
+	}
+	var annulledID, confirmedID int
+	if err := db.QueryRow(`SELECT id FROM ventas WHERE estado = 'anulada'`).Scan(&annulledID); err != nil {
+		t.Fatalf("annulled id: %v", err)
+	}
+	if err := db.QueryRow(`SELECT id FROM ventas WHERE estado = 'confirmada'`).Scan(&confirmedID); err != nil {
+		t.Fatalf("confirmed id: %v", err)
+	}
+	if _, err := db.Exec(`
+		INSERT INTO venta_unidades (venta_id, unidad_id) VALUES (?, 'U-920A'), (?, 'U-920B')`, annulledID, confirmedID); err != nil {
+		t.Fatalf("link legacy units: %v", err)
+	}
+
+	tx, err := db.Begin()
+	if err != nil {
+		t.Fatalf("begin migration: %v", err)
+	}
+	if err := migrateVentaUnidadesRepairSchema(tx); err != nil {
+		_ = tx.Rollback()
+		t.Fatalf("migrateVentaUnidadesRepairSchema: %v", err)
+	}
+	if err := tx.Commit(); err != nil {
+		t.Fatalf("commit migration: %v", err)
+	}
+
+	var annulledLinks, confirmedLinks int
+	if err := db.QueryRow(`SELECT COUNT(*) FROM venta_unidades WHERE venta_id = ?`, annulledID).Scan(&annulledLinks); err != nil {
+		t.Fatalf("count annulled links: %v", err)
+	}
+	if err := db.QueryRow(`SELECT COUNT(*) FROM venta_unidades WHERE venta_id = ?`, confirmedID).Scan(&confirmedLinks); err != nil {
+		t.Fatalf("count confirmed links: %v", err)
+	}
+	if annulledLinks != 0 || confirmedLinks != 1 {
+		t.Fatalf("unexpected links after repair: annulled=%d confirmed=%d", annulledLinks, confirmedLinks)
 	}
 }
 

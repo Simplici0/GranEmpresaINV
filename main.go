@@ -1181,6 +1181,12 @@ func cancelSale(tx *sql.Tx, saleID int, user *User, reason string) error {
 		return errSaleInventoryChanged
 	}
 
+	// Las unidades repuestas quedan disponibles: hay que liberar sus enlaces de venta
+	// para no bloquear ajustes de stock, eliminaciones ni revenderlas (FK RESTRICT/UNIQUE).
+	if _, err := tx.Exec(`DELETE FROM venta_unidades WHERE venta_id = ?`, saleID); err != nil {
+		return err
+	}
+
 	now := time.Now().Format(time.RFC3339)
 	if err := logMovimientos(tx, productID, unitIDs, "anulacion_venta", reason, user, now); err != nil {
 		return err
@@ -3622,6 +3628,18 @@ func migrateCambioItemsSchema(tx *sql.Tx) error {
 	return err
 }
 
+func migrateVentaUnidadesRepairSchema(tx *sql.Tx) error {
+	// Histórico: cancelSale reponía las unidades a 'Disponible' sin borrar sus enlaces
+	// en venta_unidades. Con FK RESTRICT activo eso rompía ajustes de stock,
+	// eliminación de productos y la reventa de la unidad. Se limpian los enlaces
+	// de las ventas ya anuladas.
+	_, err := tx.Exec(`
+		DELETE FROM venta_unidades
+		WHERE venta_id IN (SELECT id FROM ventas WHERE estado = 'anulada')
+	`)
+	return err
+}
+
 func migrateCheckoutSchema(tx *sql.Tx) error {
 	for _, column := range []struct {
 		name       string
@@ -3898,6 +3916,9 @@ func initDB(path string, paymentMethods []string) (*sql.DB, error) {
 		return nil, err
 	}
 	if err := applySchemaMigration(db, 8, migrateCambioItemsSchema); err != nil {
+		return nil, err
+	}
+	if err := applySchemaMigration(db, 9, migrateVentaUnidadesRepairSchema); err != nil {
 		return nil, err
 	}
 
@@ -5864,6 +5885,10 @@ func main() {
 			)
 			res, err := tx.Exec(query, args...)
 			if err != nil {
+				if strings.Contains(strings.ToLower(err.Error()), "foreign key") {
+					writeJSONError(http.StatusConflict, "Una de las unidades está vinculada a una venta anulada o histórica y no puede eliminarse.")
+					return
+				}
 				writeJSONError(http.StatusInternalServerError, "No se pudo reducir el stock.")
 				return
 			}
@@ -5953,6 +5978,16 @@ func main() {
 		}
 		if exists == 0 {
 			writeJSONError(http.StatusBadRequest, "Producto inválido.")
+			return
+		}
+
+		// Liberar los enlaces de venta de las unidades del producto para poder
+		// eliminarlas aunque tengan historial (FK RESTRICT en venta_unidades.unidad_id).
+		if _, err := tx.Exec(
+			`DELETE FROM venta_unidades WHERE unidad_id IN (SELECT id FROM unidades WHERE producto_id = ?)`,
+			productID,
+		); err != nil {
+			writeJSONError(http.StatusInternalServerError, "No se pudieron limpiar las referencias de venta del producto.")
 			return
 		}
 

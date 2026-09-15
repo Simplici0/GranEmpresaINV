@@ -3833,7 +3833,7 @@
             defaultPrice: Number(product?.salePrice || 0),
             allowProductEdit: true,
             defaultName: product?.name || "",
-            defaultLine: product?.line || "",
+            defaultLine: normalizeLine(product?.line),
             noteLabel: "Nota del ajuste (opcional)",
             notePlaceholder: "Ej: conteo físico de inventario."
           });
