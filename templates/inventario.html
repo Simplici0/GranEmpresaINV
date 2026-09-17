@@ -2592,6 +2592,13 @@
       return Number(normalized.replace(/[.,]/g, ""));
     };
 
+    // Reconstruye el valor desde sus dígitos para no romper el formateo al escribir
+    // (p. ej. "1.2000" al agregar un dígito a "1.200").
+    const formatCOPInput = (input) => {
+      const digits = String(input.value || "").replace(/[^\d]/g, "");
+      input.value = digits === "" ? "" : formatCOP(Number(digits));
+    };
+
     const saleModal = document.getElementById("sale-modal");
     const saleSubtitle = document.getElementById("sale-subtitle");
     const saleForm = document.getElementById("sale-form");
@@ -2637,32 +2644,17 @@
     if (salePrice) {
       salePrice.addEventListener("input", () => {
         salePrice.dataset.autofilled = "0";
-        const n = parseCOP(salePrice.value);
-        if (Number.isNaN(n)) {
-          salePrice.value = "";
-          return;
-        }
-        salePrice.value = formatCOP(n);
+        formatCOPInput(salePrice);
       });
     }
     if (saleFinal) {
       saleFinal.addEventListener("input", () => {
-        const n = parseCOP(saleFinal.value);
-        if (Number.isNaN(n)) {
-          saleFinal.value = "";
-          return;
-        }
-        saleFinal.value = formatCOP(n);
+        formatCOPInput(saleFinal);
       });
     }
     if (actionPrice) {
       actionPrice.addEventListener("input", () => {
-        const n = parseCOP(actionPrice.value);
-        if (Number.isNaN(n)) {
-          actionPrice.value = "";
-          return;
-        }
-        actionPrice.value = formatCOP(n);
+        formatCOPInput(actionPrice);
       });
     }
 

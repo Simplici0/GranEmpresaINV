@@ -285,16 +285,17 @@
     const fecha = document.getElementById("fecha_caducidad");
     const precioVenta = document.getElementById("precio_venta");
 
-    const parseCOP = (raw) => {
-      const normalized = String(raw || "").trim().replace(/[$\s]/g, "");
-      if (!/^\d+(?:[.,]\d{3})*$/.test(normalized)) return NaN;
-      return Number(normalized.replace(/[.,]/g, ""));
-    };
     const formatCOP = (value) => {
       const n = Math.max(0, Math.round(Number(value || 0)));
       return n.toLocaleString("es-CO");
     };
 
+    // Reconstruye el valor desde sus dígitos para no romper el formateo al escribir
+    // (p. ej. "1.2000" al agregar un dígito a "1.200").
+    const formatCOPInput = (input) => {
+      const digits = String(input.value || "").replace(/[^\d]/g, "");
+      input.value = digits === "" ? "" : formatCOP(Number(digits));
+    };
     const sync = () => {
       if (!aplica || !fecha) return;
       fecha.disabled = !aplica.checked;
@@ -302,17 +303,9 @@
     };
 
     if (precioVenta) {
-      const initial = parseCOP(precioVenta.value);
-      if (!Number.isNaN(initial) && initial > 0) {
-        precioVenta.value = formatCOP(initial);
-      }
+      formatCOPInput(precioVenta);
       precioVenta.addEventListener("input", () => {
-        const n = parseCOP(precioVenta.value);
-        if (Number.isNaN(n)) {
-          precioVenta.value = "";
-          return;
-        }
-        precioVenta.value = formatCOP(n);
+        formatCOPInput(precioVenta);
       });
     }
 
